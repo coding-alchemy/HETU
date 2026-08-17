@@ -1,0 +1,310 @@
+#!/usr/bin/env python3
+# 北方华创(002371.SZ) 独立研究 — 全新数据采集（不复用任何旧缓存/结果）
+# 输出: .hetu/research/002371.SZ-20260816T175228+0800-naura-independent/artifacts/data/*.json
+import json, time, random, re, urllib.request
+from pathlib import Path
+from datetime import datetime, timedelta
+import requests
+
+OUT = Path("/Users/nanzhang/trading/HETU/.hetu/research/002371.SZ-20260816T175228+0800-naura-independent/artifacts/data")
+OUT.mkdir(parents=True, exist_ok=True)
+CODE = "002371"
+UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+DATACENTER_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+
+EM_SESSION = requests.Session()
+EM_SESSION.trust_env = False  # 东财直连，绕开系统代理（代理节点触发 502/断连）
+EM_SESSION.headers.update({"User-Agent": UA})
+try:
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    _em_adapter = HTTPAdapter(max_retries=Retry(
+        total=3, connect=3, backoff_factor=0.6,
+        status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["GET"]))
+    EM_SESSION.mount("https://", _em_adapter)
+    EM_SESSION.mount("http://", _em_adapter)
+except Exception:
+    pass
+EM_MIN_INTERVAL = 1.0
+_em_last_call = [0.0]
+
+GAPS = []
+
+def em_get(url, params=None, headers=None, timeout=15, **kw):
+    wait = EM_MIN_INTERVAL - (time.time() - _em_last_call[0])
+    if wait > 0:
+        time.sleep(wait + random.uniform(0.1, 0.5))
+    # push2 502 风控时走 push2delay 备用主机（延迟行情，研究场景可接受）
+    try:
+        resp = EM_SESSION.get(url, params=params, headers=headers, timeout=timeout, **kw)
+        _em_last_call[0] = time.time()
+        return resp
+    except Exception as e:
+        _em_last_call[0] = time.time()
+        alt = url.replace("://push2.", "://push2delay.")
+        if alt != url:
+            time.sleep(2)
+            try:
+                print(f"[RETRY-DELAY] {url.split('/')[2]} -> push2delay")
+                return EM_SESSION.get(alt, params=params, headers=headers, timeout=timeout, **kw)
+            except Exception as e2:
+                GAPS.append({"url": url, "error": str(e), "alt_error": str(e2)})
+                raise
+        GAPS.append({"url": url, "error": str(e)})
+        raise
+
+def eastmoney_datacenter(report_name, columns="ALL", filter_str="", page_size=50,
+                         sort_columns="", sort_types="-1"):
+    params = {"reportName": report_name, "columns": columns, "filter": filter_str,
+              "pageNumber": "1", "pageSize": str(page_size), "sortColumns": sort_columns,
+              "sortTypes": sort_types, "source": "WEB", "client": "WEB"}
+    r = em_get(DATACENTER_URL, params=params, timeout=15)
+    d = r.json()
+    if d.get("result") and d["result"].get("data"):
+        return d["result"]["data"]
+    return []
+
+def save(name, obj):
+    p = OUT / f"{name}.json"
+    p.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"[SAVED] {name}: {type(obj).__name__} len={len(obj) if hasattr(obj,'__len__') else '-'}")
+
+FIVE_TIME = datetime.now().astimezone().strftime("%Y-%m-%dT%H:%M:%S%z")
+meta = {"collect_time": FIVE_TIME, "code": CODE, "note": "fresh fetch, independent run"}
+save("_meta", meta)
+
+# ---------- 1. 腾讯实时行情（估值快照） ----------
+def tencent_quote(codes):
+    prefixed = ["sz" + CODE]
+    url = "https://qt.gtimg.cn/q=" + ",".join(prefixed)
+    req = urllib.request.Request(url)
+    req.add_header("User-Agent", "Mozilla/5.0")
+    data = urllib.request.urlopen(req, timeout=10).read().decode("gbk")
+    for line in data.strip().split(";"):
+        if '"' not in line or "=" not in line:
+            continue
+        vals = line.split('"')[1].split("~")
+        if len(vals) < 53:
+            continue
+        q = {"name": vals[1], "price": vals[3], "last_close": vals[4], "open": vals[5],
+             "change_amt": vals[31], "change_pct": vals[32], "high": vals[33], "low": vals[34],
+             "amount_wan": vals[37], "turnover_pct": vals[38], "pe_ttm": vals[39],
+             "amplitude_pct": vals[43], "mcap_yi": vals[44], "float_mcap_yi": vals[45],
+             "pb": vals[46], "limit_up": vals[47], "limit_down": vals[48],
+             "vol_ratio": vals[49], "pe_static": vals[52], "trade_date": vals[30]}
+        save("tencent_quote", q)
+tencent_quote([CODE])
+
+# ---------- 2. 百度K线（含MA，2025-01-01起，自算MA60/120） ----------
+def baidu_kline(code, start_time="20250101"):
+    url = "https://finance.pae.baidu.com/selfselect/getstockquotation"
+    params = {"all": "1", "isIndex": "false", "isBk": "false", "isBlock": "false",
+              "isFutures": "false", "isStock": "true", "newFormat": "1",
+              "group": "quotation_kline_ab", "finClientType": "pc",
+              "code": code, "start_time": start_time, "ktype": "1"}
+    headers = {"User-Agent": "Mozilla/5.0",
+               "Accept": "application/vnd.finance-web.v1+json",
+               "Origin": "https://gushitong.baidu.com", "Referer": "https://gushitong.baidu.com/"}
+    r = requests.get(url, params=params, headers=headers, timeout=15)
+    md = r.json().get("Result", {}).get("newMarketData", {})
+    keys = md.get("keys", [])
+    rows = md.get("marketData", "").split(";")
+    parsed = []
+    kidx = {k: i for i, k in enumerate(keys)}
+    for row in rows:
+        parts = row.split(",")
+        if len(parts) < len(keys):
+            continue
+        parsed.append({"time": parts[kidx.get("time", 0)],
+                       "open": parts[kidx.get("open", 1)], "close": parts[kidx.get("close", 2)],
+                       "high": parts[kidx.get("high", 3)], "low": parts[kidx.get("low", 4)],
+                       "volume": parts[kidx.get("volume", 5)]})
+    return parsed
+kl = baidu_kline(CODE)
+closes = [float(k["close"]) for k in kl]
+for i, k in enumerate(kl):
+    if i >= 59:
+        k["ma60"] = round(sum(closes[i-59:i+1]) / 60, 2)
+    if i >= 119:
+        k["ma120"] = round(sum(closes[i-119:i+1]) / 120, 2)
+save("baidu_kline", kl)
+
+# ---------- 3. 东财个股信息 ----------
+try:
+  r = em_get("https://push2.eastmoney.com/api/qt/stock/get",
+             params={"fltt": "2", "invt": "2",
+                     "fields": "f57,f58,f84,f85,f127,f116,f117,f189,f43,f162,f164,f167,f173,f105,f183,f184,f186,f188",
+                     "secid": f"0.{CODE}"},
+             headers={"User-Agent": UA}, timeout=10)
+  d = r.json().get("data", {}) or {}
+  info = {"code": d.get("f57"), "name": d.get("f58"), "industry": d.get("f127"),
+          "total_shares": d.get("f84"), "float_shares": d.get("f85"),
+          "mcap": d.get("f116"), "float_mcap": d.get("f117"),
+          "list_date": str(d.get("f189", "")), "price": d.get("f43"),
+          "pe_dyn": d.get("f162"), "pe_static": d.get("f164"), "pb": d.get("f167"),
+          "roe": d.get("f173"), "net_profit": d.get("f105"),
+          "rev_yoy": d.get("f183"), "np_yoy": d.get("f186"), "gross_margin": d.get("f188")}
+  save("em_stock_info", info)
+except Exception as e:
+  print("[GAP] em_stock_info:", e)
+
+# ---------- 4. 东财板块归属（行业/概念） ----------
+boards = []
+try:
+  r = em_get("https://push2.eastmoney.com/api/qt/slist/get",
+             params={"fltt": "2", "invt": "2", "secid": f"0.{CODE}", "spt": "3",
+                     "pi": "0", "pz": "200", "po": "1", "fields": "f12,f14,f3,f128"},
+             headers={"User-Agent": UA, "Referer": "https://quote.eastmoney.com/"}, timeout=15)
+  diff = (r.json().get("data") or {}).get("diff") or {}
+  items = list(diff.values()) if isinstance(diff, dict) else diff
+  boards = [{"name": it.get("f14", ""), "code": it.get("f12", ""),
+             "change_pct": it.get("f3", ""), "lead": it.get("f128", "")} for it in items]
+  save("em_boards", boards)
+except Exception as e:
+  print("[GAP] em_boards:", e)
+
+# ---------- 5. 新浪财报三表 ----------
+def sina_fin(code, rtype, num=9):
+    url = "https://quotes.sina.cn/cn/api/openapi.php/CompanyFinanceService.getFinanceReport2022"
+    params = {"paperCode": f"sz{code}", "source": rtype, "type": "0", "page": "1", "num": str(num)}
+    r = requests.get(url, params=params, headers={"User-Agent": UA}, timeout=15)
+    rl = r.json().get("result", {}).get("data", {}).get("report_list", {}) or {}
+    rows = []
+    for period in sorted(rl.keys(), reverse=True)[:num]:
+        obj = rl[period]
+        rec = {"报告期": f"{period[:4]}-{period[4:6]}-{period[6:8]}"}
+        for it in obj.get("data", []) or []:
+            t = it.get("item_title", "")
+            if t and it.get("item_value") is not None:
+                rec[t] = it.get("item_value")
+        rows.append(rec)
+    return rows
+save("sina_lrb", sina_fin(CODE, "lrb"))
+save("sina_fzb", sina_fin(CODE, "fzb"))
+save("sina_llb", sina_fin(CODE, "llb"))
+
+# ---------- 6. 巨潮公告（orgId 动态解析） ----------
+def cninfo_orgid(code):
+    url = "http://www.cninfo.com.cn/new/data/szse_stock.json"
+    r = requests.get(url, headers={"User-Agent": UA}, timeout=20)
+    for st in r.json().get("stockList", []):
+        if st.get("code") == code:
+            return st.get("orgId")
+    return None
+orgid = cninfo_orgid(CODE)
+print("[orgId]", orgid)
+
+def cninfo_ann(sect, seDate, searchkey="", category="", pageSize=30):
+    url = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
+    data = {"pageNum": "1", "pageSize": str(pageSize), "column": "szse", "tabName": "fulltext",
+            "plate": "", "stock": f"{CODE},{orgid}", "searchkey": searchkey, "secid": "",
+            "category": category, "trade": "", "seDate": seDate, "sortName": "", "sortType": "",
+            "isHLtitle": "true"}
+    r = requests.post(url, data=data, headers={"User-Agent": UA}, timeout=20)
+    d = r.json()
+    anns = d.get("announcements") or []
+    out = []
+    for a in anns:
+        out.append({"title": re.sub(r"</?em>", "", a.get("announcementTitle", "")),
+                    "time": str(a.get("announcementTime", "")),
+                    "url": f"http://static.cninfo.com.cn/{a.get('adjunctUrl','')}",
+                    "category": ",".join(a.get("announcementTypeName") or [])})
+    return {"total": d.get("totalAnnouncement"), "count": len(out), "announcements": out}
+save("cninfo_ann_recent", cninfo_ann("", "2026-05-01~2026-08-16", pageSize=50))
+save("cninfo_ann_annual", cninfo_ann("", "2026-01-01~2026-08-16", category="category_ndbg_szsh", pageSize=20))
+
+# ---------- 7. 东财数据中心：两融/股东户数/分红/解禁/龙虎榜 ----------
+def margin(code, n=15):
+    data = eastmoney_datacenter("RPTA_WEB_RZRQ_GGMX", filter_str=f'(SCODE="{code}")',
+                                page_size=n, sort_columns="DATE", sort_types="-1")
+    return [{"date": str(x.get("DATE", ""))[:10], "rzye": x.get("RZYE"),
+             "rzrqye": x.get("RZRQYE")} for x in data]
+save("em_margin", margin(CODE))
+
+def holders(code, n=10):
+    data = eastmoney_datacenter("RPT_HOLDERNUMLATEST", filter_str=f'(SECURITY_CODE="{code}")',
+                                page_size=n, sort_columns="END_DATE", sort_types="-1")
+    return [{"date": str(x.get("END_DATE", ""))[:10], "holder_num": x.get("HOLDER_NUM"),
+             "change_ratio": x.get("HOLDER_NUM_RATIO")} for x in data]
+save("em_holders", holders(CODE))
+
+def dividend(code, n=10):
+    data = eastmoney_datacenter("RPT_SHAREBONUS_DET", filter_str=f'(SECURITY_CODE="{code}")',
+                                page_size=n, sort_columns="EX_DIVIDEND_DATE", sort_types="-1")
+    return [{"date": str(x.get("EX_DIVIDEND_DATE", ""))[:10], "pretax_bonus": x.get("PRETAX_BONUS_RMB"),
+             "progress": x.get("ASSIGN_PROGRESS")} for x in data]
+save("em_dividend", dividend(CODE))
+
+def unlock_hist(code):
+    data = eastmoney_datacenter("RPT_LIFT_STAGE", filter_str=f'(SECURITY_CODE="{code}")',
+                                page_size=15, sort_columns="FREE_DATE", sort_types="-1")
+    return [{"date": str(x.get("FREE_DATE", ""))[:10], "type": x.get("LIMITED_STOCK_TYPE"),
+             "shares": x.get("FREE_SHARES_NUM"), "ratio": x.get("FREE_RATIO")} for x in data]
+save("em_unlock_hist", unlock_hist(CODE))
+
+end_str = (datetime(2026, 8, 16) + timedelta(days=90)).strftime("%Y-%m-%d")
+data = eastmoney_datacenter("RPT_LIFT_STAGE",
+    filter_str=f'(SECURITY_CODE="{CODE}")(FREE_DATE>=\'2026-08-16\')(FREE_DATE<=\'{end_str}\')',
+    page_size=20, sort_columns="FREE_DATE", sort_types="1")
+save("em_unlock_upcoming", [{"date": str(x.get("FREE_DATE", ""))[:10], "type": x.get("LIMITED_STOCK_TYPE"),
+    "shares": x.get("FREE_SHARES_NUM"), "ratio": x.get("FREE_RATIO")} for x in data])
+
+data = eastmoney_datacenter("RPT_DAILYBILLBOARD_DETAILSNEW",
+    filter_str=f"(TRADE_DATE>='2026-06-01')(TRADE_DATE<='2026-08-16')(SECURITY_CODE=\"{CODE}\")",
+    page_size=20, sort_columns="TRADE_DATE", sort_types="-1")
+save("em_dragon_tiger", [{"date": str(x.get("TRADE_DATE", ""))[:10], "reason": x.get("EXPLANATION"),
+    "net_buy": x.get("BILLBOARD_NET_AMT")} for x in data])
+
+# ---------- 8. 资金流120日 ----------
+try:
+  r = em_get("https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
+             params={"secid": f"0.{CODE}", "fields1": "f1,f2,f3,f7",
+                     "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65",
+                     "lmt": "120"},
+             headers={"User-Agent": UA, "Referer": "https://quote.eastmoney.com/"}, timeout=15)
+  kl2 = (r.json().get("data") or {}).get("klines", [])
+  ff = [{"date": p[0], "main_net": p[1], "super_net": p[5]} for p in (x.split(",") for x in kl2)]
+  save("em_fundflow", ff)
+except Exception as e:
+  print("[GAP] em_fundflow:", e)
+  ff = []
+
+# ---------- 9. 东财研报列表（2026年至今） ----------
+try:
+  r = em_get("https://reportapi.eastmoney.com/report/list",
+           params={"industryCode": "*", "pageSize": "100", "industry": "*", "rating": "*",
+                   "ratingChange": "*", "beginTime": "2026-01-01", "endTime": "2030-01-01",
+                   "pageNo": "1", "fields": "", "qType": "0", "orgCode": "", "code": CODE,
+                   "rcode": "", "p": "1", "pageNum": "1", "pageNumber": "1"},
+             headers={"Referer": "https://data.eastmoney.com/"}, timeout=30)
+  rows = r.json().get("data") or []
+  save("em_reports", [{"date": (x.get("publishDate") or "")[:10], "org": x.get("orgSName"),
+      "title": x.get("title"), "rating": x.get("emRatingName"),
+      "eps26": x.get("predictThisYearEps"), "eps27": x.get("predictNextYearEps")} for x in rows])
+except Exception as e:
+  print("[GAP] em_reports:", e)
+  rows = []
+
+# ---------- 10. 同花顺一致预期 ----------
+r = requests.get(f"https://basic.10jqka.com.cn/new/{CODE}/worth.html",
+                 headers={"User-Agent": UA, "Referer": "https://basic.10jqka.com.cn/"}, timeout=15)
+r.encoding = "gbk"
+html = r.text
+tbls = re.findall(r"<table[^>]*>.*?</table>", html, re.S)
+best = None
+for t in tbls:
+    if "每股收益" in t or "预测年报每股收益" in t:
+        best = t
+        break
+ths = []
+if best:
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", best, re.S):
+        cells = [re.sub(r"<[^>]+>|&nbsp;|\s", "", c) for c in re.findall(r"<t[dh][^>]*>(.*?)</t[dh]>", tr, re.S)]
+        if cells:
+            ths.append(cells)
+save("ths_consensus", ths)
+
+import json as _j
+(OUT / "_gaps.json").write_text(_j.dumps(GAPS, ensure_ascii=False, indent=1), encoding="utf-8")
+print("\n[ALL DONE] files:", sorted(p.name for p in OUT.glob("*.json")))
+print("[GAPS]", len(GAPS))

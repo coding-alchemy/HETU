@@ -1,0 +1,16 @@
+sources:
+  licensed-fixture:
+    enabled: true
+    adapter: synthetic-fixture
+    secret_ref: secret://hetu/test/licensed-fixture
+    datasets:
+      - financials
+      - market
+    point_in_time: true
+    valid_from: 2026-01-01T00:00:00+08:00
+    valid_until: 2026-12-31T23:59:59+08:00
+    license:
+      purpose: internal_research
+      cache: derived_only
+      display: internal_users
+      redistribution: forbidden

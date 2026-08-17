@@ -1,0 +1,23 @@
+{
+  "files": {
+    "SKILL.md": "a2eec40524d1520804939a643499472c2da6a97a1dfaa8df2e9c8b2f80ab99d7",
+    "references/checkpoint.md": "d3ebff53fc6fcab20709dc697814cde030bcd1a13bfaefd91dfb978689e22406",
+    "references/evidence-rules.md": "f57144355936f71f4b2a69c569acbf000f6b2f36b2c9804189ea4df1ae76108e",
+    "references/host-tools.md": "8a29c463690cb67b2382d73fb45a25f6742a5f866bb3ee0da19ec9d482fbaa79",
+    "references/orchestration.md": "53d08ad39399e59217139483c6a063b31f9e802cbef46583057aa3b9f7f8a450",
+    "references/recovery.md": "2c107b6233de57d1e059ed1d2ff46845c6455b80272988aa0ad965485ec74d6f",
+    "references/report-guidance.md": "feca6348ef8b091a5f2612748127d6924d4f7eee7e15c8e6ca76bae1358dee7e",
+    "references/work-packages/catalog.md": "e4ba2015158f9d05f6763fbf67cea63d0777bac2227aeb6c2423b760252f81d3",
+    "references/work-packages/core/W0-task-framing.md": "b851ce1cb9fdf5ebe2f8dd363850d6b81189e1bcba21a5592f9dd325479db71e",
+    "references/work-packages/core/W1-subject-verification.md": "92740212b5798d5962d72ece40dc0780f14800d6aa0c0507f4113786fd501b7a",
+    "references/work-packages/core/W10-report-review.md": "f1c9cd667fb5af6d964c26b8d571caed555954ee08c4fc6ab207aeb7b262a382",
+    "references/work-packages/core/W2-incremental-events.md": "a1a8d5922d9c28fa143db2c84296b3b03c65f8dba85fb48cbbe45c649b625aad",
+    "references/work-packages/core/W3-industry-competition.md": "2457f8f2dd1f6a04f9e6b87e883c51b4af80c06cb341b648e15fc193bf716c0a",
+    "references/work-packages/core/W4-business-governance.md": "1376a0678e7019c35865c355f22a49ef4b6455d3432a46a275fd9f9a84c9f903",
+    "references/work-packages/core/W5-financial-validation.md": "f491a2323e06e19d0e1270293635a20eaff3b6800e2728797ba88756b2b0994b",
+    "references/work-packages/core/W6-forecast-scenarios.md": "6bece3fb3029e91348f5810c024e8bfdfdadc290c6ea14587e45f5407ed7f5d6",
+    "references/work-packages/core/W7-valuation-expectations.md": "3c1e5c24a163b7f35d1c1912718b87ae87840d389f962f74d6763d6ac1580842",
+    "references/work-packages/core/W8-market-signals.md": "d76d63a56838e85f5b86e4aa001e781f3c2351b909e5942eb095a0bdce881eb5",
+    "references/work-packages/core/W9-thesis-counterevidence.md": "5b942e993082dbc8636a5d353d2c9ea9476103a53be2d134a1a2c5d6ec1701ed"
+  }
+}
