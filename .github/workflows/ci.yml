@@ -1,0 +1,21 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Create isolated environment
+        run: python -m venv .venv
+      - name: Install current checkout and development dependencies
+        run: .venv/bin/python -m pip install -e '.[dev]'
+      - name: Full repository gate
+        run: bash scripts/check.sh

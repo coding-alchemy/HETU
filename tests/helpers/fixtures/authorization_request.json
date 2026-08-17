@@ -1,0 +1,20 @@
+{
+  "source_id": "licensed-fixture",
+  "dataset": "financials",
+  "purpose": "internal_research",
+  "as_of": "2026-07-27T10:04:35+08:00",
+  "checked_at": "2026-08-01T12:00:00+08:00",
+  "require_point_in_time": true,
+  "user_sources": ["licensed-fixture"],
+  "user_datasets": ["financials"],
+  "secret_ref": "secret://hetu/test/licensed-fixture",
+  "secret_resolved": true,
+  "declared_license": {
+    "purpose": "internal_research",
+    "cache": "derived_only",
+    "display": "internal_users",
+    "redistribution": "forbidden"
+  },
+  "operation_status": "available",
+  "reliable_recovery_available": false
+}

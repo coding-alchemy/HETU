@@ -1,0 +1,28 @@
+# Phase-2 authorized source registry example.
+#
+# This file is metadata only, never a credential store. Current user grants,
+# the resolver result (whether a secret reference resolved), the requested
+# purpose, the evaluation `as_of`, and the operation status are explicit
+# per-call inputs supplied to `hetu-stock helper authorization-check`; they
+# do not belong in this file. Raw secret values never belong here - only
+# `secret://` reference names.
+#
+# The schema is the Plan 02 `SourceRegistry` model
+# (sources -> source-id -> enabled/adapter/secret_ref/datasets/point_in_time/
+# valid_from/valid_until/license). It does not carry `governance`,
+# `required_datasets`, `user_datasets` or `resolved_secret_refs`; those are
+# per-call inputs.
+sources:
+  licensed-example:
+    enabled: false
+    adapter: replace-with-authorized-adapter
+    secret_ref: secret://replace-with-authorized-reference
+    datasets: [financials]
+    point_in_time: true
+    valid_from: 2026-01-01T00:00:00+08:00
+    valid_until: 2026-12-31T23:59:59+08:00
+    license:
+      purpose: internal_research
+      cache: derived_only
+      display: internal_users
+      redistribution: forbidden
