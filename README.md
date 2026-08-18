@@ -132,3 +132,4 @@ bash scripts/check.sh
 - [授权数据源配置示例](config/data_sources.example.yaml)
 - [版本日志](CHANGELOG.md)
 - [中国股票分析体系全景指南](docs/中国股票分析体系全景指南.md)
+- [A股板块与行业分析指南](docs/A股板块与行业分析指南.md)
