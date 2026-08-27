@@ -58,13 +58,20 @@ description: Analyze one China A-share stock with public or explicitly authorize
 - 启动时读取[证据规则](references/evidence-rules.md)，再形成任何事实或引用。
 - 启动时读取[工作包目录](references/work-packages/catalog.md)，判断领域适用性；核心包仍从下节直接读取。
 - 首次建立或恢复研究产物时读取[检查点规则](references/checkpoint.md)。
+- 首次建立研究目录时读取[研究产物合同](references/artifact-contract.md)和[工作包结果结构](references/work-package-result.md)，按固定结构落盘目录、`manifest.json` 与各工作包独立文件。
+- 需要确定性处理或来源失败分类时才读取[工具目录](references/tool-catalog.md)或[来源合同](references/source-contracts.md)；工具目录的五个确定性脚本已 `adopted`，另有阶段 04 机械助手 `source_adapter.py`（只解析显式保存输入，是否调用与是否采用由 Agent 决定）；来源合同已写全五个数据域的字段、失败语义与等价边界，但在用户确认阶段 04 放行证据前仍不得标记替代取得。
+- 当 Agent 已按来源合同明确选择 `cninfo-announcement-index`、`sina-financial-statements` 或 `tencent-quote-snapshot` 时，可读取工具目录并调用可选的 `source_fetch.py`；脚本失败只形成局部缺口，不改变 Agent 的来源选择、采用或后续判断责任。
 - 工具、来源、授权或恢复出现问题时读取[恢复规则](references/recovery.md)。
-- 准备综合报告或提前核对交付边界时读取[报告指引](references/report-guidance.md)。
+- 进入 W10 综合报告或提前核对交付边界时读取[报告指引](references/report-guidance.md)。
 - 发现宿主能力、选择文件位置或调用可选助手时读取[宿主工具边界](references/host-tools.md)。
 
-研究工作区默认使用 `.hetu/research/<证券>-<任务时间>/`，包含 `checkpoint.md`、`evidence.md`、
-`artifacts/` 与 `report.md`；尚未产生内容的文件可以在首次写入前缺席。`artifacts/` 只保存合法
-取得、许可允许、与当前任务相关且确有复核价值的材料。
+研究工作区默认使用 `.hetu/research/<证券>-<任务时间>/` 固定目录，包含 `checkpoint.md`、
+`evidence.md`、`manifest.json`、`work-packages/` 下 W0–W10 独立提交的固定命名文件、
+`artifacts/raw|normalized|derived|scripts/` 四类子目录与 `report.md`；尚未产生内容的文件可以在
+首次写入前缺席。`artifacts/` 只保存合法取得、许可允许、与当前任务相关且确有复核价值的材料。
+运行中记录实际分析模型，宿主未暴露完整版本或推理深度时如实标记"未暴露"，不推测；为生成报告
+而创建或修改的中间脚本按产物合同的保留中间脚本要求保存实际版本和失败版本并在 `manifest.json`
+登记，不得删除或静默覆盖。
 
 ## 工作包直接导航
 

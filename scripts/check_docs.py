@@ -117,6 +117,15 @@ def _link_failures(root: Path, documents: Sequence[Path]) -> tuple[str, ...]:
                 failures.append(
                     f"{document.as_posix()}: outside repository {destination}"
                 )
+            elif (
+                resolved_target.relative_to(repository_root).parts[:1]
+                == (".hetu",)
+                and not (repository_root / ".hetu").exists()
+            ):
+                # Runtime research/validation artifacts are gitignored and
+                # absent in clean clones; skip only when the runtime tree
+                # itself is absent — when present, links must resolve.
+                continue
             elif not resolved_target.exists():
                 failures.append(f"{document.as_posix()}: missing {destination}")
     return tuple(sorted(failures))

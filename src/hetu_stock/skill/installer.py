@@ -44,6 +44,8 @@ def _validated_package_files(root: Path) -> tuple[Path, ...]:
             raise SkillValidationError(
                 f"symbolic link is not allowed in Skill package: {relative}"
             )
+        if "__pycache__" in path.parts:
+            continue
         resolved = path.resolve()
         if not resolved.is_relative_to(root_resolved):
             raise SkillValidationError(f"Skill package path resolves outside root: {relative}")
@@ -130,7 +132,7 @@ def install_skill(source: Path, destination_root: Path, *, force: bool = False) 
             raise FileExistsError(target)
         shutil.rmtree(target)
     destination_root.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, target)
+    shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
     try:
         validate_skill_package(target, require_manifest=True)
         verify_skill_manifest(target)

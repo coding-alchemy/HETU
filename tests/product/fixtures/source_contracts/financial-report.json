@@ -1,0 +1,24 @@
+{
+  "result": {
+    "data": {
+      "report_list": {
+        "20260331": {
+          "data": [
+            { "item_title": "营业收入", "item_value": "1234567.89" },
+            { "item_title": "营业成本", "item_value": "987654.32" },
+            { "item_title": "净利润", "item_value": "234567.89" },
+            { "item_title": "经营活动产生的现金流量净额", "item_value": "345678.90" }
+          ]
+        },
+        "20251231": {
+          "data": [
+            { "item_title": "营业收入", "item_value": "2345678.90" },
+            { "item_title": "营业成本", "item_value": "876543.21" },
+            { "item_title": "净利润", "item_value": "1234567.89" },
+            { "item_title": "经营活动产生的现金流量净额", "item_value": "456789.01" }
+          ]
+        }
+      }
+    }
+  }
+}

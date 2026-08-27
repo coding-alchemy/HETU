@@ -11,7 +11,7 @@
 > 原五期 v1.0 依据：原四期可靠性、易用性与信息完整性增强整体顺延而来，需求范围和效果目标
 > 不因重编号而改变
 > 一期实现基线：[`2026-08-17-stock-analysis-workflow-v1-phase-1-implementation.md`](2026-08-17-stock-analysis-workflow-v1-phase-1-implementation.md)
-> 二期前置：[`2026-08-17-stock-analysis-workflow-v1-phase-2-hardening-requirements.md`](2026-08-17-stock-analysis-workflow-v1-phase-2-hardening-requirements.md)
+> 二期实现：[`2026-08-25-stock-analysis-workflow-v1-phase-2-implementation.md`](2026-08-25-stock-analysis-workflow-v1-phase-2-implementation.md)
 > 需求来源：原二期需求中超出"控制权迁移与基本可用"范围的可靠性、易用性、信息完整性和规模化增强项
 > 适用范围：单只 A 股 Agent 研究质量增强、信息源完善、经营模型适配、主/子 Agent 协作、工作包扩展、复杂恢复、跨宿主验收和安装治理
 > 输出性质：V1 产品与工程长期需求，不构成实现设计或执行计划

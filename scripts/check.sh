@@ -8,7 +8,7 @@ test -x "$hetu_cli"
 
 "$hetu_python" -m pytest --collect-only -q
 "$hetu_python" -m pytest -q tests/product tests/helpers
-"$hetu_python" -m ruff check src tests scripts
+"$hetu_python" -m ruff check src tests scripts skills/hetu-stock-analysis/scripts
 "$hetu_python" -m mypy src
 "$hetu_python" scripts/check_docs.py
 "$hetu_python" scripts/update_skill_manifest.py

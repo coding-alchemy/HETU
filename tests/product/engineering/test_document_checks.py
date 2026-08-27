@@ -77,6 +77,48 @@ def test_document_checker_rejects_broken_tracked_link(tmp_path: Path) -> None:
     assert "docs/missing.md" in completed.stdout
 
 
+def test_document_checker_skips_hetu_links_only_without_runtime_tree(
+    tmp_path: Path,
+) -> None:
+    # Clean clones have no .hetu runtime tree: links into it cannot be
+    # verified and must not gate.
+    files = _valid_current_documents()
+    files["specs/design.md"] = (
+        "# Design\n\n[Evidence](../.hetu/research/002371-run/report.md)\n"
+    )
+    root = _tracked_tree(tmp_path, files)
+
+    completed = _run_checker(root)
+
+    assert completed.returncode == 0, completed.stdout
+
+
+def test_document_checker_verifies_hetu_links_when_runtime_tree_exists(
+    tmp_path: Path,
+) -> None:
+    # With the runtime tree present, a misspelled evidence link fails the
+    # gate like any other broken relative link.
+    files = _valid_current_documents()
+    files["specs/design.md"] = (
+        "# Design\n\n[Evidence](../.hetu/research/002371-run/report.md)\n"
+    )
+    root = _tracked_tree(tmp_path, files)
+    (root / ".hetu" / "research" / "002371-run").mkdir(parents=True)
+    (root / ".hetu" / "research" / "002371-run" / "report.md").write_text(
+        "# Report\n", encoding="utf-8"
+    )
+    _write(
+        root,
+        "specs/design.md",
+        "# Design\n\n[Evidence](../.hetu/research/002371-run/repotr.md)\n",
+    )
+
+    completed = _run_checker(root)
+
+    assert completed.returncode != 0
+    assert "repotr.md" in completed.stdout
+
+
 def test_document_checker_rejects_relative_link_outside_repository(
     tmp_path: Path,
 ) -> None:
