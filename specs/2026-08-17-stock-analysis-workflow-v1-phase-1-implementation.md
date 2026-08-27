@@ -3,12 +3,12 @@
 > 文档版本：V1 一期实现 v1.2
 > 文档状态：V1 一期实现说明；随实现同步维护
 > 创建日期：2026-08-17
-> 修订日期：2026-08-17
+> 修订日期：2026-08-26
 > v1.2 修订依据：2026-08-17 用户将现行实现归入 V1 系列：本文档为 V1 一期实现；二期加固
 > 与 V1 长期需求另行成文；方法论移至 docs/
 > 适用范围：V0.1 未发布版本的 canonical Skill、Python 辅助工具、CLI、安装与工程门禁
 > 权威顺序：canonical Skill 与源码 > 当前测试 > 本文档
-> 后续需求：[二期工作流加固](2026-08-17-stock-analysis-workflow-v1-phase-2-hardening-requirements.md)、
+> 后续需求：[二期实现](2026-08-25-stock-analysis-workflow-v1-phase-2-implementation.md)、
 > [V1 长期需求](2026-08-17-stock-analysis-workflow-v1-requirements.md)
 
 ---
@@ -108,14 +108,12 @@ HETU/
 │   └── update_skill_manifest.py      # canonical manifest 生成
 ├── tests/product/                    # 当前产品、Skill、安装和文档契约
 ├── tests/helpers/                    # 两个原子 helper
-├── config/data_sources.example.yaml  # authorized registry 示例
-└── archive/phase4-analysis-tool-candidates/
-                                      # 二期加固候选，未接入产品路径
+└── config/data_sources.example.yaml  # authorized registry 示例
 ```
 
-`archive/phase4-analysis-tool-candidates/` 中的财务报表、公告索引和数值一致性脚本只是二期加固输入。
-CLI、Skill、helper 和安装器均不导入它们；未完成二期设计、修复与正式门禁前，不得描述为当前
-能力。
+财务报表、公告索引和数值一致性候选曾存在于 Git 提交 `94c4438`；三项确定性能力已由二期
+canonical 脚本吸收，历史目录现已退役。CLI、Skill、helper 和安装器不依赖该历史目录；当前
+能力以 canonical 入口和现行测试为准。
 
 ### 2.2 运行依赖
 
@@ -140,7 +138,7 @@ CLI、Skill、helper 和安装器均不导入它们；未完成二期设计、�
 | 一键安装 | `scripts/install.sh --host ...` | Python/平台检查 → venv/pip → launcher → Skill 安装与复验 | 用户级 CLI 与 Skill | 已接线 | `scripts/install.sh`；`tests/product/install/test_install_script.py` |
 | 时间边界 | `hetu-stock helper time-boundary` | 解析 → 时区归一 → 点时比较 | JSON decision | 已接线，可选 | `helpers/time.py`；`tests/helpers/test_time.py` |
 | 授权判断 | `hetu-stock helper authorization-check` | YAML/JSON 解析 → 封闭 schema → 14 类检查 | JSON decision | 已接线，可选 | `helpers/authorization.py`；authorization tests |
-| 三个分析工具候选 | 无产品入口 | 仅归档代码和候选测试 | 二期设计输入 | 未接线 | `archive/phase4-analysis-tool-candidates/README.md` |
+| 三项确定性能力 | `skills/hetu-stock-analysis/scripts/` | 显式保存输入的标准化、索引与数值复算 | 研究产物中的局部确定性结果 | 已接线，可选 | `financial_statements.py`、`announcement_index.py`、`numeric_consistency.py` 及现行产品测试 |
 | 原生宿主认证 | 无当前执行器 | 无 | README 版本状态表与使用指南 | `UNVERIFIED` | 三宿主均未认证；旧 harness 已删除，仅 Git 历史追溯 |
 
 每项当前能力只有一个 owner：研究行为归 canonical Skill，确定性实现归对应 Python 模块，安装
@@ -409,9 +407,9 @@ bash scripts/check.sh
 - 当前可执行的宿主认证流程和已通过宿主声明。
 
 历史实现和执行证据只通过 Git 历史追溯，不在当前仓库复制归档。长期可复用的代码精简原则见
-[不变量保护式代码精简方法论](../docs/invariant-preserving-code-reduction-methodology.md)。尚未实施但仍有
-价值的质量加固能力已并入[二期加固需求](2026-08-17-stock-analysis-workflow-v1-phase-2-hardening-requirements.md)
-第 10 章，标记为待讨论。
+[代码简化方法论](../docs/engineering/code-reduction-methodology.md)。尚未实施但仍有
+价值的质量加固能力已并入[二期实现](2026-08-25-stock-analysis-workflow-v1-phase-2-implementation.md)
+与[V1 长期需求](2026-08-17-stock-analysis-workflow-v1-requirements.md)。
 
 ## 11. 当前限制与后续边界
 
@@ -421,12 +419,12 @@ bash scripts/check.sh
 - 报告章节只有内容下界，没有 quick/standard/deep 的固定编号模板。
 - 来源完整度、行业专用经营模型、复杂恢复、正式并行、长任务控制和跨宿主稳定性未实现。
 - Skill 覆盖安装不是原子替换，失败不恢复旧版本。
-- 归档的分析工具候选尚未修复和接线。
+- 已退役历史候选不构成当前能力或运行依赖；其演进只在 Git 历史中追溯。
 
 ### 11.2 后续唯一落点
 
-- 二期加固：固定编号报告骨架、三档模板、核心发现表、空值/缺口语义、报告事实零错误门禁，以及
-  三个归档分析工具候选的修复与最小整合。
+- 二期加固：固定编号报告骨架、三档模板、核心发现表、空值/缺口语义与报告事实零错误门禁；
+  已接线确定性能力的后续变更仍须由 canonical owner 与现行测试共同约束。
 - V1：来源与信息完整度、经营/会计模型适配、主/子 Agent 协作、复杂任务控制、安全与宿主
   认证、安装原子性和工作包扩展治理。
 

@@ -64,6 +64,9 @@ def test_build_skill_manifest_is_sorted_and_excludes_itself(tmp_path: Path) -> N
     nested.mkdir()
     (nested / "a.md").write_text("a", encoding="utf-8")
     (root / "MANIFEST.json").write_text("old manifest", encoding="utf-8")
+    cache = root / "scripts" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "tool.cpython-312.pyc").write_bytes(b"\x00pyc")
 
     manifest = build_skill_manifest(root)
 
@@ -78,6 +81,21 @@ def test_build_skill_manifest_rejects_symbolic_links(tmp_path: Path) -> None:
     outside = tmp_path / "outside.txt"
     outside.write_text("outside secret", encoding="utf-8")
     _symlink_or_skip(root / "leak.txt", outside)
+
+    with pytest.raises(SkillValidationError, match="symbolic link"):
+        build_skill_manifest(root)
+
+
+def test_build_skill_manifest_rejects_pycache_directory_symlink(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "skill"
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "rogue.py").write_text("EXECUTABLE = True\n", encoding="utf-8")
+    _symlink_or_skip(scripts / "__pycache__", outside)
 
     with pytest.raises(SkillValidationError, match="symbolic link"):
         build_skill_manifest(root)
@@ -153,6 +171,19 @@ def test_install_copies_canonical_package(tmp_path: Path) -> None:
     for index in range(11):
         assert len(list(installed.glob(f"references/work-packages/core/W{index}-*.md"))) == 1
     assert (installed / "MANIFEST.json").is_file()
+
+
+def test_install_does_not_copy_unregistered_bytecode_cache(tmp_path: Path) -> None:
+    source = tmp_path / "source" / "hetu-stock-analysis"
+    _make_skill_package(source)
+    cache = source / "scripts" / "__pycache__"
+    cache.mkdir(parents=True)
+    (cache / "tool.cpython-312.pyc").write_bytes(b"\x00pyc")
+    (cache / "rogue.py").write_text("EXECUTABLE = True\n", encoding="utf-8")
+
+    installed = install_skill(source, tmp_path / "skills")
+
+    assert not (installed / "scripts" / "__pycache__").exists()
 
 
 def test_install_rejects_post_copy_tampering(

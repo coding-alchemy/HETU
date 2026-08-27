@@ -33,6 +33,16 @@ def test_skill_uses_exact_phase_two_frontmatter_and_section_order() -> None:
         "## 工作包直接导航",
         "## 最终交付",
     ]
+    for target in (
+        "references/artifact-contract.md",
+        "references/work-package-result.md",
+        "references/report-guidance.md",
+        "references/tool-catalog.md",
+        "references/source-contracts.md",
+    ):
+        assert f"]({target})" in text
+    assert "实际分析模型" in text
+    assert "保留中间脚本" in text
 
 
 def test_skill_defaults_continue_without_overquestioning() -> None:
@@ -352,8 +362,8 @@ def test_report_guidance_keeps_business_writing_with_the_agent() -> None:
     for phrase in (
         "Agent 直接撰写",
         "任务与时点",
-        "结论摘要",
-        "公司与行业",
+        "核心发现",
+        "公司、业务与行业",
         "财务",
         "估值",
         "市场",
@@ -374,6 +384,21 @@ def test_report_guidance_keeps_business_writing_with_the_agent() -> None:
     assert "内部证据 ID 不能替代" in text
     for action in ("买入", "卖出", "加仓", "减仓", "持有", "退出", "仓位"):
         assert action in text
+
+
+def test_agent_facing_contract_explains_checker_compatible_shapes() -> None:
+    report_guidance = _read("references/report-guidance.md")
+    artifact_contract = _read("references/artifact-contract.md")
+    assert "首页元数据表头使用 `| 字段 | 规则 |` 或等价的" in report_guidance
+    assert "`| 字段 | 内容 |`" in report_guidance
+    for phrase in (
+        "解析器接受 `1`、`第 1 章`、`1. 任务与时点`、`2–3` 等等价章节形式",
+        "`W2–W9` 范围",
+        "关键主张定位应是目标章节可搜索原文",
+        "证据定位应使用存在的证据编号、fragment",
+        "纯任务元数据或没有 manifest 产物链的边界说明不要写入映射表",
+    ):
+        assert phrase in artifact_contract
 
 
 def test_report_guidance_requires_safe_markdown_table_text() -> None:
@@ -437,5 +462,81 @@ def test_host_tools_keep_files_and_optional_helpers_at_atomic_scope() -> None:
         "不可信",
         "secret",
         "不得保存或展示隐藏思维链",
+        "工作区固定为",
+        "不得使用其他位置",
     ):
         assert phrase in text
+    assert "等价安全位置" not in text
+
+
+CLOSED_SOURCE_IDS = (
+    "cninfo-announcement-index",
+    "sina-financial-statements",
+    "tencent-quote-snapshot",
+)
+
+RESEARCH_ROOT_PHRASES = (
+    "调用前创建或选择",
+    ".hetu/research/<证券>-<任务时间>/",
+    "`--input` 和 `--output`",
+    "同一当前研究根",
+    "`artifacts/raw/`",
+    "不接受研究根参数",
+    "目录选择和边界确认由 Agent 负责",
+)
+
+
+@pytest.mark.parametrize(
+    ("resource", "phrases"),
+    (
+        pytest.param(
+            "SKILL.md",
+            ("source_fetch.py", *CLOSED_SOURCE_IDS),
+            id="skill-optional-explicit-tool",
+        ),
+        pytest.param(
+            "references/source-contracts.md",
+            (
+                "source_fetch.py",
+                *CLOSED_SOURCE_IDS,
+                "不自动换源",
+                "采集成功不代表采用",
+                "由 Agent 决定是否调用替代",
+                "主体、期间、范围、单位和用途",
+                "不得后台自动换源",
+                "精确公司份额",
+                "未披露订单",
+            ),
+            id="source-contracts-agent-owned",
+        ),
+        pytest.param(
+            "references/host-tools.md",
+            (
+                "source_fetch.py",
+                *CLOSED_SOURCE_IDS,
+                "不自动换源",
+                "采集成功不代表采用",
+                "任意 URL",
+                "其他搜索、浏览、PDF",
+                *RESEARCH_ROOT_PHRASES,
+            ),
+            id="host-tools-fetcher-and-root",
+        ),
+        pytest.param(
+            "references/tool-catalog.md",
+            (
+                "source_fetch.py",
+                *CLOSED_SOURCE_IDS,
+                "不自动换源",
+                *RESEARCH_ROOT_PHRASES,
+            ),
+            id="tool-catalog-closed-entry",
+        ),
+    ),
+)
+def test_source_fetch_stays_an_optional_agent_owned_closed_contract(
+    resource: str, phrases: tuple[str, ...]
+) -> None:
+    text = _read(resource)
+    for phrase in phrases:
+        assert phrase in text, f"{resource} lost source-fetch contract phrase {phrase!r}"

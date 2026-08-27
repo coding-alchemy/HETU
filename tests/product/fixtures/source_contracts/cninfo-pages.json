@@ -1,0 +1,32 @@
+{
+  "pages": [
+    {
+      "pageNum": 1,
+      "totalAnnouncement": 3,
+      "announcements": [
+        {
+          "announcementTitle": "合成样例：虚构股份公司2025年年度股东大会决议公告（非真实披露）",
+          "announcementTime": 1781503500000,
+          "adjunctUrl": "finalpage/2026-06/synthetic-cninfo-a1-20260615.pdf"
+        },
+        {
+          "announcementTitle": "合成样例：虚构投资者关系活动记录表（非真实披露）",
+          "announcementTime": 1780363800000,
+          "adjunctUrl": "finalpage/2026-06/synthetic-cninfo-a2-20260602.pdf"
+        }
+      ]
+    },
+    {
+      "pageNum": 2,
+      "totalAnnouncement": 3,
+      "announcements": [
+        {
+          "announcementTitle": "合成样例：虚构2026年半年度业绩预告（as_of 后公告，非真实披露）",
+          "announcementTime": 1783476000000,
+          "adjunctUrl": "finalpage/2026-07/synthetic-cninfo-a3-20260708.pdf"
+        }
+      ]
+    }
+  ],
+  "as_of": "2026-06-30T18:00:00+08:00"
+}

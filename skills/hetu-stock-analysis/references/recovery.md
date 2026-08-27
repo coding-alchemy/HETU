@@ -6,6 +6,12 @@
 再尝试至少一种合法替代来源或方法。非关键数据仍无法取得时记录局部缺口、传播影响，并继续不受
 影响的研究；不要求用户先修复完整 Python 环境。
 
+技术失败分类使用[来源合同](source-contracts.md)定义的九值闭集：`success`、`not_found`、
+`rate_limited`、`transport_error`、`permission_denied`、`parse_error`、
+`incomplete_pagination`、`out_of_asof`、`scope_mismatch`。首选来源失败时，先按九类记录
+分类与已保存证据，再由 Agent 明示决定是否换用合同替代来源；适配器与脚本不得后台自动换源，
+替代不等价时保留原缺口或冲突，不为完成率强行升级。
+
 ## 强制暂停
 
 只有证券、发行人或范围需用户选择，主体唯一但存在风险警示、停复牌、退市等异常状态，`as_of`

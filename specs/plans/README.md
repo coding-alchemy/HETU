@@ -7,9 +7,15 @@
 历史追溯；已落地行为统一见
 [个股分析工作流 V1 一期实现](../2026-08-17-stock-analysis-workflow-v1-phase-1-implementation.md)。
 
-V1 二期加固和 V1 长期需求目前只有需求，不得把需求文档当作已批准执行计划：
+V1 二期加固、两轮保护性减量、来源采集与 archive 退役均已完成技术验收。相关执行计划和独立
+设计均已从工作区删除，只通过 Git 历史追溯；仍有效的设计约束与最终结果统一见
+[个股分析工作流 V1 二期实现](../2026-08-25-stock-analysis-workflow-v1-phase-2-implementation.md)。
 
-- [V1 二期加固需求：报告模板约束与质量加固候选](../2026-08-17-stock-analysis-workflow-v1-phase-2-hardening-requirements.md)
+个股分析工作流架构图的设计（`2026-08-26-stock-analysis-workflow-diagram-design.md`）与其执行
+计划子目录已应用户要求从工作区删除，只通过 Git 历史追溯。
+
+V1 长期需求目前只有需求，不得把需求文档当作已批准执行计划：
+
 - [V1 长期需求：完善个股分析工作流](../2026-08-17-stock-analysis-workflow-v1-requirements.md)
 
 ## 新增计划约定
