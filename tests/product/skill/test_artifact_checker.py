@@ -21,6 +21,7 @@ import pytest
 
 from tests.product.skill.deterministic_tool_loader import load_script
 from tests.product.skill.phase2_run_fixture import (
+    DEFAULT_RUN_ID,
     DERIVED_REL,
     NORMALIZED_REL,
     RAW_REL,
@@ -40,7 +41,6 @@ MUTATIONS: dict[str, str] = {
     "manifest-hash-mismatch": "manifest.hash_mismatch",
     "missing-model-field": "report.missing_model",
     "wrong-report-order": "report.chapter_order",
-    "missing-w10-mapping": "trace.missing_w10_mapping",
     "unregistered-script": "script.unregistered",
     "missing-no-script-declaration": "script.missing_declaration",
     "missing-delivery-message": "message.not_checked",
@@ -174,8 +174,8 @@ def _assert_nonblocking_warning(result: dict[str, Any], code: str) -> None:
 
 
 def _apply_mutation(name: str, root: Path) -> None:
-    research = root / "research"
-    lock = root / "lock-record.json"
+    research = root / "research" / DEFAULT_RUN_ID
+    lock = root / "locks" / DEFAULT_RUN_ID / "lock-record.json"
     if name == "missing-work-package":
         (research / "work-packages/W3-industry-competition.md").unlink()
     elif name == "invalid-manifest-json":
@@ -294,6 +294,151 @@ def test_valid_run_passes_mechanically(checker: Any, tmp_path: Path) -> None:
     assert result["issues"] == []
     assert result["warnings"] == []
     assert isinstance(result["checks"], list) and result["checks"]
+
+
+@pytest.mark.parametrize("depth", ("quick", "standard", "deep"))
+def test_canonical_run_directory_accepts_all_depths(
+    checker: Any, tmp_path: Path, depth: str
+) -> None:
+    run_id = f"合成公司-000001.SZ-{depth}-20260630T190000+0800"
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, run_id=run_id, requested_depth=depth
+    )
+    result = checker.check_run(research, delivery, lock)
+    assert result["mechanical_status"] == "PASS"
+    assert result["warnings"] == []
+
+
+def test_noncanonical_but_consistent_run_directory_warns(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, run_id="000001.SZ-20260630T190000+0800"
+    )
+    result = checker.check_run(research, delivery, lock)
+    _assert_nonblocking_warning(result, "run.directory_name_noncanonical")
+
+
+def test_research_and_lock_directory_names_must_match_run_id(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    wrong_lock = lock.parent.parent / "wrong-run-id" / "lock-record.json"
+    wrong_lock.parent.mkdir(parents=True)
+    lock = lock.rename(wrong_lock)
+    result = checker.check_run(research, delivery, lock)
+    assert result["mechanical_status"] == "FAIL"
+    assert "run.directory_run_id_mismatch" in {
+        issue["code"] for issue in result["issues"]
+    }
+
+
+def test_verified_identity_metadata_drift_is_a_nonblocking_warning(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["run"].__setitem__("verified_security", "待核验"),
+    )
+    _refresh_research_lock(checker, research, lock)
+    result = checker.check_run(research, delivery, lock)
+    _assert_nonblocking_warning(result, "identity.metadata_out_of_sync")
+
+
+def test_markdown_bullet_w1_identity_is_actually_mirror_checked(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    w1 = research / "work-packages/W1-subject-verification.md"
+    text = w1.read_text(encoding="utf-8")
+    text = text.replace("证券简称：合成公司", "- 证券简称：**合成公司**")
+    text = text.replace(
+        "权威身份：000001.SZ / 合成发行人 / 合成交易所（唯一核验）",
+        "- 权威身份：**000001.SZ／合成发行人／合成交易所**（唯一核验）",
+    )
+    w1.write_text(text, encoding="utf-8")
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["run"].__setitem__("verified_security", "待核验"),
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    _assert_nonblocking_warning(result, "identity.metadata_out_of_sync")
+
+
+def test_realistic_bold_bullet_w1_identity_without_unique_suffix_is_parsed(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    w1 = research / "work-packages/W1-subject-verification.md"
+    text = w1.read_text(encoding="utf-8")
+    text = text.replace(
+        "证券简称：合成公司",
+        "- 证券简称：**合成公司**（交易所公开简称）[S1，L0]",
+    )
+    text = text.replace(
+        "权威身份：000001.SZ / 合成发行人 / 合成交易所（唯一核验）",
+        "- 权威身份：**000001.SZ／合成发行人／合成交易所** [S1，L0]",
+    )
+    w1.write_text(text, encoding="utf-8")
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    warning_codes = {warning["code"] for warning in result["warnings"]}
+    assert "identity.metadata_unreadable" not in warning_codes
+    assert "run.directory_name_noncanonical" not in warning_codes
+
+
+def test_canonical_directory_accepts_security_inside_full_identity_string(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["run"].__setitem__(
+            "verified_security", "000001.SZ / 合成发行人 / 合成交易所主板"
+        ),
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "run.directory_name_noncanonical" not in {
+        warning["code"] for warning in result["warnings"]
+    }
+
+
+def test_existing_w1_with_unreadable_identity_warns_instead_of_skipping(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    w1 = research / "work-packages/W1-subject-verification.md"
+    w1.write_text(
+        w1.read_text(encoding="utf-8").replace("权威身份：", "身份说明："),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    _assert_nonblocking_warning(result, "identity.metadata_unreadable")
+
+
+def test_missing_w10_mapping_is_a_nonblocking_warning(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    (research / "work-packages/W10-report-review.md").write_text(
+        "# W10（合成，缺映射表）\n\n本工作包未创建或修改中间脚本。\n",
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+    result = checker.check_run(research, delivery, lock)
+    _assert_nonblocking_warning(result, "trace.missing_w10_mapping")
 
 
 def test_script_dependencies_accept_nonempty_string_list(
@@ -590,7 +735,7 @@ def test_scripts_under_full_package_directory_count_as_owned(checker: Any, tmp_p
     module = _ilu.module_from_spec(spec)
     spec.loader.exec_module(module)
     record = module.lock_run(
-        run_id="synthetic-run-0001",
+        run_id=DEFAULT_RUN_ID,
         request_path=tmp_path / "request.md",
         research_root=research,
         delivery_message_path=delivery,
@@ -636,7 +781,7 @@ def test_home_fields_and_core_rows_as_prose_are_rejected(checker: Any, tmp_path:
     assert "report.missing_core_row" in codes
 
 
-def test_w10_mapping_fields_in_prose_without_table_are_rejected(
+def test_w10_mapping_fields_in_prose_without_table_warn(
     checker: Any, tmp_path: Path
 ) -> None:
     research, delivery, lock = build_valid_phase2_run(tmp_path)
@@ -647,7 +792,7 @@ def test_w10_mapping_fields_in_prose_without_table_are_rejected(
 
     result = checker.check_run(research, delivery, lock)
 
-    codes = {issue["code"] for issue in result["issues"]}
+    codes = {warning["code"] for warning in result["warnings"]}
     assert "trace.missing_w10_mapping" in codes
 
 
@@ -1086,15 +1231,17 @@ def test_nested_list_headings_cannot_satisfy_top_level_report_chapters(
 
 
 HIDDEN_TABLE_CASES = (
-    # (edits, expected issue codes). Each edit is (relative path, table marker,
-    # prefix, suffix) wrapping the marked table block, or (relative path, None,
-    # whole-file literal, None) replacing the entire file.
+    # (edits, expected issue codes, expected warning codes). Each edit is
+    # (relative path, table marker, prefix, suffix) wrapping the marked table
+    # block, or (relative path, None, whole-file literal, None) replacing the
+    # entire file.
     (
         (
             ("report.md", "| 字段 | 规则 |", "```markdown\n", "\n```"),
             ("work-packages/W10-report-review.md", "| 报告章节 |", "```markdown\n", "\n```"),
         ),
-        ("report.missing_model", "report.missing_home_field", "trace.missing_w10_mapping"),
+        ("report.missing_model", "report.missing_home_field"),
+        ("trace.missing_w10_mapping",),
     ),
     (
         (
@@ -1109,6 +1256,7 @@ HIDDEN_TABLE_CASES = (
                 None,
             ),
         ),
+        (),
         ("trace.missing_w10_mapping",),
     ),
     (
@@ -1121,8 +1269,8 @@ HIDDEN_TABLE_CASES = (
             "report.missing_model",
             "report.missing_home_field",
             "report.missing_fixed_table",
-            "trace.missing_w10_mapping",
         ),
+        ("trace.missing_w10_mapping",),
     ),
 )
 
@@ -1145,7 +1293,7 @@ def _checked_run_with_table_edits(
 
 
 @pytest.mark.parametrize(
-    ("edits", "expected_codes"),
+    ("edits", "expected_issue_codes", "expected_warning_codes"),
     HIDDEN_TABLE_CASES,
     ids=(
         "test_fenced_tables_do_not_satisfy_report_or_w10_contracts",
@@ -1157,12 +1305,17 @@ def test_hidden_table_variants_do_not_satisfy_report_or_w10_contracts(
     checker: Any,
     tmp_path: Path,
     edits: tuple[tuple[str, str | None, str, str | None], ...],
-    expected_codes: tuple[str, ...],
+    expected_issue_codes: tuple[str, ...],
+    expected_warning_codes: tuple[str, ...],
 ) -> None:
     result = _checked_run_with_table_edits(checker, tmp_path, edits)
 
-    codes = {issue["code"] for issue in result["issues"]}
-    assert set(expected_codes) <= codes, result["issues"]
+    assert set(expected_issue_codes) <= {
+        issue["code"] for issue in result["issues"]
+    }, result["issues"]
+    assert set(expected_warning_codes) <= {
+        warning["code"] for warning in result["warnings"]
+    }, result["warnings"]
 
 
 RAW_HTML_BLOCK_CASES = (
@@ -1175,9 +1328,9 @@ RAW_HTML_BLOCK_CASES = (
         "| 报告章节 |",
         "<pre>\n",
         "\n</pre>",
-        ("trace.missing_w10_mapping",),
-        ("trace.invalid_w10_mapping",),
-        False,
+        (),
+        ("trace.invalid_w10_mapping", "trace.missing_w10_mapping"),
+        True,
     ),
     ("report.md", "| 字段 | 规则 |", "<?hidden\n", "\n?>", ("report.raw_html",), (), False),
     (
@@ -2222,7 +2375,7 @@ def test_inline_code_html_literal_is_not_raw_html(
     assert result["mechanical_status"] == "PASS", result["issues"]
 
 
-def test_w10_pipe_rows_without_separator_are_not_a_table(checker: Any, tmp_path: Path) -> None:
+def test_w10_pipe_rows_without_separator_warn(checker: Any, tmp_path: Path) -> None:
     research, delivery, lock = build_valid_phase2_run(tmp_path)
     w10 = research / "work-packages/W10-report-review.md"
     w10.write_text(
@@ -2236,7 +2389,7 @@ def test_w10_pipe_rows_without_separator_are_not_a_table(checker: Any, tmp_path:
 
     result = checker.check_run(research, delivery, lock)
 
-    codes = {issue["code"] for issue in result["issues"]}
+    codes = {warning["code"] for warning in result["warnings"]}
     assert "trace.missing_w10_mapping" in codes
 
 

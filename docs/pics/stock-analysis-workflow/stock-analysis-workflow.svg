@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000" role="img" aria-labelledby="title desc">
+  <title id="title">HETU 个股分析工作流 V1</title>
+  <desc id="desc">上轨展示 W0 至 W10 从用户请求到报告交付的决策流，下轨展示来源目录、静态来源合同、Agent 选择、运行时来源状态、证据产物和 owner 工作包的证据流。</desc>
+  <defs>
+    <style>
+      text { font-family: "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif; fill: #132238; }
+      .muted { fill: #60758A; }
+      .small { font-size: 12px; }
+      .micro { font-size: 11px; }
+      .label { font-size: 15px; font-weight: 700; fill: #173B65; }
+      .node-title { font-size: 17px; font-weight: 700; }
+      .center { text-anchor: middle; }
+      .white { fill: #FFFFFF; }
+      .light { fill: #DCE8F4; }
+      .navy-stroke { stroke: #173B65; }
+    </style>
+    <marker id="arrow-navy" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#173B65"/></marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#0E9F9A"/></marker>
+    <marker id="arrow-gray" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 Z" fill="#7E8FA1"/></marker>
+  </defs>
+  <rect width="1600" height="1000" fill="#F5F7FB"/>
+  <text x="52" y="77" font-size="38" font-weight="700">HETU 个股分析工作流 V1</text>
+  <text x="54" y="112" font-size="16" class="muted">Agent 主导编排 · W0–W10 唯一事实 owner · 信息源按用途进入现有流程</text>
+  <rect x="1322" y="48" width="226" height="38" rx="19" fill="#F0EDFF"/>
+  <text x="1435" y="73" font-size="14" font-weight="700" fill="#6D55D9" text-anchor="middle">V1 · 三期实现 · 2026-08-31</text>
+
+  <rect x="52" y="150" width="1496" height="370" rx="22" fill="#EAF0F7"/>
+  <text x="74" y="188" class="label">决策轨｜从用户问题到可交付报告</text>
+  <text x="1516" y="188" class="small muted" text-anchor="end">编号不等于串行；W1 后事实研究可并行或交错</text>
+  <path d="M92 322 H1496" stroke="#173B65" stroke-width="8" fill="none" marker-end="url(#arrow-navy)"/>
+
+  <rect x="74" y="246" width="102" height="150" rx="16" fill="#173B65"/>
+  <text x="125" y="296" class="node-title white center">用户请求</text>
+  <text x="125" y="329" class="small light center"><tspan x="125">标的 · 时点</tspan><tspan x="125" dy="20">深度 · 关注点</tspan></text>
+
+  <rect x="202" y="258" width="112" height="126" rx="14" fill="#FFFFFF" stroke="#173B65" stroke-width="2"/>
+  <text x="258" y="293" font-size="19" font-weight="700" fill="#173B65" class="center">W0</text>
+  <text x="258" y="321" font-size="14" font-weight="700" class="center">任务界定</text>
+  <text x="258" y="348" class="small muted center">约束 · 授权</text>
+  <rect x="336" y="242" width="116" height="158" rx="14" fill="#FFFFFF" stroke="#2F6BFF" stroke-width="3"/>
+  <text x="394" y="280" font-size="19" font-weight="700" fill="#2F6BFF" class="center">W1</text>
+  <text x="394" y="309" font-size="14" font-weight="700" class="center">主体核验</text>
+  <text x="394" y="339" class="small muted center"><tspan x="394">唯一身份确认后</tspan><tspan x="394" dy="20">创建正式目录</tspan></text>
+
+  <rect x="480" y="205" width="474" height="270" rx="16" fill="#F8FAFD" stroke="#C8D3DF" stroke-width="1.5"/>
+  <text x="500" y="233" font-size="14" font-weight="700" fill="#173B65">事实研究｜唯一 owner</text>
+  <g>
+    <rect x="500" y="252" width="132" height="72" rx="10" fill="#FFFFFF" stroke="#173B65" stroke-width="2"/>
+    <text x="566" y="278" class="center"><tspan font-size="17" font-weight="700" fill="#173B65">W2</tspan><tspan font-size="12"> 增量披露</tspan></text>
+    <text x="566" y="304" class="small muted center">连续窗口 · 唯一并集</text>
+    <rect x="648" y="252" width="132" height="72" rx="10" fill="#FFFFFF" stroke="#173B65" stroke-width="2"/>
+    <text x="714" y="278" class="center"><tspan font-size="17" font-weight="700" fill="#173B65">W3</tspan><tspan font-size="12"> 行业竞争</tspan></text>
+    <text x="714" y="304" class="small muted center">官方版本 · 指标口径</text>
+    <rect x="796" y="252" width="138" height="72" rx="10" fill="#FFF3DD" stroke="#D88918" stroke-width="2"/>
+    <text x="865" y="278" class="center"><tspan font-size="17" font-weight="700" fill="#D88918">W4</tspan><tspan font-size="12"> 业务治理</tspan></text>
+    <text x="865" y="304" class="small muted center">行业来源 · 逐实体并购</text>
+    <rect x="555" y="357" width="158" height="76" rx="10" fill="#FFFFFF" stroke="#173B65" stroke-width="2"/>
+    <text x="634" y="384" class="center"><tspan font-size="17" font-weight="700" fill="#173B65">W5</tspan><tspan font-size="12"> 财务验证</tspan></text>
+    <text x="634" y="412" class="small muted center">输入链 · 产物状态</text>
+    <rect x="734" y="357" width="158" height="76" rx="10" fill="#FFFFFF" stroke="#173B65" stroke-width="2"/>
+    <text x="813" y="384" class="center"><tspan font-size="17" font-weight="700" fill="#173B65">W8</tspan><tspan font-size="12"> 市场状态</tspan></text>
+    <text x="813" y="412" class="small muted center">价格 · 股本 · 流动性</text>
+  </g>
+  <path d="M566 324 L634 357" stroke="#7E8FA1" stroke-width="2" stroke-dasharray="6 5" fill="none"/>
+  <text x="489" y="348" class="micro" fill="#7E8FA1">共享最新披露基准</text>
+
+  <rect x="988" y="215" width="246" height="250" rx="16" fill="#F8FAFD" stroke="#C8D3DF" stroke-width="1.5"/>
+  <text x="1006" y="242" font-size="14" font-weight="700" fill="#173B65">判断形成</text>
+  <rect x="1007" y="266" width="98" height="72" rx="10" fill="#FFFFFF" stroke="#173B65" stroke-width="2"/>
+  <text x="1056" y="293" font-size="17" font-weight="700" fill="#173B65" class="center">W6</text><text x="1056" y="319" class="small muted center">预测与情景</text>
+  <rect x="1117" y="266" width="98" height="72" rx="10" fill="#FFFFFF" stroke="#173B65" stroke-width="2"/>
+  <text x="1166" y="293" font-size="17" font-weight="700" fill="#173B65" class="center">W7</text><text x="1166" y="319" class="small muted center">估值与披露</text>
+  <rect x="1024" y="366" width="174" height="70" rx="10" fill="#173B65"/>
+  <text x="1111" y="394" class="center"><tspan font-size="17" font-weight="700" fill="#FFFFFF">W9</tspan><tspan font-size="12" fill="#DCE8F4"> 论点与反证</tspan></text>
+  <text x="1111" y="419" class="small light center">条件 · 未知 · 监控</text>
+
+  <rect x="1270" y="255" width="124" height="166" rx="15" fill="#F0EDFF" stroke="#6D55D9" stroke-width="3"/>
+  <text x="1332" y="292" font-size="20" font-weight="700" fill="#6D55D9" class="center">W10</text>
+  <text x="1332" y="322" font-size="14" font-weight="700" class="center">报告与发布</text>
+  <text x="1332" y="350" class="small muted center"><tspan x="1332">全引用同步</tspan><tspan x="1332" dy="20">warning 分层</tspan><tspan x="1332" dy="20">两轮自检</tspan></text>
+  <rect x="1430" y="276" width="98" height="124" rx="14" fill="#6D55D9"/>
+  <text x="1479" y="320" font-size="14" font-weight="700" class="white center">report.md</text>
+  <text x="1479" y="356" class="small white center"><tspan x="1479">唯一</tspan><tspan x="1479" dy="19">最终报告</tspan></text>
+  <path d="M1387 456 Q1362 490 1332 490 H917 Q893 490 875 464" stroke="#7E8FA1" stroke-width="2" stroke-dasharray="7 6" fill="none" marker-end="url(#arrow-gray)"/>
+  <text x="1145" y="486" class="micro center" fill="#7E8FA1">新证据命中条件 → 重开受影响 owner 与下游</text>
+
+  <text x="54" y="575" class="label">证据轨｜从来源目录到 owner 可采用的证据</text>
+  <text x="1546" y="575" class="small muted" text-anchor="end">来源选择始终由 Agent 负责；脚本不自动换源、不形成结论</text>
+  <path d="M80 720 H1510" stroke="#0E9F9A" stroke-width="8" fill="none" marker-end="url(#arrow-teal)"/>
+  <rect x="62" y="633" width="174" height="166" rx="14" fill="#E7F7F5" stroke="#0E9F9A" stroke-width="2"/>
+  <text x="149" y="675" class="center"><tspan font-size="22" font-weight="700" fill="#0E9F9A">136</tspan><tspan font-size="12"> 条来源记录</tspan></text>
+  <text x="149" y="706" font-size="14" font-weight="700" class="center">26 个来源家族</text>
+  <text x="149" y="745" class="small muted center"><tspan x="149">研究目录</tspan><tspan x="149" dy="20">≠ 全部自动接入</tspan></text>
+
+  <rect x="270" y="633" width="184" height="166" rx="14" fill="#FFFFFF" stroke="#7E8FA1" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="362" y="673" font-size="16" font-weight="700" fill="#173B65" class="center">source-contracts</text>
+  <text x="362" y="705" class="small muted center"><tspan x="362">按用途读取的</tspan><tspan x="362" dy="20" font-weight="700">静态来源规则</tspan></text>
+  <text x="362" y="756" class="small muted center"><tspan x="362">不是工作包</tspan><tspan x="362" dy="20">也不是路由器</tspan></text>
+
+  <path d="M576 616 L664 666 V766 L576 816 L488 766 V666 Z" fill="#173B65"/>
+  <text x="576" y="672" font-size="23" font-weight="700" class="white center">Agent</text>
+  <text x="576" y="706" font-size="13" class="light center"><tspan x="576">按研究问题</tspan><tspan x="576" dy="20">选择来源</tspan></text>
+  <text x="576" y="756" class="small light center"><tspan x="576">核验 · 裁决</tspan><tspan x="576" dy="19">采用 · 降级</tspan></text>
+
+  <rect x="702" y="600" width="414" height="232" rx="16" fill="#FFFFFF" stroke="#C8D3DF" stroke-width="1.5"/>
+  <text x="720" y="626" font-size="13" font-weight="700" fill="#173B65">运行时能力与来源状态</text>
+  <rect x="720" y="640" width="378" height="50" rx="10" fill="#E8F0FF"/>
+  <text x="733" y="670" class="small"><tspan font-size="14" font-weight="700" fill="#2F6BFF">自动能力</tspan><tspan fill="#60758A">　3 个封闭采集器 · 4 个适配域 · 6 个确定性工具</tspan></text>
+  <rect x="720" y="700" width="378" height="66" rx="10" fill="#FFF3DD"/>
+  <text x="733" y="725" class="small"><tspan font-size="14" font-weight="700" fill="#D88918">Agent / 人工</tspan><tspan fill="#60758A">　7 个正式用途组合</tspan></text>
+  <text x="733" y="750" class="micro muted">SEMI · OFAC · SEC EDGAR · 药明康德 IR；ClinicalTrials.gov 逐条核验</text>
+  <rect x="720" y="776" width="378" height="40" rx="10" fill="#EEF2F5"/>
+  <text x="733" y="801" class="micro"><tspan font-weight="700" fill="#7E8FA1">候选 / 待授权 / 未实现</tspan><tspan fill="#7E8FA1">　保留缺口，不为形式完整强行接入</tspan></text>
+
+  <rect x="1150" y="622" width="182" height="188" rx="14" fill="#E7F7F5" stroke="#0E9F9A" stroke-width="2"/>
+  <text x="1241" y="662" font-size="18" font-weight="700" fill="#0E9F9A" class="center">证据与产物</text>
+  <text x="1241" y="699" class="small muted center"><tspan x="1241">raw · normalized</tspan><tspan x="1241" dy="20">derived · evidence</tspan></text>
+  <text x="1241" y="752" class="small muted center"><tspan x="1241">manifest 记录路径、</tspan><tspan x="1241" dy="20">输入链与采用状态</tspan></text>
+  <rect x="1370" y="636" width="166" height="160" rx="14" fill="#173B65"/>
+  <text x="1453" y="675" font-size="18" font-weight="700" class="white center">owner 工作包</text>
+  <text x="1453" y="714" class="small light center"><tspan x="1453">取得 · 核验 · 解释</tspan><tspan x="1453" dy="20">引用 · 回访</tspan></text>
+  <text x="1453" y="762" class="small light center"><tspan x="1453">每项基础事实</tspan><tspan x="1453" dy="19">只有一个 owner</tspan></text>
+  <path d="M1452 636 V551 Q1452 530 1430 527 L884 493" stroke="#0E9F9A" stroke-width="2.5" stroke-dasharray="7 6" fill="none" marker-end="url(#arrow-teal)"/>
+  <text x="1452" y="590" class="micro" fill="#0E9F9A" text-anchor="end">证据进入对应 owner，而非绕过工作包</text>
+
+  <rect x="52" y="858" width="1496" height="90" rx="16" fill="#F0EDFF" stroke="#CFC6FF" stroke-width="1.5"/>
+  <text x="74" y="902" font-size="15" font-weight="700" fill="#6D55D9">三期边界</text>
+  <text x="204" y="905" font-size="13">source-contracts ≠ 工作包 / 路由器　｜　ClinicalTrials.gov → W4 条件性人工研究　｜　136 个来源 ≠ 136 个自动接口　｜　<tspan font-weight="700" fill="#6D55D9">结论：无需 W11，也无需新增工作流</tspan></text>
+  <text x="800" y="978" class="micro muted center">实线箭头：信息流　 · 　虚线：静态规则 / 共享基准 / 回访条件（不自动执行）　 · 　蓝：canonical 自动能力　 · 　琥珀：Agent / 人工核验　 · 　灰：候选或待授权</text>
+</svg>

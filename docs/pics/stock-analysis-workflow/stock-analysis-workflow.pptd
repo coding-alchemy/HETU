@@ -1,0 +1,32 @@
+version: v2
+title: HETU 个股分析工作流 V1
+size: [1600, 1000]
+theme:
+  colors:
+    background: "#F5F7FB"
+    ink: "#132238"
+    muted: "#60758A"
+    navy: "#173B65"
+    blue: "#2F6BFF"
+    blueSoft: "#E8F0FF"
+    teal: "#0E9F9A"
+    tealSoft: "#E7F7F5"
+    amber: "#D88918"
+    amberSoft: "#FFF3DD"
+    purple: "#6D55D9"
+    purpleSoft: "#F0EDFF"
+    line: "#C8D3DF"
+    panel: "#EAF0F7"
+    white: "#FFFFFF"
+    candidate: "#7E8FA1"
+    candidateSoft: "#EEF2F5"
+  textStyles:
+    title: {fontFamily: "PingFang SC", fontSize: 38, bold: true, color: "$ink"}
+    subtitle: {fontFamily: "PingFang SC", fontSize: 16, color: "$muted"}
+    section: {fontFamily: "PingFang SC", fontSize: 15, bold: true, color: "$navy"}
+    nodeTitle: {fontFamily: "PingFang SC", fontSize: 18, bold: true, color: "$ink"}
+    nodeBody: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", lineHeight: 1.35}
+    inverted: {fontFamily: "PingFang SC", fontSize: 17, bold: true, color: "$white"}
+    micro: {fontFamily: "PingFang SC", fontSize: 11, color: "$muted", lineHeight: 1.25}
+pages:
+  - pages/1_workflow.page

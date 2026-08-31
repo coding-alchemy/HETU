@@ -230,6 +230,14 @@ W10_TO_MANIFEST_STATUS = {
     "不采用": "not_adopted",
 }
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+ASHARE_SECURITY_RE = re.compile(
+    r"(?<![A-Za-z0-9_])\d{6}\.(?:SH|SZ|BJ)(?![A-Za-z0-9_])"
+)
+RUN_DIRECTORY_PATTERN = re.compile(
+    r"^(?P<short_name>.+)-(?P<security>\d{6}\.(?:SZ|SH|BJ))-"
+    r"(?P<depth>quick|standard|deep)-"
+    r"(?P<task_time>\d{8}T\d{6}[+-]\d{4})$"
+)
 EVIDENCE_REF_RE = re.compile(r"(?<![A-Za-z0-9_])([EFCJU]\d+)(?![A-Za-z0-9_])")
 OWNER_RE = re.compile(r"(?<![A-Za-z0-9_])(W(?:10|[0-9]))(?![A-Za-z0-9_])")
 ARTIFACT_REF_RE = re.compile(r"artifacts/[^\s`；，、）)\]}]+")
@@ -1700,7 +1708,7 @@ def _check_w10_mapping(
         )
     rows = _find_table_rows(w10_text, W10_MAPPING_FIELDS)
     if not rows:
-        issues.append(
+        warnings.append(
             _issue(
                 "trace.missing_w10_mapping",
                 relative_path,
@@ -2088,6 +2096,141 @@ def _check_identity_bindings(
                     "manifest.json#run.runtime_skill.sha256",
                     "manifest runtime Skill sha256 differs from lock runtime Skill sha256",
                 )
+                )
+
+
+def _w1_label_value(research_root: Path, label: str) -> str | None:
+    relative_path = f"work-packages/{WORK_PACKAGES[1]}.md"
+    path = research_root / relative_path
+    if not path.is_file():
+        return None
+    values: list[str] = []
+    for raw_line in _without_fenced_code(path.read_text(encoding="utf-8")).splitlines():
+        line = re.sub(r"^(?:[-+*]|\d+[.)])\s+", "", raw_line.strip(), count=1)
+        prefix = f"{label}："
+        if not line.startswith(prefix):
+            continue
+        value = line[len(prefix) :].strip()
+        bold = re.match(r"^\*\*(.+?)\*\*", value)
+        if bold is not None:
+            value = bold.group(1)
+        values.append(value)
+    return values[0] if len(values) == 1 and values[0] else None
+
+
+def _verified_w1_short_name(research_root: Path) -> str | None:
+    return _w1_label_value(research_root, "证券简称")
+
+
+def _single_ashare_security(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    securities = ASHARE_SECURITY_RE.findall(value)
+    return securities[0] if len(securities) == 1 else None
+
+
+def _check_run_directory_name(
+    research_root: Path,
+    lock_record: Path,
+    manifest: dict[str, Any],
+    lock: dict[str, Any],
+    issues: list[dict[str, str]],
+    warnings: list[dict[str, str]],
+) -> None:
+    run = manifest.get("run")
+    manifest_run_id = run.get("run_id") if isinstance(run, dict) else None
+    lock_run_id = lock.get("run_id")
+    # Missing or mistyped IDs are already handled by schema checks. A value
+    # conflict is already handled by lock.run_id_mismatch.
+    if not isinstance(manifest_run_id, str) or not isinstance(lock_run_id, str):
+        return
+    if manifest_run_id != lock_run_id:
+        return
+    if (
+        manifest_run_id != research_root.name
+        or lock_run_id != lock_record.parent.name
+    ):
+        issues.append(
+            _issue(
+                "run.directory_run_id_mismatch",
+                str(research_root),
+                "research, manifest, and lock directory run IDs must match",
+            )
+        )
+        return
+    match = RUN_DIRECTORY_PATTERN.fullmatch(research_root.name)
+    short_name = _verified_w1_short_name(research_root)
+    manifest_security = (
+        _single_ashare_security(run.get("verified_security"))
+        if isinstance(run, dict)
+        else None
+    )
+    valid = (
+        isinstance(run, dict)
+        and match is not None
+        and short_name is not None
+        and match.group("short_name") == short_name
+        and match.group("security") == manifest_security
+        and match.group("depth") == run.get("requested_depth")
+    )
+    if not valid:
+        warnings.append(
+            _issue(
+                "run.directory_name_noncanonical",
+                str(research_root),
+                "research directory should be "
+                "<short-name>-<security>-<depth>-<task-time>",
+            )
+        )
+
+
+def _verified_w1_security(research_root: Path) -> str | None:
+    """Return W1's single visible, explicitly unique A-share identity."""
+    identity = _w1_label_value(research_root, "权威身份")
+    return _single_ashare_security(identity)
+
+
+def _check_identity_metadata_mirrors(
+    research_root: Path,
+    manifest: dict[str, Any],
+    warnings: list[dict[str, str]],
+) -> None:
+    """Warn when W1's verified security was not mirrored into final metadata."""
+    verified_security = _verified_w1_security(research_root)
+    if verified_security is None:
+        warnings.append(
+            _issue(
+                "identity.metadata_unreadable",
+                f"work-packages/{WORK_PACKAGES[1]}.md",
+                "W1 exists but its single verified A-share identity cannot be parsed",
+            )
+        )
+        return
+
+    run = manifest.get("run")
+    manifest_security = run.get("verified_security") if isinstance(run, dict) else None
+    mirrors = (
+        ("manifest.json#run.verified_security", manifest_security),
+        ("checkpoint.md", (research_root / "checkpoint.md").read_text(encoding="utf-8")),
+        (
+            "report.md#1",
+            _report_sections(
+                _without_fenced_code(
+                    (research_root / "report.md").read_text(encoding="utf-8")
+                )
+            ).get(1, ""),
+        ),
+    )
+    for relative_path, mirror_value in mirrors:
+        if not isinstance(mirror_value, str) or (
+            "待核验" in mirror_value or verified_security not in mirror_value
+        ):
+            warnings.append(
+                _issue(
+                    "identity.metadata_out_of_sync",
+                    relative_path,
+                    "verified W1 identity is not synchronized to every metadata mirror",
+                )
             )
 
 
@@ -2342,6 +2485,21 @@ def check_run(
                 )
                 if lock_present:
                     _check_identity_bindings(manifest, lock, issues)
+                    if f"work-packages/{WORK_PACKAGES[1]}.md" not in missing:
+                        _check_run_directory_name(
+                            research_root,
+                            lock_record,
+                            manifest,
+                            lock,
+                            issues,
+                            warnings,
+                        )
+                if (
+                    "checkpoint.md" not in missing
+                    and "report.md" not in missing
+                    and f"work-packages/{WORK_PACKAGES[1]}.md" not in missing
+                ):
+                    _check_identity_metadata_mirrors(research_root, manifest, warnings)
     checks.append(
         _check(
             "manifest.entries",

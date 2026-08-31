@@ -27,6 +27,7 @@ APPROVED_SCRIPTS = frozenset(
         "financial_statements.py",
         "announcement_index.py",
         "numeric_consistency.py",
+        "pdf_text_extract.py",
         "financial-ratio-series.py",
         "market-series-metrics.py",
         "source_adapter.py",

@@ -1,0 +1,383 @@
+pageType: architecture
+background:
+  type: solid
+  color: "$background"
+notes: HETU 个股分析工作流 V1 三期后的双轨架构。上轨为工作包决策流，下轨为来源与证据流。
+elements:
+  - elementId: title
+    elementType: text
+    bounds: [52, 34, 920, 52]
+    content: {style: "$title", text: "HETU 个股分析工作流 V1"}
+  - elementId: subtitle
+    elementType: text
+    bounds: [54, 88, 1100, 30]
+    content: {style: "$subtitle", text: "Agent 主导编排 · W0–W10 唯一事实 owner · 信息源按用途进入现有流程"}
+  - elementId: phase-pill
+    elementType: shape
+    bounds: [1322, 48, 226, 38]
+    shapeName: roundRect
+    adjustments: [50000]
+    fill: {type: solid, color: "$purpleSoft"}
+  - elementId: phase-pill-text
+    elementType: text
+    bounds: [1322, 48, 226, 38]
+    content: {fontFamily: "PingFang SC", fontSize: 14, bold: true, color: "$purple", align: [center, middle], text: "V1 · 三期实现 · 2026-08-31"}
+
+  - elementId: decision-panel
+    elementType: shape
+    bounds: [52, 150, 1496, 370]
+    shapeName: roundRect
+    adjustments: [9000]
+    fill: {type: solid, color: "$panel"}
+  - elementId: decision-label
+    elementType: text
+    bounds: [74, 168, 420, 28]
+    content: {style: "$section", text: "决策轨｜从用户问题到可交付报告"}
+  - elementId: decision-note
+    elementType: text
+    bounds: [965, 169, 550, 24]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [right, middle], text: "编号不等于串行；W1 后事实研究可并行或交错"}
+
+  - elementId: rail-main
+    elementType: line
+    bounds: [92, 322, 1404, 1]
+    viewBox: [1404, 1]
+    points: "0,0.5 1404,0.5"
+    arrow: [null, stealth]
+    border: {style: solid, width: 8, color: "$navy"}
+
+  - elementId: user-node
+    elementType: shape
+    bounds: [74, 246, 102, 150]
+    shapeName: roundRect
+    adjustments: [15000]
+    fill: {type: solid, color: "$navy"}
+  - elementId: user-title
+    elementType: text
+    bounds: [84, 269, 82, 34]
+    content: {style: "$inverted", align: [center, middle], text: "用户请求"}
+  - elementId: user-body
+    elementType: text
+    bounds: [86, 313, 78, 56]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "#DCE8F4", align: [center, top], text: "标的 · 时点\n深度 · 关注点"}
+
+  - elementId: w0-node
+    elementType: shape
+    bounds: [202, 258, 112, 126]
+    shapeName: roundRect
+    adjustments: [12000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$navy"}
+  - elementId: w0-text
+    elementType: text
+    bounds: [212, 270, 92, 98]
+    content: {fontFamily: "PingFang SC", fontSize: 13, color: "$muted", align: [center, middle], lineHeight: 1.35, text: "<p><span style=\"font-size:19px;color:$navy\"><strong>W0</strong></span></p><p><strong>任务界定</strong></p><p>约束 · 授权</p>"}
+  - elementId: w1-node
+    elementType: shape
+    bounds: [336, 242, 116, 158]
+    shapeName: roundRect
+    adjustments: [12000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 3, color: "$blue"}
+  - elementId: w1-text
+    elementType: text
+    bounds: [346, 256, 96, 126]
+    content: {fontFamily: "PingFang SC", fontSize: 13, color: "$muted", align: [center, middle], lineHeight: 1.35, text: "<p><span style=\"font-size:19px;color:$blue\"><strong>W1</strong></span></p><p><strong>主体核验</strong></p><p>唯一身份确认后<br>创建正式目录</p>"}
+
+  - elementId: facts-group
+    elementType: shape
+    bounds: [480, 205, 474, 270]
+    shapeName: roundRect
+    adjustments: [9000]
+    fill: {type: solid, color: "#F8FAFD"}
+    border: {style: solid, width: 1.5, color: "$line"}
+  - elementId: facts-label
+    elementType: text
+    bounds: [500, 214, 240, 26]
+    content: {fontFamily: "PingFang SC", fontSize: 14, bold: true, color: "$navy", text: "事实研究｜唯一 owner"}
+  - elementId: w2-node
+    elementType: shape
+    bounds: [500, 252, 132, 72]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$navy"}
+  - elementId: w2-text
+    elementType: text
+    bounds: [508, 258, 116, 60]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], text: "<p><span style=\"font-size:17px;color:$navy\"><strong>W2</strong></span> 增量披露</p><p>连续窗口 · 唯一并集</p>"}
+  - elementId: w3-node
+    elementType: shape
+    bounds: [648, 252, 132, 72]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$navy"}
+  - elementId: w3-text
+    elementType: text
+    bounds: [656, 258, 116, 60]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], text: "<p><span style=\"font-size:17px;color:$navy\"><strong>W3</strong></span> 行业竞争</p><p>官方版本 · 指标口径</p>"}
+  - elementId: w4-node
+    elementType: shape
+    bounds: [796, 252, 138, 72]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$amberSoft"}
+    border: {style: solid, width: 2, color: "$amber"}
+  - elementId: w4-text
+    elementType: text
+    bounds: [804, 258, 122, 60]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], text: "<p><span style=\"font-size:17px;color:$amber\"><strong>W4</strong></span> 业务治理</p><p>行业来源 · 逐实体并购</p>"}
+  - elementId: w5-node
+    elementType: shape
+    bounds: [555, 357, 158, 76]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$navy"}
+  - elementId: w5-text
+    elementType: text
+    bounds: [564, 364, 140, 62]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], text: "<p><span style=\"font-size:17px;color:$navy\"><strong>W5</strong></span> 财务验证</p><p>输入链 · 产物状态</p>"}
+  - elementId: w8-node
+    elementType: shape
+    bounds: [734, 357, 158, 76]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$navy"}
+  - elementId: w8-text
+    elementType: text
+    bounds: [743, 364, 140, 62]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], text: "<p><span style=\"font-size:17px;color:$navy\"><strong>W8</strong></span> 市场状态</p><p>价格 · 股本 · 流动性</p>"}
+  - elementId: w2-w5-shared
+    elementType: line
+    bounds: [566, 324, 68, 33]
+    viewBox: [68, 33]
+    points: "0,0 68,33"
+    curve: sharp
+    border: {style: dash, width: 2, color: "$candidate"}
+  - elementId: shared-label
+    elementType: text
+    bounds: [489, 329, 145, 23]
+    content: {fontFamily: "PingFang SC", fontSize: 10, color: "$candidate", align: [left, middle], text: "共享最新披露基准"}
+
+  - elementId: judgment-group
+    elementType: shape
+    bounds: [988, 215, 246, 250]
+    shapeName: roundRect
+    adjustments: [9000]
+    fill: {type: solid, color: "#F8FAFD"}
+    border: {style: solid, width: 1.5, color: "$line"}
+  - elementId: judgment-label
+    elementType: text
+    bounds: [1006, 225, 180, 24]
+    content: {fontFamily: "PingFang SC", fontSize: 14, bold: true, color: "$navy", text: "判断形成"}
+  - elementId: w6-node
+    elementType: shape
+    bounds: [1007, 266, 98, 72]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$navy"}
+  - elementId: w6-text
+    elementType: text
+    bounds: [1015, 272, 82, 60]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], text: "<p><span style=\"font-size:17px;color:$navy\"><strong>W6</strong></span></p><p>预测与情景</p>"}
+  - elementId: w7-node
+    elementType: shape
+    bounds: [1117, 266, 98, 72]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 2, color: "$navy"}
+  - elementId: w7-text
+    elementType: text
+    bounds: [1125, 272, 82, 60]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], text: "<p><span style=\"font-size:17px;color:$navy\"><strong>W7</strong></span></p><p>估值与披露</p>"}
+  - elementId: w9-node
+    elementType: shape
+    bounds: [1024, 366, 174, 70]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$navy"}
+  - elementId: w9-text
+    elementType: text
+    bounds: [1034, 372, 154, 58]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "#DCE8F4", align: [center, middle], text: "<p><span style=\"font-size:17px;color:#FFFFFF\"><strong>W9</strong></span> 论点与反证</p><p>条件 · 未知 · 监控</p>"}
+
+  - elementId: w10-node
+    elementType: shape
+    bounds: [1270, 255, 124, 166]
+    shapeName: roundRect
+    adjustments: [12000]
+    fill: {type: solid, color: "$purpleSoft"}
+    border: {style: solid, width: 3, color: "$purple"}
+  - elementId: w10-text
+    elementType: text
+    bounds: [1280, 270, 104, 134]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], lineHeight: 1.35, text: "<p><span style=\"font-size:20px;color:$purple\"><strong>W10</strong></span></p><p><strong>报告与发布</strong></p><p>全引用同步<br>warning 分层<br>两轮自检</p>"}
+  - elementId: report-node
+    elementType: shape
+    bounds: [1430, 276, 98, 124]
+    shapeName: roundRect
+    adjustments: [12000]
+    fill: {type: solid, color: "$purple"}
+  - elementId: report-text
+    elementType: text
+    bounds: [1439, 290, 80, 96]
+    content: {fontFamily: "PingFang SC", fontSize: 13, bold: true, color: "$white", align: [center, middle], lineHeight: 1.4, text: "report.md\n\n唯一最终报告"}
+  - elementId: reopen-line
+    elementType: line
+    bounds: [875, 456, 512, 34]
+    viewBox: [512, 34]
+    points: "512,0 485,34 28,34 0,8"
+    curve: round
+    arrow: [null, stealth]
+    border: {style: dash, width: 2, color: "$candidate"}
+  - elementId: reopen-text
+    elementType: text
+    bounds: [1010, 472, 270, 22]
+    content: {fontFamily: "PingFang SC", fontSize: 10, color: "$candidate", align: [center, middle], text: "新证据命中条件 → 重开受影响 owner 与下游"}
+
+  - elementId: evidence-label
+    elementType: text
+    bounds: [54, 550, 490, 30]
+    content: {style: "$section", text: "证据轨｜从来源目录到 owner 可采用的证据"}
+  - elementId: evidence-note
+    elementType: text
+    bounds: [980, 551, 566, 26]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [right, middle], text: "来源选择始终由 Agent 负责；脚本不自动换源、不形成结论"}
+  - elementId: evidence-rail
+    elementType: line
+    bounds: [80, 720, 1430, 1]
+    viewBox: [1430, 1]
+    points: "0,0.5 1430,0.5"
+    arrow: [null, stealth]
+    border: {style: solid, width: 8, color: "$teal"}
+
+  - elementId: catalog-node
+    elementType: shape
+    bounds: [62, 633, 174, 166]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$tealSoft"}
+    border: {style: solid, width: 2, color: "$teal"}
+  - elementId: catalog-text
+    elementType: text
+    bounds: [75, 647, 148, 137]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], lineHeight: 1.35, text: "<p><span style=\"font-size:22px;color:$teal\"><strong>136</strong></span> 条来源记录</p><p><strong>26 个来源家族</strong></p><p>研究目录<br>≠ 全部自动接入</p>"}
+  - elementId: contract-node
+    elementType: shape
+    bounds: [270, 633, 184, 166]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$white"}
+    border: {style: dash, width: 2, color: "$candidate"}
+  - elementId: contract-text
+    elementType: text
+    bounds: [283, 647, 158, 137]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], lineHeight: 1.35, text: "<p><span style=\"font-size:16px;color:$navy\"><strong>source-contracts</strong></span></p><p>按用途读取的<br><strong>静态来源规则</strong></p><p>不是工作包<br>也不是路由器</p>"}
+  - elementId: agent-node
+    elementType: shape
+    bounds: [488, 616, 176, 200]
+    shapeName: hexagon
+    fill: {type: solid, color: "$navy"}
+  - elementId: agent-text
+    elementType: text
+    bounds: [518, 645, 116, 142]
+    content: {fontFamily: "PingFang SC", fontSize: 13, color: "#DCE8F4", align: [center, middle], lineHeight: 1.4, text: "<p><span style=\"font-size:23px;color:#FFFFFF\"><strong>Agent</strong></span></p><p>按研究问题<br>选择来源</p><p>核验 · 裁决<br>采用 · 降级</p>"}
+  - elementId: states-frame
+    elementType: shape
+    bounds: [702, 600, 414, 232]
+    shapeName: roundRect
+    adjustments: [9000]
+    fill: {type: solid, color: "$white"}
+    border: {style: solid, width: 1.5, color: "$line"}
+  - elementId: states-label
+    elementType: text
+    bounds: [720, 608, 260, 25]
+    content: {fontFamily: "PingFang SC", fontSize: 13, bold: true, color: "$navy", text: "运行时能力与来源状态"}
+  - elementId: auto-band
+    elementType: shape
+    bounds: [720, 640, 378, 50]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$blueSoft"}
+  - elementId: auto-text
+    elementType: text
+    bounds: [733, 644, 352, 42]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [left, middle], text: "<span style=\"font-size:14px;color:$blue\"><strong>自动能力</strong></span>　3 个封闭采集器 · 4 个适配域 · 6 个确定性工具"}
+  - elementId: manual-band
+    elementType: shape
+    bounds: [720, 700, 378, 66]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$amberSoft"}
+  - elementId: manual-text
+    elementType: text
+    bounds: [733, 704, 352, 58]
+    content: {fontFamily: "PingFang SC", fontSize: 11, color: "$muted", align: [left, middle], lineHeight: 1.3, text: "<p><span style=\"font-size:14px;color:$amber\"><strong>Agent / 人工</strong></span>　7 个正式用途组合</p><p>SEMI · OFAC · SEC EDGAR · 药明康德 IR；ClinicalTrials.gov 逐条核验</p>"}
+  - elementId: candidate-band
+    elementType: shape
+    bounds: [720, 776, 378, 40]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$candidateSoft"}
+  - elementId: candidate-text
+    elementType: text
+    bounds: [733, 779, 352, 34]
+    content: {fontFamily: "PingFang SC", fontSize: 11, color: "$candidate", align: [left, middle], text: "<strong>候选 / 待授权 / 未实现</strong>　保留缺口，不为形式完整强行接入"}
+  - elementId: evidence-node
+    elementType: shape
+    bounds: [1150, 622, 182, 188]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$tealSoft"}
+    border: {style: solid, width: 2, color: "$teal"}
+  - elementId: evidence-text
+    elementType: text
+    bounds: [1164, 638, 154, 155]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "$muted", align: [center, middle], lineHeight: 1.35, text: "<p><span style=\"font-size:18px;color:$teal\"><strong>证据与产物</strong></span></p><p>raw · normalized<br>derived · evidence</p><p>manifest 记录路径、<br>输入链与采用状态</p>"}
+  - elementId: owner-node
+    elementType: shape
+    bounds: [1370, 636, 166, 160]
+    shapeName: roundRect
+    adjustments: [10000]
+    fill: {type: solid, color: "$navy"}
+  - elementId: owner-text
+    elementType: text
+    bounds: [1384, 650, 138, 132]
+    content: {fontFamily: "PingFang SC", fontSize: 12, color: "#DCE8F4", align: [center, middle], lineHeight: 1.4, text: "<p><span style=\"font-size:18px;color:#FFFFFF\"><strong>owner 工作包</strong></span></p><p>取得 · 核验 · 解释<br>引用 · 回访</p><p>每项基础事实<br>只有一个 owner</p>"}
+  - elementId: owner-up
+    elementType: line
+    bounds: [884, 493, 568, 143]
+    viewBox: [568, 143]
+    points: "568,143 568,58 0,0"
+    curve: round
+    arrow: [null, stealth]
+    border: {style: dash, width: 2.5, color: "$teal"}
+  - elementId: owner-up-text
+    elementType: text
+    bounds: [1212, 566, 240, 24]
+    content: {fontFamily: "PingFang SC", fontSize: 10, color: "$teal", align: [right, middle], text: "证据进入对应 owner，而非绕过工作包"}
+
+  - elementId: boundary-box
+    elementType: shape
+    bounds: [52, 858, 1496, 90]
+    shapeName: roundRect
+    adjustments: [9000]
+    fill: {type: solid, color: "$purpleSoft"}
+    border: {style: solid, width: 1.5, color: "#CFC6FF"}
+  - elementId: boundary-title
+    elementType: text
+    bounds: [74, 875, 135, 28]
+    content: {fontFamily: "PingFang SC", fontSize: 15, bold: true, color: "$purple", text: "三期边界"}
+  - elementId: boundary-copy
+    elementType: text
+    bounds: [204, 873, 1318, 48]
+    content: {fontFamily: "PingFang SC", fontSize: 13, color: "$ink", align: [left, middle], text: "source-contracts ≠ 工作包 / 路由器　｜　ClinicalTrials.gov → W4 条件性人工研究　｜　136 个来源 ≠ 136 个自动接口　｜　结论：无需 W11，也无需新增工作流"}
+  - elementId: legend
+    elementType: text
+    bounds: [55, 961, 1490, 24]
+    content: {fontFamily: "PingFang SC", fontSize: 11, color: "$muted", align: [center, middle], text: "实线箭头：信息流　 · 　虚线：静态规则 / 共享基准 / 回访条件（不自动执行）　 · 　蓝：canonical 自动能力　 · 　琥珀：Agent / 人工核验　 · 　灰：候选或待授权"}

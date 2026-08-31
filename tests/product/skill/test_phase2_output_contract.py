@@ -100,11 +100,77 @@ def test_work_package_ownership_direction_w7_references_w8() -> None:
     assert "W7 → W8" in w8
 
 
-def test_source_contracts_keep_preadoption_gate_closed() -> None:
+APPROVED_SOURCE_USES = (
+    ("主体与证券映射", "src-szse-stock-list-api"),
+    ("司法诉讼与制裁记录", "src-ofac-sanctions-list-service"),
+    ("独立行业供需", "src-semi-market-data"),
+    ("竞争与市场份额参照", "src-sec-edgar-api"),
+    ("业务、产品与分部", "src-wuxi-ir"),
+    ("情景输入", "src-semi-market-data"),
+    ("价格、股本与流动性", "src-szse-stock-list-api"),
+)
+
+def _pair_contexts(text: str, use: str, source_id: str) -> tuple[str, ...]:
+    use_pattern = re.escape(use)
+    source_pattern = re.escape(source_id)
+    pattern = re.compile(
+        rf"(?:{use_pattern}.{{0,240}}?{source_pattern}|"
+        rf"{source_pattern}.{{0,240}}?{use_pattern})",
+        re.DOTALL,
+    )
+    return tuple(
+        text[max(0, match.start() - 160) : min(len(text), match.end() + 160)]
+        for match in pattern.finditer(text)
+    )
+
+
+def _is_nonadopted_context(context: str) -> bool:
+    if "正式采用" not in context:
+        return True
+    return bool(
+        re.search(r"(?:不|非|未|降).{0,12}正式采用|正式采用.{0,12}(?:不|非|未|降)", context)
+    )
+
+
+def _is_positively_adopted_context(context: str) -> bool:
+    return "正式采用" in context and not bool(
+        re.search(r"(?:不|非|未|降).{0,12}正式采用|正式采用.{0,12}(?:不|非|未|降)", context)
+    )
+
+
+def test_source_contracts_cover_the_approved_source_uses() -> None:
     text = read("references/source-contracts.md")
-    assert "阶段 04 完成前不得标记替代取得" in text
-    assert "只适用于宿主原生合法替代" not in text
-    assert '都不得标记"替代取得"' in text
+    for use, source_id in APPROVED_SOURCE_USES:
+        contexts = _pair_contexts(text, use, source_id)
+        assert contexts, (use, source_id)
+        assert any(_is_positively_adopted_context(context) for context in contexts), (
+            use,
+            source_id,
+            contexts,
+        )
+
+    for use, source_id in (
+        ("任务能力／财务用途", "src-eastmoney-push2-indicators"),
+        ("公司行动用途", "src-szse-stock-list-api"),
+        ("研发与临床登记", "src-clinicaltrials-gov-api-v2"),
+    ):
+        contexts = _pair_contexts(text, use, source_id)
+        assert contexts, (use, source_id)
+        assert all(_is_nonadopted_context(context) for context in contexts), (
+            use,
+            source_id,
+            contexts,
+        )
+        assert all(
+            all(
+                word not in context
+                for word in ("通过", "首选", "合法替代", "独立交叉验证")
+            )
+            for context in contexts
+        ), (use, source_id, contexts)
+
+    assert "仅适合人工研究" in text
+    assert "登记不等于监管获批、疗效成立或商业化成功" in text
 
 
 ADOPTED_TOOL_SCRIPTS = (
@@ -188,6 +254,19 @@ def test_artifact_contract_freezes_artifact_object_schema() -> None:
         "非 failed 条目**不得包含**该键",
         "确定性计算不得遗漏实际输入",
         "manifest 完整输入哈希为权威身份",
+    ):
+        assert phrase in text
+
+
+def test_canonical_tool_invocation_records_are_not_scripts() -> None:
+    text = read("references/artifact-contract.md")
+    for phrase in (
+        "调用既有 canonical 工具不等于创建脚本",
+        "不得放入 `artifacts/scripts/`",
+        "不得登记为 `type=script`",
+        "实际创建或修改的可执行代码文件",
+        "canonical 工具哈希",
+        "每组输入与输出",
     ):
         assert phrase in text
 

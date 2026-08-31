@@ -2,13 +2,13 @@
 
 ## 当前状态
 
-五个具名工具均为 `adopted`，随 canonical Skill 的 `scripts/` 目录分发，可按本目录的接口与边界调用。放行证据是阶段 03 的 RED→GREEN 测试、取证哈希锁定、离线字节重放、拒绝边界验证、封闭文件集检查和全量门禁（`./scripts/check.sh`）。五个工具的用户真实效果确认尚未完成，为阶段 03 停止门的开放条件。共享信封模块 `_artifact_io.py` 不是独立工具，只为五个工具提供确定性的读取、SHA-256 和规范 JSON 写入。
+六个具名工具均为 `adopted`，随 canonical Skill 的 `scripts/` 目录分发，可按本目录的接口与边界调用。前五个 JSON 工具沿用阶段 03 的 RED→GREEN、取证哈希锁定、离线字节重放、拒绝边界和全量门禁；`pdf_text_extract.py` 以 v1.4 的稳定文本、页面失败和拒绝边界测试放行。共享信封模块 `_artifact_io.py` 不是独立工具，只为五个 JSON 工具提供确定性的读取、SHA-256 和规范 JSON 写入。
 
-除五个具名分析工具、封闭采集脚本 `source_fetch.py`、阶段 04 机械助手 `source_adapter.py`、阶段 05 机械检查器 `check-run-artifacts.py` 与共享信封模块 `_artifact_io.py` 外，`scripts/` 内不得存在任何其他文件。只有 `source_fetch.py` 可按下述封闭接口联网；历史聚合脚本、一次性补采或最终报告拼接脚本仍禁止接入和联网。封闭文件集由 `tests/product/skill/test_deterministic_tool_io.py` 的严格相等断言保证（阶段 04/05 已随 `source_adapter.py`、`check-run-artifacts.py` 同步扩展白名单）。
+除六个具名分析工具、封闭采集脚本 `source_fetch.py`、阶段 04 机械助手 `source_adapter.py`、阶段 05 机械检查器 `check-run-artifacts.py` 与共享信封模块 `_artifact_io.py` 外，`scripts/` 内不得存在任何其他文件。只有 `source_fetch.py` 可按下述封闭接口联网；历史聚合脚本、一次性补采或最终报告拼接脚本仍禁止接入和联网。封闭文件集由 `tests/product/skill/test_deterministic_tool_io.py` 的严格相等断言保证。
 
 ## 共享信封与退出码
 
-五个具名工具与阶段 04 机械助手 `source_adapter.py` 统一通过 `_artifact_io.run_transform` 写确定性 JSON 信封（排序键、紧凑分隔符、UTF-8、结尾换行）：
+五个 JSON 工具与阶段 04 机械助手 `source_adapter.py` 统一通过 `_artifact_io.run_transform` 写确定性 JSON 信封（排序键、紧凑分隔符、UTF-8、结尾换行）；PDF 文本工具使用下文单独定义的稳定文本格式：
 
 - 成功信封：`schema_version`（`"1.0"`）、`tool`、`input_sha256`（输入文件字节 SHA-256）、`status`（`"success"`）、`source`（输入中 `source` 块的原样透传，无则 `null`）、`source_provided`（布尔）、`result`。
 - 失败信封：`schema_version`、`tool`、`input_sha256`、`status`（`"failed"`）、`error_type`、`error_message`、`source`、`source_provided`；不含 `result`，不含执行时间等非确定字段。
@@ -39,7 +39,8 @@
 - 失败状态：来源侧 403、429、其他非 2xx、传输或结构错误分别以稳定的 `permission_denied`、`rate_limited`、`transport_error` 或 `parse_error` 失败信封保存；脚本不把空结果或来源成功解释为证据采用。
 - 文件发布：同目录临时文件完整写入、flush、`fsync` 后原子且不覆盖地发布；写入失败、发布竞态或
   既有目标均不留下截断目标或临时残留。
-- 研究目录：Agent 在调用前创建或选择 `.hetu/research/<证券>-<任务时间>/` 作为当前研究根；
+- 研究目录：Agent 在调用前创建或选择当前研究根，且只能在 W1 唯一核验后使用
+  `.hetu/research/<证券简称>-<证券代码>-<请求深度>-<任务时间>/` 作为当前研究根；
   `--input` 和 `--output` 必须位于同一当前研究根，输出只允许位于其 `artifacts/raw/` 下。
   `source_fetch.py` 不接受研究根参数或任意写入授权；目录选择和边界确认由 Agent 负责，脚本只执行
   固定 CLI 的同路径、覆盖和竞态拒绝。
@@ -76,12 +77,30 @@
 - 状态：`adopted`
 - 文件路径：`skills/hetu-stock-analysis/scripts/numeric_consistency.py`
 - 用途：对显式给出的数值执行确定性 Decimal 计算，暴露冲突主张的双方值、差异和容差结果。
-- 输入 Schema：CLI `--operation OP --input IN --output OUT`，输入为该操作的显式参数 JSON：`gross_margin_percent`(revenue, revenue_unit, cost, cost_unit)、`debt_ratio_percent`(liabilities, liabilities_unit, assets, assets_unit)、`market_cap_values`(price, price_unit, total_shares, total_shares_unit, float_shares, float_shares_unit)、`price_earnings_ratio`(market_cap, market_cap_unit, attributable_profit, attributable_profit_unit)、`compare_metric`(metric, unit, claimed, recomputed, tolerance)——每个数值参数都必须携带显式单位（非空字符串）；参与同一次相减或相除比较的输入单位必须一致（如 revenue 与 cost 同为 `CNY`，total_shares 与 float_shares 同为 `share`），单位不一致即拒绝且不做任何换算；可选 `source` 块。缺参数（含缺任一单位）或出现未声明参数即拒绝。
+- 输入 Schema：CLI `--operation OP --input IN --output OUT`，输入为该操作的显式参数 JSON：`gross_margin_percent`(revenue, revenue_unit, cost, cost_unit)、`debt_ratio_percent`(liabilities, liabilities_unit, assets, assets_unit)、`market_cap_values`(price, price_unit, total_shares, total_shares_unit, float_shares, float_shares_unit)、`price_earnings_ratio`(market_cap, market_cap_unit, attributable_profit, attributable_profit_unit)、`price_to_book_ratio`(market_cap, market_cap_unit, attributable_equity, attributable_equity_unit)、`dividend_yield_percent`(dividend_per_share, dividend_per_share_unit, price, price_unit)、`compare_metric`(metric, unit, claimed, recomputed, tolerance)——每个数值参数都必须携带显式单位（非空字符串）；参与同一次相减或相除比较的输入单位必须一致，单位不一致即拒绝且不做任何换算；可选 `source` 块。缺参数（含缺任一单位）或出现未声明参数即拒绝。
 - 输出 Schema：算术操作输出 `value`（或 `total_market_cap` 与 `float_market_cap`）加上 `input_units`（逐输入单位回显）与 `result_unit`（`%`、复合单位或 `ratio`）；`compare_metric` 输出 `metric`、`unit`、`claimed`、`recomputed`、`tolerance`、`consistent`、`absolute_difference`。全部数值为 Decimal 字符串，不是 float。
 - 失败异常：非有限数、零分母、负容差、非法参数名、单位缺失或同次比较单位不一致抛 `ValueError`（退出 1）；未知操作名或参数错误退出 2。
 - 是否可离线重放：是。
 - 禁止边界：保留双方原值和差异，不自动交换标签、不自动改写来源值；不选择来源、不决定换源、不裁决冲突、不生成报告结论、不生成交易信号。
 - 实际测试文件：`tests/product/skill/test_numeric_consistency_tool.py`、`tests/product/skill/test_tool_cli_contract.py`、`tests/product/skill/test_deterministic_tool_io.py`。
+
+### pdf_text_extract.py
+
+- 状态：`adopted`
+- 文件路径：`skills/hetu-stock-analysis/scripts/pdf_text_extract.py`
+- 用途：把一份显式保存的本地 PDF 确定性提取为一份带输入哈希和页边界的 UTF-8 文本。
+- 输入 Schema：CLI `--input INPUT.pdf --output OUTPUT.txt`；只读取该本地 PDF，不接收证券、日期、
+  来源、owner 或研究目录路由参数。运行依赖为 `pypdf>=6.16,<7`。
+- 输出 Schema：文本头依次为 `HETU_PDF_TEXT_V1`、`input_sha256=<64 hex>`、
+  `page_count=<int>`、`empty_text_pages=<none|逗号分隔页码>`；正文以 `<<<PAGE N>>>` 标记每页，
+  无可提取文本的页面写 `[NO_EXTRACTABLE_TEXT]`，文件末尾固定一个换行。
+- 失败异常：PDF 解析或任一页提取异常退出 1 且不产生输出；输入缺失或不可读、输入输出同路径、
+  输出已存在或发布竞态退出 2，既有输出保持原样，临时文件清理。
+- 是否可离线重放：是（从同一输入字节计算哈希并提取，不联网、不读取时钟）。
+- 禁止边界：不联网、不 OCR、不判断 owner、不硬编码证券、公司、日期、目录或 W4/W5 路由；不选择
+  来源、不决定换源、不裁决冲突、不生成报告结论、不生成交易信号。
+- 实际测试文件：`tests/product/skill/test_pdf_text_extract_tool.py`、
+  `tests/product/skill/test_deterministic_tool_io.py`。
 
 ### financial-ratio-series.py
 

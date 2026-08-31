@@ -67,6 +67,134 @@ def test_skill_defaults_continue_without_overquestioning() -> None:
     assert re.search(r"唯一\s+唯一映射", text) is None
 
 
+def test_deep_runtime_quality_rules_match_the_approved_design() -> None:
+    skill = _read("SKILL.md")
+    assert "`deep`" in skill
+    assert "各工作包选择具体来源时" in skill
+    assert "references/source-contracts.md" in skill
+
+    required = {
+        "references/artifact-contract.md": (
+            "<证券简称>-<证券代码>-<请求深度>-<任务时间>",
+            "quick",
+            "standard",
+            "deep",
+        ),
+        "references/work-packages/core/W0-task-framing.md": (
+            "W1",
+            "唯一核验",
+            "正式研究目录",
+        ),
+        "references/work-packages/core/W1-subject-verification.md": (
+            "证券简称：",
+            "权威身份：",
+            "run_id",
+        ),
+        "references/work-packages/core/W2-incremental-events.md": (
+            "连续",
+            "日期空档",
+            "部分覆盖",
+            "公告并集",
+            "重复数量",
+            "风险扫描",
+            "同一公告并集",
+        ),
+        "references/work-packages/core/W3-industry-competition.md": (
+            "最新官方",
+            "WFE",
+            "设备总销售额",
+            "候选",
+            "每个具体指标",
+            "最新适用版本",
+            "允许并存",
+        ),
+        "references/work-packages/core/W5-financial-validation.md": (
+            "实际本地输入",
+            "机械复算",
+            "降级",
+            "superseded",
+            "failed",
+            "同一次修正",
+            "所有直接引用",
+        ),
+        "references/work-packages/core/W4-business-governance.md": (
+            "行业特定",
+            "ClinicalTrials.gov",
+            "登记不等于",
+            "同一控制下企业合并",
+            "非同一控制下企业合并",
+            "逐实体",
+            "不得跨行",
+        ),
+        "references/work-packages/core/W7-valuation-expectations.md": (
+            "方法",
+            "输入",
+            "公式",
+            "限制",
+            "不作为本轮",
+            "numeric_consistency.py",
+            "必须优先",
+            "手算",
+            "临时脚本",
+        ),
+        "references/work-packages/core/W10-report-review.md": (
+            "manifest",
+            "checkpoint",
+            "所有现存工作包引用",
+            "纯格式提示",
+            "最新采用集合",
+            "不得继续引用",
+            "同一份实际清单",
+        ),
+    }
+    for relative, phrases in required.items():
+        text = _read(relative)
+        assert all(phrase in text for phrase in phrases), (relative, phrases)
+
+
+def test_runtime_completion_rules_cover_observed_dual_model_failures() -> None:
+    required = {
+        "references/work-packages/core/W2-incremental-events.md": (
+            "定稿前",
+            "各段原始数量",
+            "跨段重复数量",
+            "去重后并集数量",
+            "风险扫描输入",
+        ),
+        "references/work-packages/core/W3-industry-competition.md": (
+            "本次运行",
+            "候选集合",
+            "历史运行",
+            "不参与版本裁决",
+        ),
+        "references/work-packages/core/W4-business-governance.md": (
+            "附注标题层级",
+            "该实体所在行",
+            "合并类型",
+            "不得关闭",
+        ),
+        "references/work-packages/core/W5-financial-validation.md": (
+            "当前采用集合",
+            "退出采用集合",
+            "实际输入链",
+        ),
+        "references/work-packages/core/W7-valuation-expectations.md": (
+            "每项计算",
+            "canonical 产物路径",
+            "不支持或不可用原因",
+        ),
+        "references/work-packages/core/W10-report-review.md": (
+            "terminal status",
+            "先排除",
+            "逐条核对",
+            "实质提示",
+        ),
+    }
+    for relative, phrases in required.items():
+        text = _read(relative)
+        assert all(phrase in text for phrase in phrases), (relative, phrases)
+
+
 def test_excluded_requests_short_circuit_before_research() -> None:
     text = _read("SKILL.md")
 
@@ -452,7 +580,7 @@ def test_host_tools_keep_files_and_optional_helpers_at_atomic_scope() -> None:
         "原子助手",
         "可选",
         "局部失败",
-        ".hetu/research/<证券>-<任务时间>/",
+        ".hetu/research/<证券简称>-<证券代码>-<请求深度>-<任务时间>/",
         "checkpoint.md",
         "evidence.md",
         "artifacts/",
@@ -477,7 +605,7 @@ CLOSED_SOURCE_IDS = (
 
 RESEARCH_ROOT_PHRASES = (
     "调用前创建或选择",
-    ".hetu/research/<证券>-<任务时间>/",
+    ".hetu/research/<证券简称>-<证券代码>-<请求深度>-<任务时间>/",
     "`--input` 和 `--output`",
     "同一当前研究根",
     "`artifacts/raw/`",

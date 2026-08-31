@@ -109,6 +109,21 @@ def test_price_earnings_ratio_uses_matching_market_cap_and_profit_units() -> Non
     assert ratio.quantize(Decimal("0.01")) == Decimal("97.18")
 
 
+def test_price_to_book_and_dividend_yield_use_decimal_arithmetic() -> None:
+    assert numeric.price_to_book_ratio(
+        market_cap="506175473892.00",
+        market_cap_unit="CNY",
+        attributable_equity="40544865591.99",
+        attributable_equity_unit="CNY",
+    ) == Decimal("506175473892.00") / Decimal("40544865591.99")
+    assert numeric.dividend_yield_percent(
+        dividend_per_share="0.762",
+        dividend_per_share_unit="CNY/share",
+        price="697.51",
+        price_unit="CNY/share",
+    ) == Decimal("0.762") / Decimal("697.51") * Decimal("100")
+
+
 def test_numeric_consistency_rejects_non_finite_and_zero_denominators() -> None:
     with pytest.raises(ValueError, match="must be finite"):
         numeric.compare_metric(
@@ -377,6 +392,125 @@ def test_cli_arithmetic_operations_output_decimal_strings(
     assert cap_result["result_unit"] == "CNY/share·share"
 
 
+@pytest.mark.parametrize(
+    ("operation", "payload", "expected_units", "result_unit"),
+    (
+        (
+            "price_to_book_ratio",
+            {
+                "market_cap": "506175473892.00",
+                "market_cap_unit": "CNY",
+                "attributable_equity": "40544865591.99",
+                "attributable_equity_unit": "CNY",
+            },
+            {"market_cap": "CNY", "attributable_equity": "CNY"},
+            "ratio",
+        ),
+        (
+            "dividend_yield_percent",
+            {
+                "dividend_per_share": "0.762",
+                "dividend_per_share_unit": "CNY/share",
+                "price": "697.51",
+                "price_unit": "CNY/share",
+            },
+            {"dividend_per_share": "CNY/share", "price": "CNY/share"},
+            "%",
+        ),
+    ),
+)
+def test_cli_new_valuation_operations_return_decimal_envelopes(
+    tmp_path: Path,
+    operation: str,
+    payload: dict[str, str],
+    expected_units: dict[str, str],
+    result_unit: str,
+) -> None:
+    input_path = _write_json(tmp_path / f"{operation}.json", payload)
+    output_path = tmp_path / f"{operation}-envelope.json"
+
+    completed = _run_cli(
+        "--operation",
+        operation,
+        "--input",
+        str(input_path),
+        "--output",
+        str(output_path),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    result = _decimal_envelope(output_path)["result"]
+    assert isinstance(result["value"], str)
+    assert result["input_units"] == expected_units
+    assert result["result_unit"] == result_unit
+
+
+@pytest.mark.parametrize(
+    ("operation", "payload", "fragment"),
+    (
+        (
+            "price_to_book_ratio",
+            {
+                "market_cap": "100",
+                "market_cap_unit": "CNY",
+                "attributable_equity": "0",
+                "attributable_equity_unit": "CNY",
+            },
+            "must not be zero",
+        ),
+        (
+            "price_to_book_ratio",
+            {
+                "market_cap": "100",
+                "market_cap_unit": "CNY",
+                "attributable_equity": "10",
+                "attributable_equity_unit": "万元",
+            },
+            "must match",
+        ),
+        (
+            "dividend_yield_percent",
+            {
+                "dividend_per_share": "1",
+                "dividend_per_share_unit": "CNY/share",
+                "price": "0",
+                "price_unit": "CNY/share",
+            },
+            "must not be zero",
+        ),
+        (
+            "dividend_yield_percent",
+            {
+                "dividend_per_share": "1",
+                "dividend_per_share_unit": "CNY/share",
+                "price": "10",
+                "price_unit": "USD/share",
+            },
+            "must match",
+        ),
+    ),
+)
+def test_cli_new_valuation_operations_reject_bad_units_and_denominators(
+    tmp_path: Path, operation: str, payload: dict[str, str], fragment: str
+) -> None:
+    input_path = _write_json(tmp_path / f"{operation}.json", payload)
+    output_path = tmp_path / f"{operation}-envelope.json"
+
+    completed = _run_cli(
+        "--operation",
+        operation,
+        "--input",
+        str(input_path),
+        "--output",
+        str(output_path),
+    )
+
+    assert completed.returncode == 1
+    envelope = _decimal_envelope(output_path)
+    assert envelope["status"] == "failed"
+    assert fragment in envelope["error_message"]
+
+
 def test_cli_non_object_source_exits_1_with_failure_envelope(
     tmp_path: Path,
 ) -> None:
@@ -431,6 +565,20 @@ def test_arithmetic_operations_reject_mismatched_units() -> None:
             market_cap_unit="CNY",
             attributable_profit="10",
             attributable_profit_unit="万元",
+        )
+    with pytest.raises(ValueError, match="must match"):
+        numeric.price_to_book_ratio(
+            market_cap="1000",
+            market_cap_unit="CNY",
+            attributable_equity="100",
+            attributable_equity_unit="万元",
+        )
+    with pytest.raises(ValueError, match="must match"):
+        numeric.dividend_yield_percent(
+            dividend_per_share="1",
+            dividend_per_share_unit="CNY/share",
+            price="10",
+            price_unit="USD/share",
         )
 
 
