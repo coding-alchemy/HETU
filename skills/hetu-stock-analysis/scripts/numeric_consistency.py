@@ -10,7 +10,10 @@ input JSON object holds the explicit parameters for one operation:
 ``debt_ratio_percent`` (liabilities, liabilities_unit, assets, assets_unit),
 ``market_cap_values`` (price, price_unit, total_shares, total_shares_unit,
 float_shares, float_shares_unit), ``price_earnings_ratio`` (market_cap,
-market_cap_unit, attributable_profit, attributable_profit_unit), or
+market_cap_unit, attributable_profit, attributable_profit_unit),
+``price_to_book_ratio`` (market_cap, market_cap_unit, attributable_equity,
+attributable_equity_unit), ``dividend_yield_percent`` (dividend_per_share,
+dividend_per_share_unit, price, price_unit), or
 ``compare_metric``
 (metric, unit, claimed, recomputed, tolerance), where ``unit`` is the required
 explicit unit of the compared metric. Exit 0 writes a success envelope;
@@ -158,6 +161,52 @@ def price_earnings_ratio(
         return market_cap_value / profit_value
 
 
+def price_to_book_ratio(
+    *,
+    market_cap: Decimal | str | int,
+    market_cap_unit: str,
+    attributable_equity: Decimal | str | int,
+    attributable_equity_unit: str,
+) -> Decimal:
+    market_unit = _unit(market_cap_unit, name="market_cap_unit")
+    equity_unit = _unit(attributable_equity_unit, name="attributable_equity_unit")
+    _require_matching_units(
+        market_unit,
+        equity_unit,
+        first_name="market_cap",
+        second_name="attributable_equity",
+    )
+    equity = _decimal(attributable_equity, name="attributable_equity")
+    if equity == 0:
+        raise ValueError("attributable_equity must not be zero")
+    with decimal.localcontext(_DECIMAL_CONTEXT):
+        return _decimal(market_cap, name="market_cap") / equity
+
+
+def dividend_yield_percent(
+    *,
+    dividend_per_share: Decimal | str | int,
+    dividend_per_share_unit: str,
+    price: Decimal | str | int,
+    price_unit: str,
+) -> Decimal:
+    dividend_unit = _unit(dividend_per_share_unit, name="dividend_per_share_unit")
+    price_unit_value = _unit(price_unit, name="price_unit")
+    _require_matching_units(
+        dividend_unit,
+        price_unit_value,
+        first_name="dividend_per_share",
+        second_name="price",
+    )
+    price_value = _decimal(price, name="price")
+    if price_value == 0:
+        raise ValueError("price must not be zero")
+    with decimal.localcontext(_DECIMAL_CONTEXT):
+        return _decimal(dividend_per_share, name="dividend_per_share") / price_value * Decimal(
+            "100"
+        )
+
+
 def compare_metric(
     *,
     metric: str,
@@ -201,6 +250,18 @@ _OPERATION_PARAMS: dict[str, tuple[str, ...]] = {
     ),
     "price_earnings_ratio": (
         "market_cap", "market_cap_unit", "attributable_profit", "attributable_profit_unit",
+    ),
+    "price_to_book_ratio": (
+        "market_cap",
+        "market_cap_unit",
+        "attributable_equity",
+        "attributable_equity_unit",
+    ),
+    "dividend_yield_percent": (
+        "dividend_per_share",
+        "dividend_per_share_unit",
+        "price",
+        "price_unit",
     ),
     "compare_metric": ("metric", "unit", "claimed", "recomputed", "tolerance"),
 }
@@ -275,6 +336,40 @@ def _price_earnings_result(payload: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _price_to_book_result(payload: dict[str, Any]) -> dict[str, str]:
+    value = price_to_book_ratio(
+        market_cap=payload["market_cap"],
+        market_cap_unit=payload["market_cap_unit"],
+        attributable_equity=payload["attributable_equity"],
+        attributable_equity_unit=payload["attributable_equity_unit"],
+    )
+    return {
+        "value": _decimal_text(value),
+        "input_units": {
+            "market_cap": payload["market_cap_unit"],
+            "attributable_equity": payload["attributable_equity_unit"],
+        },
+        "result_unit": "ratio",
+    }
+
+
+def _dividend_yield_result(payload: dict[str, Any]) -> dict[str, str]:
+    value = dividend_yield_percent(
+        dividend_per_share=payload["dividend_per_share"],
+        dividend_per_share_unit=payload["dividend_per_share_unit"],
+        price=payload["price"],
+        price_unit=payload["price_unit"],
+    )
+    return {
+        "value": _decimal_text(value),
+        "input_units": {
+            "dividend_per_share": payload["dividend_per_share_unit"],
+            "price": payload["price_unit"],
+        },
+        "result_unit": "%",
+    }
+
+
 def _compare_metric_result(payload: dict[str, Any]) -> dict[str, str | bool]:
     comparison = compare_metric(
         metric=payload["metric"],
@@ -299,6 +394,8 @@ _OPERATIONS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "debt_ratio_percent": _debt_ratio_result,
     "market_cap_values": _market_cap_result,
     "price_earnings_ratio": _price_earnings_result,
+    "price_to_book_ratio": _price_to_book_result,
+    "dividend_yield_percent": _dividend_yield_result,
     "compare_metric": _compare_metric_result,
 }
 

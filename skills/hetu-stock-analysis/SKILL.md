@@ -31,16 +31,23 @@ description: Analyze one China A-share stock with public or explicitly authorize
 1. 读取[编排规则](references/orchestration.md)、[证据规则](references/evidence-rules.md)和
    [工作包目录](references/work-packages/catalog.md)，建立默认启动工作集；不要启动时加载全部
    工作包或失败、报告细则。
-2. 建立 W0 候选任务卡，应用安全默认值，在主体核验前创建 Markdown 检查点并向用户展示；
-   尚未核验的证券写为“待核验”。
+2. 建立 W0 候选任务卡，应用安全默认值，在主体核验前保留在 Agent 当前上下文并向用户展示；
+   尚未核验的证券写为“待核验”，不创建正式研究目录或临时研究目录。
 3. 按需读取 W1，使用交易所、发行人或监管来源核验证券、发行人、板块、上市和交易状态。
-   唯一映射时更新并展示正式任务卡后自动继续；歧义或异常状态时说明影响并等待确认。
-4. 正式任务卡形成后，根据开始前依赖、定稿前依赖、共享基准、用户关注点、证据和工具能力
-   自由选择、交错或合并 W2–W9；编号不代表顺序。必要时拆分临时研究子问题并汇回工作包。
+   唯一映射时生成正式 `run_id`、创建正式研究目录，把 W0/W1 写入 `checkpoint.md`、`manifest.json`
+   和各自工作包文件，更新并展示正式任务卡后自动继续；歧义或异常状态时说明影响并等待确认。
+4. 正式任务卡形成后，各工作包选择具体来源时读取[来源合同](references/source-contracts.md)的适用
+   条目；`quick`、`standard`、`deep` 均按实际来源选择读取，不把来源合同当作流程节点。随后根据开始前依赖、
+   定稿前依赖、共享基准、用户关注点、证据和工具能力自由选择、交错或合并 W2–W9；编号不代表顺序。
+   必要时拆分临时研究子问题并汇回工作包。
 5. 记录证据、冲突、替代和缺口。新证据命中回访条件时撤销受影响终态，重开直接目标并递归
    复核受影响下游，保留原结论和失败历史。
 6. W9 综合支持、反证、最大未知、成立/失效条件和监控语义。W10 由 Agent 写报告，依次完成
    研究自检和安全自检；可修正问题触发重开，非阻断缺口促使收缩结论，阻断问题停止交付。
+
+运行时总原则：能自动修复就修复，能降级就降级，格式问题只提示；事实、安全或授权问题按 owner
+重开，无法解决时停止。工作包的采用集合或计算口径发生修正时，按对应 owner 规则同步全部引用；
+需要确定性处理时先检查工具目录并优先复用已支持的 canonical 能力。
 
 ## 默认值与用户可见进展
 
@@ -57,15 +64,16 @@ description: Analyze one China A-share stock with public or explicitly authorize
 - 启动时读取[编排规则](references/orchestration.md)，了解覆盖状态、依赖、自由编排、回访和停止条件。
 - 启动时读取[证据规则](references/evidence-rules.md)，再形成任何事实或引用。
 - 启动时读取[工作包目录](references/work-packages/catalog.md)，判断领域适用性；核心包仍从下节直接读取。
-- 首次建立或恢复研究产物时读取[检查点规则](references/checkpoint.md)。
-- 首次建立研究目录时读取[研究产物合同](references/artifact-contract.md)和[工作包结果结构](references/work-package-result.md)，按固定结构落盘目录、`manifest.json` 与各工作包独立文件。
-- 需要确定性处理或来源失败分类时才读取[工具目录](references/tool-catalog.md)或[来源合同](references/source-contracts.md)；工具目录的五个确定性脚本已 `adopted`，另有阶段 04 机械助手 `source_adapter.py`（只解析显式保存输入，是否调用与是否采用由 Agent 决定）；来源合同已写全五个数据域的字段、失败语义与等价边界，但在用户确认阶段 04 放行证据前仍不得标记替代取得。
+- W1 唯一核验后首次建立正式研究产物，或恢复既有任务时，读取[检查点规则](references/checkpoint.md)。
+- W1 唯一核验后首次建立正式研究目录时读取[研究产物合同](references/artifact-contract.md)和[工作包结果结构](references/work-package-result.md)，按固定结构落盘目录、`manifest.json` 与各工作包独立文件。
+- 需要确定性处理或来源失败分类时读取[工具目录](references/tool-catalog.md)；各深度在工作包选择具体来源时读取[来源合同](references/source-contracts.md)的适用条目。工具目录的六个确定性脚本已 `adopted`，另有阶段 04 机械助手 `source_adapter.py`（只解析显式保存输入，是否调用与是否采用由 Agent 决定）。
 - 当 Agent 已按来源合同明确选择 `cninfo-announcement-index`、`sina-financial-statements` 或 `tencent-quote-snapshot` 时，可读取工具目录并调用可选的 `source_fetch.py`；脚本失败只形成局部缺口，不改变 Agent 的来源选择、采用或后续判断责任。
 - 工具、来源、授权或恢复出现问题时读取[恢复规则](references/recovery.md)。
 - 进入 W10 综合报告或提前核对交付边界时读取[报告指引](references/report-guidance.md)。
 - 发现宿主能力、选择文件位置或调用可选助手时读取[宿主工具边界](references/host-tools.md)。
 
-研究工作区默认使用 `.hetu/research/<证券>-<任务时间>/` 固定目录，包含 `checkpoint.md`、
+研究工作区在 W1 唯一核验后使用
+`.hetu/research/<证券简称>-<证券代码>-<请求深度>-<任务时间>/` 固定目录，包含 `checkpoint.md`、
 `evidence.md`、`manifest.json`、`work-packages/` 下 W0–W10 独立提交的固定命名文件、
 `artifacts/raw|normalized|derived|scripts/` 四类子目录与 `report.md`；尚未产生内容的文件可以在
 首次写入前缺席。`artifacts/` 只保存合法取得、许可允许、与当前任务相关且确有复核价值的材料。

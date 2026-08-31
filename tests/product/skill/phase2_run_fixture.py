@@ -69,6 +69,7 @@ SCRIPT_REL = (
     "artifacts/scripts/W5/recompute--W5--20260630T190500+0800--"
     f"{hashlib.sha256(SCRIPT_CONTENT.encode()).hexdigest()[:8]}.py"
 )
+DEFAULT_RUN_ID = "合成公司-000001.SZ-standard-20260630T190000+0800"
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -99,7 +100,7 @@ def research_tree_sha256(research_root: Path) -> str:
     return digest.hexdigest()
 
 
-def _report_text() -> str:
+def _report_text(*, run_id: str, requested_depth: str) -> str:
     lines = [
         "# 合成研究报告（fixture，无研究意义）",
         "",
@@ -113,9 +114,9 @@ def _report_text() -> str:
         "| 分析模型 | 合成模型标识（fixture） |",
         "| 推理深度 | 未暴露 |",
         "| 数据模式 | public |",
-        "| 请求深度、实际覆盖 | standard / standard |",
+        f"| 请求深度、实际覆盖 | {requested_depth} / {requested_depth} |",
         "| 技术完成状态 | 无未解决技术失败 |",
-        "| 研究目录 | research/ |",
+        f"| 研究目录 | {run_id}/ |",
         "",
         "重要声明：合成内容，无研究意义。",
         "",
@@ -199,7 +200,13 @@ def _w10_text() -> str:
     )
 
 
-def _manifest(research_root: Path, script_sha: str) -> dict[str, object]:
+def _manifest(
+    research_root: Path,
+    script_sha: str,
+    *,
+    run_id: str,
+    requested_depth: str,
+) -> dict[str, object]:
     raw_rel = RAW_REL
     normalized_rel = NORMALIZED_REL
     derived_rel = DERIVED_REL
@@ -211,12 +218,12 @@ def _manifest(research_root: Path, script_sha: str) -> dict[str, object]:
     return {
         "schema_version": "1.0",
         "run": {
-            "run_id": "synthetic-run-0001",
+            "run_id": run_id,
             "requested_security": "000001.SZ",
             "verified_security": "000001.SZ",
             "as_of": "2026-06-30T18:00:00+08:00",
             "data_mode": "public",
-            "requested_depth": "standard",
+            "requested_depth": requested_depth,
             "model": {
                 "id": "合成模型标识（fixture）",
                 "reasoning_depth": "未暴露",
@@ -292,10 +299,15 @@ def _manifest(research_root: Path, script_sha: str) -> dict[str, object]:
     }
 
 
-def build_valid_phase2_run(root: Path) -> tuple[Path, Path, Path]:
+def build_valid_phase2_run(
+    root: Path,
+    *,
+    run_id: str = DEFAULT_RUN_ID,
+    requested_depth: str = "standard",
+) -> tuple[Path, Path, Path]:
     """Return (research_root, delivery_message, lock_record) for a valid
     synthetic run laid out under ``root``."""
-    research = root / "research"
+    research = root / "research" / run_id
     for sub in (
         "work-packages",
         "artifacts/raw/source-a",
@@ -306,7 +318,7 @@ def build_valid_phase2_run(root: Path) -> tuple[Path, Path, Path]:
         (research / sub).mkdir(parents=True, exist_ok=True)
 
     (research / "checkpoint.md").write_text(
-        "# 检查点（合成）\n\n任务卡：合成。\n", encoding="utf-8"
+        "# 检查点（合成）\n\n任务卡：合成。\n\n正式证券：000001.SZ。\n", encoding="utf-8"
     )
     (research / "evidence.md").write_text(
         "# 证据（合成）\n\n"
@@ -326,12 +338,20 @@ def build_valid_phase2_run(root: Path) -> tuple[Path, Path, Path]:
     script_rel = research / SCRIPT_REL
     script_rel.write_text(SCRIPT_CONTENT, encoding="utf-8")
 
-    (research / "report.md").write_text(_report_text(), encoding="utf-8")
+    (research / "report.md").write_text(
+        _report_text(run_id=run_id, requested_depth=requested_depth),
+        encoding="utf-8",
+    )
 
     for name in WORK_PACKAGES:
         text = f"# {name}（合成）\n\n合成占位内容。\n\n"
         if name == "W0-task-framing":
             text += "证据定位：E1。\n\n"
+        if name == "W1-subject-verification":
+            text += (
+                "证券简称：合成公司\n\n"
+                "权威身份：000001.SZ / 合成发行人 / 合成交易所（唯一核验）\n\n"
+            )
         if name == "W5-financial-validation":
             text += "证据定位：C1。\n\n"
         if name != "W5-financial-validation":
@@ -339,7 +359,12 @@ def build_valid_phase2_run(root: Path) -> tuple[Path, Path, Path]:
         (research / "work-packages" / f"{name}.md").write_text(text, encoding="utf-8")
     (research / "work-packages/W10-report-review.md").write_text(_w10_text(), encoding="utf-8")
 
-    manifest = _manifest(research, sha256_file(script_rel))
+    manifest = _manifest(
+        research,
+        sha256_file(script_rel),
+        run_id=run_id,
+        requested_depth=requested_depth,
+    )
     (research / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -360,7 +385,7 @@ def build_valid_phase2_run(root: Path) -> tuple[Path, Path, Path]:
 
     lock = {
         "schema_version": "1.0",
-        "run_id": "synthetic-run-0001",
+        "run_id": run_id,
         "request": {"path": str(request.resolve()), "sha256": sha256_file(request)},
         "research_root": {
             "path": str(research.resolve()),
@@ -391,7 +416,8 @@ def build_valid_phase2_run(root: Path) -> tuple[Path, Path, Path]:
         "locked_at": "2026-06-30T19:10:00+08:00",
         "locked_by": "fixture",
     }
-    lock_record = root / "lock-record.json"
+    lock_record = root / "locks" / run_id / "lock-record.json"
+    lock_record.parent.mkdir(parents=True, exist_ok=True)
     lock_record.write_text(
         json.dumps(lock, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
