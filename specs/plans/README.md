@@ -30,7 +30,7 @@ V1 三期信息源研究、证据整改和 Deep 运行质量整改已经完成�
 
 V1 长期需求目前只有需求，不得把需求文档当作已批准执行计划：
 
-- [V1 长期需求：完善个股分析工作流](../2026-08-17-stock-analysis-workflow-v1-requirements.md)
+- [V1 长期需求：完善个股分析工作流](../stock-analysis-workflow-v1-requirements.md)
 
 ## 新增计划约定
 

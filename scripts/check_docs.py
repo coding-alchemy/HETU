@@ -27,7 +27,7 @@ _PREFIXED_OBSOLETE_COMMAND = re.compile(
 _CODE_OBSOLETE_COMMAND = re.compile(
     r"\b(?:hetu-stock\s+)?(?:run\s+(?:init|submit|resume)|report\s+render)\b"
 )
-_V01_TITLE = re.compile(r"^v0\.1\b", re.IGNORECASE)
+_CURRENT_RELEASE_TITLE = re.compile(r"^v0\.2\b", re.IGNORECASE)
 _HISTORICAL_EXAMPLE_PREFIXES = (
     "legacy example",
     "historical example",
@@ -154,10 +154,14 @@ def _headings(section: _MarkdownSection) -> tuple[_Heading, ...]:
     return tuple(headings)
 
 
-def _current_v01(document: _MarkdownSection) -> _MarkdownSection | None:
+def _current_release(document: _MarkdownSection) -> _MarkdownSection | None:
     headings = _headings(document)
     start_heading = next(
-        (heading for heading in headings if heading.level == 2 and _V01_TITLE.match(heading.title)),
+        (
+            heading
+            for heading in headings
+            if heading.level == 2 and _CURRENT_RELEASE_TITLE.match(heading.title)
+        ),
         None,
     )
     if start_heading is None:
@@ -278,9 +282,9 @@ def _obsolete_failures(
         changelog_document = _MarkdownSection.parse(
             root.joinpath(changelog).read_text(encoding="utf-8")
         )
-        current = _current_v01(changelog_document)
+        current = _current_release(changelog_document)
         if current is None:
-            return (("CHANGELOG.md: missing current V0.1 section",), len(scoped))
+            return (("CHANGELOG.md: missing current V0.2 section",), len(scoped))
         scoped.append((changelog, current))
 
     scoped.extend(

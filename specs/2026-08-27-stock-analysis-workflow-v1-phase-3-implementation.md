@@ -6,7 +6,7 @@
 > 修订日期：2026-08-31
 > 一期基线：[V1 一期实现](2026-08-17-stock-analysis-workflow-v1-phase-1-implementation.md)
 > 二期基线：[V1 二期实现](2026-08-25-stock-analysis-workflow-v1-phase-2-implementation.md)
-> 长期需求：[V1 长期需求](2026-08-17-stock-analysis-workflow-v1-requirements.md)
+> 长期需求：[V1 长期需求](stock-analysis-workflow-v1-requirements.md)
 > 研究明细：[A股个股分析数据源指南](../docs/theory/A股个股分析数据源指南.md)（长期方法与来源目录）；阶段研究证据归档于本文第 11 节
 > 适用范围：canonical `hetu-stock-analysis` Skill 的信息源选择、W0–W10 接纳和
 > `quick`、`standard`、`deep` 三种深度的运行质量增强

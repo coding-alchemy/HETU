@@ -50,7 +50,7 @@ def _valid_current_documents() -> dict[str, str]:
         "skills/hetu-stock-analysis/references/rules.md": "# Rules\n",
         "CHANGELOG.md": (
             "# Changelog\n\n"
-            "## V0.1 (unreleased)\n\nCurrent Agent workflow.\n\n"
+            "## V0.2 (unreleased)\n\nCurrent Agent workflow.\n\n"
             "## V0.1\n\n`hetu-stock report render` was supported.\n"
         ),
     }
@@ -329,7 +329,7 @@ def test_changelog_v02_failure_uses_original_line_number(tmp_path: Path) -> None
         "\n"
         "Release history.\n"
         "\n"
-        "## V0.1 (unreleased)\n"
+        "## V0.2 (unreleased)\n"
         "\n"
         "```bash\n"
         "run init\n"

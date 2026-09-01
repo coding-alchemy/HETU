@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>A 股板块量价研究平台 · 架构阅读版</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: light-dark(#f4f6fa,#0d1117); --surface: light-dark(#fff,#151b23); --surface2: light-dark(#eef2f7,#1c2430);
+      --text: light-dark(#182033,#e7edf5); --muted: light-dark(#5c687c,#9aa8ba); --line: light-dark(#dce2ea,#2c3745);
+      --blue: light-dark(#2f65d9,#78a6ff); --cyan: light-dark(#087e8b,#55c7d2); --green: light-dark(#23865d,#62d19a);
+      --orange: light-dark(#b86217,#f0a258); --purple: light-dark(#7652b7,#bd98ff); --red: light-dark(#ba3d4b,#ff7d8b);
+      --shadow: light-dark(0 12px 35px rgba(38,54,80,.08),0 12px 35px rgba(0,0,0,.22));
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.65 ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+    a { color: var(--blue); text-decoration: none; } a:hover { text-decoration: underline; }
+    code { padding: .12em .35em; border-radius: 5px; background: var(--surface2); font: .9em ui-monospace,Menlo,Consolas,monospace; }
+    .shell { display: grid; grid-template-columns: 258px minmax(0,1fr); max-width: 1500px; margin: 0 auto; }
+    aside { position: sticky; top: 0; height: 100vh; overflow: auto; padding: 30px 20px; border-right: 1px solid var(--line); background: color-mix(in srgb,var(--surface) 92%,transparent); }
+    .brand { margin-bottom: 24px; font-weight: 760; line-height: 1.35; }.brand small { display: block; margin-top: 6px; color: var(--muted); font-weight: 500; }
+    nav a { display: block; margin: 4px 0; padding: 8px 10px; border-radius: 7px; color: var(--muted); } nav a:hover { color: var(--text); background: var(--surface2); text-decoration: none; }
+    main { min-width: 0; padding: 45px clamp(22px,5vw,70px) 90px; }
+    .hero { padding: clamp(28px,5vw,54px); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); background: linear-gradient(135deg,color-mix(in srgb,var(--blue) 18%,var(--surface)),color-mix(in srgb,var(--purple) 12%,var(--surface))); }
+    h1 { margin: 0 0 16px; font-size: clamp(30px,5vw,54px); line-height: 1.12; } h2 { margin: 70px 0 18px; padding-top: 10px; font-size: clamp(25px,3vw,36px); line-height: 1.25; } h3 { margin: 0 0 10px; font-size: 18px; }
+    p { margin: 8px 0 14px; } .lede { max-width: 900px; color: var(--muted); font-size: 18px; }
+    .badges { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 24px; }.badge { padding: 6px 10px; border: 1px solid color-mix(in srgb,var(--blue) 30%,var(--line)); border-radius: 999px; background: color-mix(in srgb,var(--blue) 8%,transparent); font-size: 13px; }
+    .grid2,.grid3,.grid4,.grid5,.grid6,.flow4,.flow6 { display: grid; gap: 15px; }.grid2 { grid-template-columns: repeat(2,minmax(0,1fr)); }.grid3 { grid-template-columns: repeat(3,minmax(0,1fr)); }.grid4,.flow4 { grid-template-columns: repeat(4,minmax(0,1fr)); }.grid5 { grid-template-columns: repeat(5,minmax(0,1fr)); }.grid6,.flow6 { grid-template-columns: repeat(6,minmax(0,1fr)); }
+    .card { padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); box-shadow: 0 5px 18px color-mix(in srgb,var(--text) 5%,transparent); }.card p:last-child,.card ul:last-child { margin-bottom: 0; }.card ul { margin: 8px 0; padding-left: 18px; }.muted { color: var(--muted); }
+    .cyan { border-color: color-mix(in srgb,var(--cyan) 35%,var(--line)); background: color-mix(in srgb,var(--cyan) 7%,var(--surface)); }.green { border-color: color-mix(in srgb,var(--green) 35%,var(--line)); background: color-mix(in srgb,var(--green) 7%,var(--surface)); }.purple { border-color: color-mix(in srgb,var(--purple) 35%,var(--line)); background: color-mix(in srgb,var(--purple) 7%,var(--surface)); }.orange { border-color: color-mix(in srgb,var(--orange) 35%,var(--line)); background: color-mix(in srgb,var(--orange) 7%,var(--surface)); }
+    .flow4,.flow6 { gap: 24px; margin: 24px 0; }.flow4 .node,.flow6 .node { position: relative; min-height: 150px; padding: 18px; border: 1px solid color-mix(in srgb,var(--blue) 33%,var(--line)); border-radius: 12px; background: color-mix(in srgb,var(--blue) 8%,var(--surface)); }.flow4 .node::after,.flow6 .node::after { content: "→"; position: absolute; top: 50%; right: -20px; transform: translateY(-50%); color: var(--muted); font-size: 22px; }.flow4 .node:last-child::after,.flow6 .node:last-child::after { content: ""; }
+    .contract { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); }.note { margin: 22px 0; padding: 15px 18px; border-left: 4px solid var(--blue); border-radius: 0 9px 9px 0; background: color-mix(in srgb,var(--blue) 7%,var(--surface)); }.warning { border-left-color: var(--red); background: color-mix(in srgb,var(--red) 7%,var(--surface)); }
+    .step { display: inline-grid; place-items: center; width: 27px; height: 27px; margin-bottom: 12px; border-radius: 50%; background: var(--blue); color: white; font-size: 13px; font-weight: 700; }.level { display: inline-block; margin-bottom: 9px; padding: 3px 8px; border-radius: 6px; background: var(--surface2); font-weight: 750; }
+    .table { overflow-x: auto; border: 1px solid var(--line); border-radius: 11px; } table { width: 100%; border-collapse: collapse; background: var(--surface); } th,td { padding: 12px 13px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); } th { background: var(--surface2); }
+    .doclinks a { display: block; padding: 12px 14px; border-bottom: 1px solid var(--line); }.doclinks a:last-child { border-bottom: 0; } footer { margin-top: 75px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); }
+    @media (max-width:1100px) { .shell { grid-template-columns: 1fr; } aside { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); } nav { display: flex; flex-wrap: wrap; gap: 4px; } nav a { display: inline-block; } .grid5,.grid6,.flow6 { grid-template-columns: repeat(3,minmax(0,1fr)); }.flow4 { grid-template-columns: repeat(2,minmax(0,1fr)); }.flow4 .node::after,.flow6 .node::after { content: ""; } }
+    @media (max-width:720px) { main { padding: 25px 15px 70px; }.grid2,.grid3,.grid4,.grid5,.grid6,.flow4,.flow6 { grid-template-columns: 1fr; }.hero { border-radius: 12px; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand">A 股板块量价研究平台<small>架构阅读版</small></div>
+      <nav aria-label="文档目录">
+        <a href="#overview">定位</a><a href="#position">研究体系中的位置</a><a href="#funnel">研究漏斗</a><a href="#theory">理论框架</a><a href="#objects">研究对象</a><a href="#architecture">平台架构</a><a href="#evidence">证据治理</a><a href="#research">因子与评价</a><a href="#matrix">研究矩阵</a><a href="#daily">每日输出</a><a href="#scope">边界</a><a href="#documents">完整文档</a>
+      </nav>
+    </aside>
+    <main>
+      <section class="hero" id="overview">
+        <h1>发现、排序、再验证</h1>
+        <p class="lede">板块量价平台是市场侧研究证据层：先稳定维护点时数据，再用因子和模型发现异常，最后回到行业事实、原始披露与人工 Gate 完成验证。</p>
+        <div class="badges"><span class="badge">最近 1 年状态</span><span class="badge">3–5 年正式研究</span><span class="badge">多源但不静默混源</span><span class="badge">滚动样本外</span><span class="badge">不输出交易指令</span></div>
+      </section>
+
+      <section id="position">
+        <h2>在研究体系中的位置</h2>
+        <div class="grid3">
+          <div class="card cyan"><h3>市场雷达</h3><p>相对强弱、宽度、波动、量能、拥挤和异常状态。</p></div>
+          <div class="card cyan"><h3>行业研究</h3><p>发现景气、政策、估值、资金和事件线索，提供价格确认。</p></div>
+          <div class="card cyan"><h3>策略实验室</h3><p>因子、模型、合并方法、样本外评价与生命周期治理。</p></div>
+        </div>
+        <div class="note warning"><strong>核心边界：</strong>量价信号说明市场如何定价，不直接证明需求、盈利、政策兑现、估值合理或真实资金身份。</div>
+      </section>
+
+      <section id="funnel">
+        <h2>板块研究漏斗</h2>
+        <div class="flow6">
+          <article class="node"><span class="step">1</span><h3>定义对象</h3><p>分类、成分、基准、窗口和共同信息集。</p></article>
+          <article class="node"><span class="step">2</span><h3>计算信号</h3><p>价格、成交、宽度、波动和拥挤。</p></article>
+          <article class="node"><span class="step">3</span><h3>形成线索</h3><p>解释、反方解释、缺口和失效条件。</p></article>
+          <article class="node"><span class="step">4</span><h3>再验证</h3><p>回到官方统计、法定披露和合法授权字段。</p></article>
+          <article class="node"><span class="step">5</span><h3>行业 Gate</h3><p>推进、观察或暂缓。</p></article>
+          <article class="node"><span class="step">6</span><h3>后续研究</h3><p>粗筛、深研、评审、监控和复盘。</p></article>
+        </div>
+        <div class="grid3">
+          <div class="card green"><h3>推进</h3><p>对象明确、关键数据可验证，存在可解释的景气或预期差。</p></div>
+          <div class="card orange"><h3>观察</h3><p>逻辑可能成立，但数据、政策细则或盈利证据不足。</p></div>
+          <div class="card purple"><h3>暂缓</h3><p>边界不清、叙事主导、风险不可定价或数据严重冲突。</p></div>
+        </div>
+      </section>
+
+      <section id="theory">
+        <h2>量价信号的理论位置</h2>
+        <div class="grid4">
+          <div class="card"><h3>基本面变化</h3><p>量价平台观察价格是否确认，不能用上涨证明景气改善。</p></div>
+          <div class="card"><h3>预期变化</h3><p>观察相对强弱和事件持续性，不能证明盈利预测必然上修。</p></div>
+          <div class="card"><h3>估值变化</h3><p>观察定价结果，不能用价格上涨证明估值合理。</p></div>
+          <div class="card"><h3>资金与风险偏好</h3><p>观察成交与拥挤，不能由算法标签反推投资者身份。</p></div>
+        </div>
+        <div class="note"><strong>行业七变量：</strong>产业“量、价、库存、产能、订单、成本、政策”通过盈利、预期和风险溢价影响市场定价；证券价格与成交是交叉验证层，不是产业经营量价本身。</div>
+      </section>
+
+      <section id="objects">
+        <h2>先分清研究对象</h2>
+        <div class="table"><table><thead><tr><th>类型</th><th>主要驱动</th><th>平台定位</th></tr></thead><tbody>
+          <tr><td>行业板块</td><td>供需、竞争、利润池和周期</td><td>正式研究主对象</td></tr>
+          <tr><td>产业主题</td><td>政策、产业兑现和业务关联度</td><td>展示与影子研究；需核验主题纯度</td></tr>
+          <tr><td>风格板块</td><td>因子暴露、估值和风险偏好</td><td>因子比较和市场状态解释</td></tr>
+          <tr><td>上市板块</td><td>制度、公司阶段和流动性</td><td>交易制度与样本边界解释</td></tr>
+        </tbody></table></div>
+        <div class="note">板块身份由提供方、分类体系、分类版本/有效日、层级和板块代码共同确定。名称不是主键，跨体系映射不是官方等价关系。</div>
+      </section>
+
+      <section id="architecture">
+        <h2>四个稳定模块</h2>
+        <div class="flow4">
+          <article class="node"><h3>1 · 数据资产</h3><p>初始化、增量、点时分类、质量、不可变快照和 lineage。</p><p class="contract">输出：可追溯研究数据视图</p></article>
+          <article class="node"><h3>2 · 研究运行</h3><p>执行冻结研究定义，计算因子、模型预测和合并结果。</p><p class="contract">输出：特征与预测证据</p></article>
+          <article class="node"><h3>3 · 评价</h3><p>历史滚动样本外、每日成熟标签、IC、稳定性和不确定性。</p><p class="contract">输出：可比较评价快照</p></article>
+          <article class="node"><h3>4 · 治理</h3><p>硬闸门、同类比较、状态变更和人工记录。</p><p class="contract">输出：研究生命周期状态</p></article>
+        </div>
+        <div class="note"><strong>平台优先：</strong>建设阶段只用少量透明方法验证数据、研究和评价闭环；因子数量不是平台完成标准。</div>
+      </section>
+
+      <section id="evidence">
+        <h2>证据与多源治理</h2>
+        <div class="grid6">
+          <div class="card green"><span class="level">L0</span><h3>法定/监管原件</h3><p>规则、公告、法定报告。</p></div>
+          <div class="card green"><span class="level">L1</span><h3>官方统计</h3><p>政府、海关、交易结算、指数公司。</p></div>
+          <div class="card cyan"><span class="level">L2</span><h3>一手/授权字段</h3><p>可追溯披露、协会原表与授权接口。</p></div>
+          <div class="card cyan"><span class="level">L3</span><h3>方法可核验派生</h3><p>可复算研究和平台字段。</p></div>
+          <div class="card orange"><span class="level">L4</span><h3>摘要与线索</h3><p>新闻摘要、平台叙事和代理指标。</p></div>
+          <div class="card purple"><span class="level">L5</span><h3>未核实信息</h3><p>只作情绪观察，不进事实层。</p></div>
+        </div>
+        <div class="grid3" style="margin-top:16px">
+          <div class="card"><h3>主源发布</h3><p>每个数据产品只由一个正式主源发布。</p></div>
+          <div class="card"><h3>核验源举证</h3><p>用于差异和质量证据，不逐行混合。</p></div>
+          <div class="card"><h3>候补先旁路</h3><p>语义、重叠区间和许可验收后才正式换源。</p></div>
+        </div>
+        <div class="note warning"><strong>授权与证据等级分离：</strong>授权说明能否使用，证据等级说明字段能证明什么；同一原始数据经多个前端传播仍只算一条事实生产链。</div>
+      </section>
+
+      <section id="research">
+        <h2>因子、评价与生命周期</h2>
+        <div class="grid4">
+          <div class="card purple"><h3>候选因子</h3><p>动量、反转、52 周高点、波动率、相对强度、异常量、流动性和宽度。</p></div>
+          <div class="card purple"><h3>接入必答</h3><p>假设、对象、输入时点、公式/模型、horizon、评价和失效条件。</p></div>
+          <div class="card purple"><h3>评价证据</h3><p>覆盖、IC/RankIC、分组单调性、衰减、漂移、子区间和多重检验。</p></div>
+          <div class="card purple"><h3>合并边界</h3><p>horizon 分开、贡献可解释、历史只用当时成熟的权重。</p></div>
+        </div>
+        <div class="flow6">
+          <div class="node"><h3>Candidate</h3><p>预登记假设。</p></div><div class="node"><h3>Historical OOS</h3><p>历史样本外。</p></div><div class="node"><h3>Shadow</h3><p>每日影子。</p></div><div class="node"><h3>Active</h3><p>人工激活。</p></div><div class="node"><h3>Probation</h3><p>持续观察。</p></div><div class="node"><h3>Retired</h3><p>退出默认计划，保留历史。</p></div>
+        </div>
+      </section>
+
+      <section id="matrix">
+        <h2>基本面 × 价格确认 × 拥挤度</h2>
+        <div class="table"><table><thead><tr><th>基本面证据</th><th>价格确认</th><th>拥挤度</th><th>研究动作</th></tr></thead><tbody>
+          <tr><td>改善且可验证</td><td>广泛确认</td><td>低/中</td><td>提交 Gate，仍由完整证据决定是否推进</td></tr>
+          <tr><td>改善且可验证</td><td>无或仅少数成分确认</td><td>低/中</td><td>观察，补订单、价格、盈利或扩散证据</td></tr>
+          <tr><td>改善但证据有限</td><td>强确认</td><td>高</td><td>降低置信度，核验叙事、估值和兑现窗口</td></tr>
+          <tr><td>恶化或冲突</td><td>强确认</td><td>高</td><td>暂缓或风险复核，价格不能抵消反证</td></tr>
+          <tr><td>改善且可验证</td><td>有确认</td><td>高</td><td>提高估值与拥挤复核频率</td></tr>
+        </tbody></table></div>
+        <div class="note">未列组合默认“观察”，不插值打分。技术指标只能影响研究顺序和复核频率，不能升级基本面状态或覆盖行业 Gate。</div>
+      </section>
+
+      <section id="daily">
+        <h2>每日确定性输出</h2>
+        <div class="flow6">
+          <div class="node"><span class="step">1</span><h3>Update</h3><p>缺口与修订检测。</p></div><div class="node"><span class="step">2</span><h3>Publish</h3><p>质量通过后发布快照。</p></div><div class="node"><span class="step">3</span><h3>Mature</h3><p>结算已到期预测。</p></div><div class="node"><span class="step">4</span><h3>Evaluate</h3><p>更新样本外证据。</p></div><div class="node"><span class="step">5</span><h3>Research</h3><p>运行冻结研究。</p></div><div class="node"><span class="step">6</span><h3>Report</h3><p>状态、线索卡、质量和心跳。</p></div>
+        </div>
+        <div class="grid4">
+          <div class="card"><h3>事实</h3><p>可定位到原始或授权字段。</p></div><div class="card"><h3>平台算法</h3><p>明确方法、样本和输入。</p></div><div class="card"><h3>研究估计</h3><p>明确假设、区间和不确定性。</p></div><div class="card"><h3>观点</h3><p>回链支持、反方证据和失效条件。</p></div>
+        </div>
+      </section>
+
+      <section id="scope">
+        <h2>边界与延后能力</h2>
+        <div class="grid3">
+          <article class="card"><h3>当前正式范围</h3><ul><li>稳定行业口径</li><li>日频量价与点时成分</li><li>因子/模型研究合同</li><li>预测评价与治理</li></ul></article>
+          <article class="card"><h3>探索范围</h3><ul><li>概念与主题板块</li><li>从启用日起积累成员</li><li>平台算法和代理线索</li><li>只进入展示或 shadow</li></ul></article>
+          <article class="card"><h3>不在当前设计</h3><ul><li>分钟/Tick 和高频</li><li>真实组合撮合与资金容量</li><li>LLM 自动上线方法</li><li>自动交易和投资建议</li></ul></article>
+        </div>
+        <div class="note"><strong>LLM：</strong>可生成研究计划草案、反方问题和结构化解释；不得计算或补造数字、提高证据等级、自动改变 Gate 或执行交易。</div>
+      </section>
+
+      <section id="documents">
+        <h2>完整设计文档</h2>
+        <div class="card doclinks"><a href="A%E8%82%A1%E6%9D%BF%E5%9D%97%E9%87%8F%E4%BB%B7%E7%A0%94%E7%A9%B6%E5%B9%B3%E5%8F%B0%E8%AE%BE%E8%AE%A1.md">A 股板块量价研究平台设计 · 完整定义、理论映射与一手来源</a></div>
+      </section>
+      <footer><p>本文是可视化阅读入口。完整定义以 Markdown 设计文档为准；平台输出不构成投资建议或交易指令。</p></footer>
+    </main>
+  </div>
+</body>
+</html>
