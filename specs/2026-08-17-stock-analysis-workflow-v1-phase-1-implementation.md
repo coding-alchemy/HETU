@@ -9,7 +9,7 @@
 > 适用范围：V0.1 未发布版本的 canonical Skill、Python 辅助工具、CLI、安装与工程门禁
 > 权威顺序：canonical Skill 与源码 > 当前测试 > 本文档
 > 后续需求：[二期实现](2026-08-25-stock-analysis-workflow-v1-phase-2-implementation.md)、
-> [V1 长期需求](2026-08-17-stock-analysis-workflow-v1-requirements.md)
+> [V1 长期需求](stock-analysis-workflow-v1-requirements.md)
 
 ---
 
@@ -409,7 +409,7 @@ bash scripts/check.sh
 历史实现和执行证据只通过 Git 历史追溯，不在当前仓库复制归档。长期可复用的代码精简原则见
 [代码简化方法论](../docs/engineering/code-reduction-methodology.md)。尚未实施但仍有
 价值的质量加固能力已并入[二期实现](2026-08-25-stock-analysis-workflow-v1-phase-2-implementation.md)
-与[V1 长期需求](2026-08-17-stock-analysis-workflow-v1-requirements.md)。
+与[V1 长期需求](stock-analysis-workflow-v1-requirements.md)。
 
 ## 11. 当前限制与后续边界
 

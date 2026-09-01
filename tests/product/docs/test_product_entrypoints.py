@@ -10,8 +10,8 @@ CHANGELOG) and assert mechanically that:
 * the Agent-execution claims are present (natural-language start, canonical
   Skill owns the workflow, ``skill``/``helper`` role split with ``legacy``
   described only as removed history, helper-unavailable continuation,
-  authorized-failure semantics, host statuses, and a single unreleased V0.1
-  entry in CHANGELOG).
+  authorized-failure semantics, host statuses, a single current unreleased
+  V0.2 entry, and the retained V0.1 internal baseline in CHANGELOG).
 
 Command-style matches use backtick- or ``hetu-stock``-prefixed patterns so a
 legitimate substring like ``legacy run show`` does not false-positive on
@@ -250,24 +250,25 @@ def test_usage_guide_does_not_claim_cli_validates_research_semantics() -> None:
     assert "请求规范化、状态迁移校验、证据元数据检查、门禁评估与报告校验" not in usage
 
 
-def test_changelog_records_single_unreleased_v01() -> None:
+def test_changelog_records_current_unreleased_v02_and_v01_baseline() -> None:
     text = _read(CHANGELOG)
-    assert "## V0.1（未正式发布）" in text
+    assert text.count("## V0.2（未正式发布）") == 1
+    assert "## V0.1（内部基线，未正式发布）" in text
     # Only implemented, delivered functionality belongs in the changelog.
-    assert "V0.2" not in text
+    assert "V0.3" not in text
     assert "后续规划" not in text
     assert "二期加固负责" not in text
     assert "长期需求负责" not in text
     # Released claims stay bounded: no release, no host certification.
-    v01_start = text.index("## V0.1（未正式发布）")
-    v01_section = text[v01_start:]
-    next_header = re.search(r"\n## V0\.", v01_section[1:])
-    v01_body = (
-        v01_section if next_header is None else v01_section[: next_header.start() + 1]
+    v02_start = text.index("## V0.2（未正式发布）")
+    v02_section = text[v02_start:]
+    next_header = re.search(r"\n## V0\.", v02_section[1:])
+    v02_body = (
+        v02_section if next_header is None else v02_section[: next_header.start() + 1]
     )
-    assert not re.search(r"(?:Codex|OpenCode|Claude Code)[^。\n]{0,24}`?PASS`?", v01_body)
-    assert "已通过正式宿主认证" not in v01_body
-    assert "正式宿主支持认证均为 `UNVERIFIED`" in v01_body
+    assert not re.search(r"(?:Codex|OpenCode|Claude Code)[^。\n]{0,24}`?PASS`?", v02_body)
+    assert "已通过正式宿主认证" not in v02_body
+    assert "正式宿主支持认证仍为 `UNVERIFIED`" in v02_body
 
 
 def test_install_script_uses_new_helper_wording() -> None:

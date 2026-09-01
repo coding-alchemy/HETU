@@ -5,7 +5,7 @@
 > 创建日期：2026-08-25
 > 修订日期：2026-08-27
 > 一期基线：[V1 一期实现](2026-08-17-stock-analysis-workflow-v1-phase-1-implementation.md)
-> 长期需求：[V1 长期需求](2026-08-17-stock-analysis-workflow-v1-requirements.md)
+> 长期需求：[V1 长期需求](stock-analysis-workflow-v1-requirements.md)
 > 方法依据：[代码简化方法论](../docs/engineering/code-reduction-methodology.md)
 > 适用范围：canonical `hetu-stock-analysis` Skill 的 `quick`、`standard`、`deep` 单股研究
 > 权威顺序：canonical Skill 与源码 > 当前测试 > 本文档

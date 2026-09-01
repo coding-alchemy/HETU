@@ -80,7 +80,7 @@ esac
 
 case "$(uname -s)" in
   Darwin|Linux) ;;
-  *) die "V0.1 installer supports macOS and Linux only" ;;
+  *) die "V0.2 installer supports macOS and Linux only" ;;
 esac
 
 [ -n "${HOME:-}" ] || die "HOME must be set"
