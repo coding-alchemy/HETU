@@ -38,7 +38,7 @@ def _tree_snapshot(root: Path) -> dict[str, str]:
     return {
         path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(root.rglob("*"))
-        if path.is_file()
+        if path.is_file() and "__pycache__" not in path.parts
     }
 
 
@@ -103,7 +103,7 @@ def _fake_cli_source() -> str:
                     raise SystemExit(1)
                 shutil.rmtree(target)
             root.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(source, target)
+            shutil.copytree(source, target, ignore=shutil.ignore_patterns("__pycache__"))
             print(f"Skill installed to: {{target}}")
             raise SystemExit(0)
 

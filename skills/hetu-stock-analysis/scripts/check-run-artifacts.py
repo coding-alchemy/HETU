@@ -92,7 +92,13 @@ FIRST_CHAPTER_FIELDS = (
     "分析或定稿时间",
     "推理深度",
     "数据模式",
-    "请求深度、实际覆盖",
+    "请求深度",
+    "实际深度",
+    "信息完整性",
+    "分析有效性",
+    "主要经营模型",
+    "关键资料缺口",
+    "当前不能得出的结论",
     "技术完成状态",
     "研究目录",
 )
@@ -156,6 +162,63 @@ MANIFEST_SCRIPT_KEYS = frozenset(
 MANIFEST_INPUT_KEYS = frozenset({"path", "sha256"})
 DATA_MODES = frozenset({"public", "authorized"})
 REQUEST_DEPTHS = frozenset({"quick", "standard", "deep"})
+SOURCE_ADAPTER_ENVELOPE_KEYS = frozenset(
+    {"adapter", "called", "disabled", "status", "raw_input_sha256"}
+)
+CANONICAL_TOOL_FAILURE_ENVELOPE_KEYS = frozenset(
+    {"tool", "status", "error_type", "error_message", "input_sha256"}
+)
+ENVELOPE_FAILURE_STATUSES = frozenset(
+    {"rate_limited", "transport_error", "permission_denied", "parse_error"}
+)
+CANONICAL_EXECUTION_CLAIM_RE = re.compile(
+    r"(?:(?:canonical\s*(?:复算|计算)|确定性计算)\s*(?:已执行|已完成|验证)"
+    r"|(?:已执行|已完成|验证)\s*(?:canonical\s*(?:复算|计算)|确定性计算))",
+    re.IGNORECASE,
+)
+PROBE_ACTION_RE = re.compile(r"接口|端点|入口|官网|探测|请求|尝试|访问|调用|查询|检索")
+PROBE_OUTCOME_RE = re.compile(
+    r"返回空|空返回|被拒|拒绝|失败|无法|不可达|超时|限流|错误|无响应|未返回"
+)
+HONEST_NO_RECORD_PHRASES = ("没有可核验的", "不能判断")
+GAP_ITEM_STATES = frozenset({"未取得", "未发现"})
+ACTUAL_DEPTHS = frozenset({"未达到 quick", "quick", "standard", "deep"})
+DEPTH_RANK = {"未达到 quick": 0, "quick": 1, "standard": 2, "deep": 3}
+INFORMATION_COMPLETENESS_VALUES = frozenset({"完整", "不完整"})
+ANALYSIS_VALIDITY_VALUES = frozenset({"有效", "受限"})
+REQUIRED_ITEM_STATUS_VALUES = frozenset(
+    {"有", "替代取得", "无", "未发现", "未取得", "不适用", "存在冲突"}
+)
+ALWAYS_UNMET_ITEM_STATUSES = frozenset({"未发现", "未取得", "存在冲突"})
+REQUIRED_ITEM_HEADER = ("必需项", "要求来源", "状态", "证据或查询范围", "对结论的影响")
+METHOD_SELECTION_HEADER = (
+    "方法",
+    "处理",
+    "使用或排除理由",
+    "所需输入",
+    "实际输入",
+    "适用分部",
+    "限制",
+)
+CONCLUSION_BOUNDARY_HEADER = ("当前不能得出的结论", "原因", "owner", "恢复条件")
+QUALITY_SUMMARY_HEADER = ("质量字段", "当前状态")
+QUALITY_SUMMARY_FIELDS = (
+    "请求深度",
+    "实际深度",
+    "信息完整性",
+    "分析有效性",
+    "主要经营模型",
+)
+MODEL_PROFILE_HEADER = ("字段", "内容")
+MODEL_PROFILE_FIELDS = (
+    "主要经营模型",
+    "次要模型或适用分部",
+    "识别依据",
+    "核心经营、会计和监管特征",
+    "适用方法",
+    "易误用或不适用方法",
+    "输入限制",
+)
 LOCK_REQUIRED_KEYS = frozenset(
     {
         "schema_version",
@@ -240,7 +303,7 @@ RUN_DIRECTORY_PATTERN = re.compile(
 )
 EVIDENCE_REF_RE = re.compile(r"(?<![A-Za-z0-9_])([EFCJU]\d+)(?![A-Za-z0-9_])")
 OWNER_RE = re.compile(r"(?<![A-Za-z0-9_])(W(?:10|[0-9]))(?![A-Za-z0-9_])")
-ARTIFACT_REF_RE = re.compile(r"artifacts/[^\s`；，、）)\]}]+")
+ARTIFACT_REF_RE = re.compile(r"artifacts/[^\s`；，、（）()\]}]+")
 FRAGMENT_LOCATOR_RE = re.compile(
     r"evidence\.md#(.+?)(?=[；，、,;]?\s*(?:evidence\.md#|artifacts/)|$)"
 )
@@ -657,6 +720,22 @@ def _inline_code_label(cell: str) -> str:
     return cell
 
 
+def _plain_table_value(cell: str) -> str:
+    """Remove simple whole-cell Markdown wrappers for literal comparisons."""
+    value = cell.strip()
+    while True:
+        for marker in ("**", "__", "`", "*", "_"):
+            if (
+                len(value) > 2 * len(marker)
+                and value.startswith(marker)
+                and value.endswith(marker)
+            ):
+                value = value[len(marker) : -len(marker)].strip()
+                break
+        else:
+            return value
+
+
 def _derived_input_hash8(input_items: object) -> str | None:
     if not isinstance(input_items, list) or not input_items:
         return None
@@ -803,6 +882,17 @@ def _artifact_name_problem(
                 "<created-at>--<hash8>.<ext>",
             )
     return None
+
+
+def _is_failed_canonical_tool_envelope(envelope: dict[str, Any]) -> bool:
+    return (
+        CANONICAL_TOOL_FAILURE_ENVELOPE_KEYS.issubset(envelope)
+        and envelope.get("status") == "failed"
+        and _nonempty_string(envelope.get("tool"))
+        and _nonempty_string(envelope.get("error_type"))
+        and _nonempty_string(envelope.get("error_message"))
+        and _valid_sha256(envelope.get("input_sha256"))
+    )
 
 
 def _check_artifact_readability(
@@ -994,6 +1084,33 @@ def _check_manifest(
                     str(entry.get("path", entry_path)),
                     f"entry {key} must be a non-empty string",
                 )
+        entry_relative = entry.get("path")
+        if (
+            isinstance(entry_relative, str)
+            and entry.get("media_format") == "json"
+            and entry_status == "adopted"
+        ):
+            envelope = _load_json_object(research_root / entry_relative)
+            if envelope is not None:
+                source_adapter_failure = (
+                    SOURCE_ADAPTER_ENVELOPE_KEYS.issubset(envelope)
+                    and (
+                        envelope.get("disabled") is True
+                        or envelope.get("status") in ENVELOPE_FAILURE_STATUSES
+                    )
+                )
+                canonical_tool_failure = _is_failed_canonical_tool_envelope(envelope)
+                if source_adapter_failure or canonical_tool_failure:
+                    issues.append(
+                        _issue(
+                            "manifest.envelope_failure_adopted",
+                            entry_relative,
+                            "tool envelope records a failed execution "
+                            f"(status={envelope.get('status')!r}) and cannot be adopted; "
+                            "register the real outcome as "
+                            "failed or not_adopted",
+                        )
+                    )
         for key in ("source_id", "period_or_asof", "schema_version"):
             if key not in entry:
                 continue
@@ -1382,7 +1499,7 @@ def _check_report(
     research_root: Path,
     expected_model_id: object,
     issues: list[dict[str, str]],
-) -> None:
+) -> dict[str, str]:
     report_path = research_root / "report.md"
     raw_text = report_path.read_text(encoding="utf-8")
     if _has_visible_raw_html(raw_text):
@@ -1474,6 +1591,335 @@ def _check_report(
                     f"minimum fields {header!r} with a non-empty row",
                 )
             )
+    return home_values
+
+
+def _key_value_table(
+    text: str,
+    header: tuple[str, str],
+    required_fields: tuple[str, ...],
+) -> dict[str, str] | None:
+    for actual_header, rows in _markdown_tables(text):
+        if tuple(actual_header) != header:
+            continue
+        values = {
+            _inline_code_label(row[0]): row[1]
+            for row in rows
+            if len(row) == 2 and row[0] and row[1]
+        }
+        if all(field in values for field in required_fields):
+            return values
+    return None
+
+
+def _read_optional_text(path: Path) -> str | None:
+    if path.is_file():
+        return path.read_text(encoding="utf-8")
+    return None
+
+
+def _load_json_object(path: Path) -> dict[str, Any] | None:
+    if not path.is_file() or path.is_symlink():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _complete_rows(
+    rows: list[list[str]] | None, width: int
+) -> list[list[str]]:
+    return [row for row in (rows or []) if len(row) == width and all(row)]
+
+
+def _check_phase4_quality(
+    research_root: Path,
+    manifest: dict[str, Any],
+    home_values: dict[str, str],
+    issues: list[dict[str, str]],
+) -> None:
+    """Mechanical phase-4 structure checks: fixed tables, allowed values,
+    depth relations and explicit mirrors only — never business verdicts."""
+    requested = home_values.get("请求深度")
+    actual = home_values.get("实际深度")
+    completeness = home_values.get("信息完整性")
+    validity = home_values.get("分析有效性")
+
+    allowed = {
+        "请求深度": REQUEST_DEPTHS,
+        "实际深度": ACTUAL_DEPTHS,
+        "信息完整性": INFORMATION_COMPLETENESS_VALUES,
+        "分析有效性": ANALYSIS_VALIDITY_VALUES,
+    }
+    for field, values in allowed.items():
+        value = home_values.get(field)
+        if value is not None and value not in values:
+            issues.append(
+                _issue(
+                    "quality.invalid_value",
+                    "report.md",
+                    f"{field} has invalid value {value!r}",
+                )
+            )
+
+    if requested in REQUEST_DEPTHS and actual in ACTUAL_DEPTHS:
+        if DEPTH_RANK[actual] > DEPTH_RANK[requested]:
+            issues.append(
+                _issue(
+                    "quality.depth_order",
+                    "report.md",
+                    "actual depth exceeds requested depth",
+                )
+            )
+        if actual == requested and (completeness == "不完整" or validity == "受限"):
+            issues.append(
+                _issue(
+                    "quality.request_depth_claim",
+                    "report.md",
+                    "limited research claims requested depth",
+                )
+            )
+
+    run = manifest.get("run")
+    manifest_requested = run.get("requested_depth") if isinstance(run, dict) else None
+    if requested in REQUEST_DEPTHS and requested != manifest_requested:
+        issues.append(
+            _issue(
+                "quality.request_depth_mismatch",
+                "report.md",
+                "report and manifest requested depth differ",
+            )
+        )
+
+    unmet_rows = 0
+    required_tables_complete = True
+    for name in WORK_PACKAGES[1:9]:
+        relative = f"work-packages/{name}.md"
+        text = _read_optional_text(research_root / relative)
+        if text is None:
+            continue
+        rows = _find_table_rows(text, REQUIRED_ITEM_HEADER)
+        if not rows:
+            required_tables_complete = False
+            issues.append(
+                _issue(
+                    "quality.missing_required_items",
+                    relative,
+                    f"{name.split('-', 1)[0]} must carry a required-items table "
+                    "with a non-empty row",
+                )
+            )
+            continue
+        for row in rows:
+            if len(row) != len(REQUIRED_ITEM_HEADER) or not all(row):
+                required_tables_complete = False
+                issues.append(
+                    _issue(
+                        "quality.invalid_required_item",
+                        relative,
+                        "required item must contain all five non-empty fields",
+                    )
+                )
+                continue
+            status = _inline_code_label(row[2])
+            impact = row[4]
+            if status not in REQUIRED_ITEM_STATUS_VALUES or not (
+                impact.startswith("满足：") or impact.startswith("未满足：")
+            ):
+                issues.append(
+                    _issue(
+                        "quality.invalid_required_item",
+                        relative,
+                        f"required item has invalid status or impact prefix: "
+                        f"{status!r} / {impact!r}",
+                    )
+                )
+                continue
+            if status in ALWAYS_UNMET_ITEM_STATUSES and impact.startswith("满足："):
+                issues.append(
+                    _issue(
+                        "quality.invalid_required_item",
+                        relative,
+                        f"status {status!r} cannot be marked 满足",
+                    )
+                )
+                continue
+            if impact.startswith("未满足："):
+                unmet_rows += 1
+
+    w4_text = _read_optional_text(
+        research_root / "work-packages/W4-business-governance.md"
+    )
+    if w4_text is not None and _key_value_table(
+        w4_text, MODEL_PROFILE_HEADER, MODEL_PROFILE_FIELDS
+    ) is None:
+        issues.append(
+            _issue(
+                "quality.missing_model_profile",
+                "work-packages/W4-business-governance.md",
+                "W4 must carry a model profile table with all fixed fields",
+            )
+        )
+
+    constrained_method_rows = 0
+    method_tables_complete = True
+    for name in (
+        "W5-financial-validation",
+        "W6-forecast-scenarios",
+        "W7-valuation-expectations",
+    ):
+        relative = f"work-packages/{name}.md"
+        text = _read_optional_text(research_root / relative)
+        if text is None:
+            continue
+        rows = _complete_rows(
+            _find_table_rows(text, METHOD_SELECTION_HEADER), len(METHOD_SELECTION_HEADER)
+        )
+        if not rows:
+            method_tables_complete = False
+            issues.append(
+                _issue(
+                    "quality.missing_method_selection",
+                    relative,
+                    f"{name.split('-', 1)[0]} must carry a method selection table "
+                    "with a non-empty row",
+                )
+            )
+            continue
+        for row in rows:
+            handling = _plain_table_value(row[1])
+            actual_input = _plain_table_value(row[4])
+            limitation = _plain_table_value(row[6])
+            if handling == "排除" and (
+                actual_input == "未取得" or limitation != "无"
+            ):
+                constrained_method_rows += 1
+
+    w9_text = _read_optional_text(
+        research_root / "work-packages/W9-thesis-counterevidence.md"
+    )
+    if w9_text is not None and not _complete_rows(
+        _find_table_rows(w9_text, CONCLUSION_BOUNDARY_HEADER),
+        len(CONCLUSION_BOUNDARY_HEADER),
+    ):
+        issues.append(
+            _issue(
+                "quality.missing_conclusion_boundary",
+                "work-packages/W9-thesis-counterevidence.md",
+                "W9 must carry a conclusion boundary table with a non-empty row",
+            )
+        )
+
+    for relative in ("checkpoint.md", "work-packages/W10-report-review.md"):
+        text = _read_optional_text(research_root / relative)
+        if text is None:
+            continue
+        values = _key_value_table(text, QUALITY_SUMMARY_HEADER, QUALITY_SUMMARY_FIELDS)
+        if values is None:
+            issues.append(
+                _issue(
+                    "quality.missing_summary",
+                    relative,
+                    f"{relative} must carry the five-field quality summary table",
+                )
+            )
+            continue
+        for field in QUALITY_SUMMARY_FIELDS:
+            report_value = home_values.get(field)
+            if report_value is not None and values.get(field) != report_value:
+                issues.append(
+                    _issue(
+                        "quality.summary_mismatch",
+                        relative,
+                        f"{relative} {field} differs from report.md",
+                    )
+                )
+
+    if required_tables_complete:
+        if completeness == "完整" and unmet_rows:
+            issues.append(
+                _issue(
+                    "quality.summary_mismatch",
+                    "report.md",
+                    "completeness is 完整 but explicit unmet required items exist",
+                )
+            )
+        if completeness == "不完整" and not unmet_rows:
+            issues.append(
+                _issue(
+                    "quality.summary_mismatch",
+                    "report.md",
+                    "completeness is 不完整 but every required item is explicitly met",
+                )
+            )
+    if validity == "受限" and method_tables_complete and not constrained_method_rows:
+        issues.append(
+            _issue(
+                "quality.summary_mismatch",
+                "report.md",
+                "validity is 受限 but no excluded method exposes missing input or a limitation",
+            )
+        )
+    if completeness == "不完整" or validity == "受限":
+        for field in ("关键资料缺口", "当前不能得出的结论"):
+            if _plain_table_value(home_values.get(field, "")) == "无":
+                issues.append(
+                    _issue(
+                        "quality.summary_mismatch",
+                        "report.md",
+                        f"limited research must not report {field} as 无",
+                    )
+                )
+
+
+def _explicit_data_modes(text: str) -> set[str]:
+    return set(
+        re.findall(
+            r"数据模式\s*(?:\|\s*|[：:]\s*)(public|authorized)"
+            r"(?=\s*(?:[（(][^）)]*[）)])?\s*(?:\||$))",
+            _without_fenced_code(text),
+            flags=re.MULTILINE,
+        )
+    )
+
+
+def _check_data_mode_mirrors(
+    research_root: Path,
+    manifest: dict[str, Any],
+    home_values: dict[str, str],
+    issues: list[dict[str, str]],
+) -> None:
+    run = manifest.get("run")
+    expected = run.get("data_mode") if isinstance(run, dict) else None
+    if not isinstance(expected, str) or expected not in DATA_MODES:
+        return
+    report_mode = _plain_table_value(home_values.get("数据模式", ""))
+    if report_mode in DATA_MODES and report_mode != expected:
+        issues.append(
+            _issue(
+                "quality.data_mode_mismatch",
+                "report.md#1",
+                "report data mode differs from manifest.run.data_mode",
+            )
+        )
+    for relative in (
+        "checkpoint.md",
+        *(f"work-packages/{name}.md" for name in WORK_PACKAGES),
+    ):
+        text = _read_optional_text(research_root / relative)
+        if text is None:
+            continue
+        for mode in _explicit_data_modes(text):
+            if mode != expected:
+                issues.append(
+                    _issue(
+                        "quality.data_mode_mismatch",
+                        relative,
+                        f"explicit data mode {mode!r} differs from manifest.run.data_mode",
+                    )
+                )
 
 
 def _resolved_artifact_references(
@@ -1483,8 +1929,11 @@ def _resolved_artifact_references(
     return cleaned if cleaned and cleaned <= registered else None
 
 
-def _evidence_block(text: str, reference: str) -> str | None:
-    text = _without_fenced_code(text)
+def _evidence_block(
+    text: str, reference: str, *, visible_only: bool = True
+) -> str | None:
+    if visible_only:
+        text = _without_fenced_code(text)
     heading = re.search(
         rf"^(?P<marks>#{{2,6}})\s+{re.escape(reference)}(?:\s|[（(:：—–-]|$).*$",
         text,
@@ -1532,29 +1981,139 @@ def _evidence_block(text: str, reference: str) -> str | None:
     return text[bullet.start() : end]
 
 
+def _artifact_candidate(
+    reference: str,
+    registered: set[str],
+) -> tuple[str | None, bool]:
+    cleaned = reference.strip("`'\".。;；,，")
+    if cleaned in registered:
+        return cleaned, True
+    abbreviation = re.search(r"\.\.\.|…", cleaned)
+    if abbreviation is None:
+        return None, False
+    prefix = cleaned[: abbreviation.start()]
+    suffix = cleaned[abbreviation.end() :]
+    if not prefix or not suffix:
+        return None, False
+    candidates = [
+        path
+        for path in registered
+        if path.startswith(prefix)
+        and path.endswith(suffix)
+    ]
+    return (candidates[0], False) if len(candidates) == 1 else (None, False)
+
+
+def _artifact_basename_references(block: str, registered: set[str]) -> set[str]:
+    registered_basenames = {Path(path).name for path in registered}
+    referenced = {
+        match.group(1).strip("'\".。;；,，")
+        for match in re.finditer(r"`([^`\r\n/]+)`", block)
+        if match.group(1).strip("'\".。;；,，") in registered_basenames
+    }
+    referenced.update(
+        basename
+        for basename in registered_basenames
+        if re.search(
+            rf"(?<![A-Za-z0-9_./-]){re.escape(basename)}(?![A-Za-z0-9_.-])",
+            block,
+        )
+    )
+    return referenced
+
+
+def _direct_artifact_references(
+    block: str, registered: set[str]
+) -> tuple[set[str] | None, bool] | None:
+    artifact_refs = ARTIFACT_REF_RE.findall(block)
+    basename_refs = _artifact_basename_references(block, registered)
+    if not artifact_refs and not basename_refs:
+        return None
+
+    resolved: set[str] = set()
+    exact = True
+    for reference in artifact_refs:
+        candidate, candidate_exact = _artifact_candidate(reference, registered)
+        if candidate is None:
+            return None, False
+        resolved.add(candidate)
+        exact = exact and candidate_exact
+    for basename in basename_refs:
+        candidates = [path for path in registered if Path(path).name == basename]
+        if len(candidates) != 1:
+            return None, False
+        resolved.add(candidates[0])
+        exact = False
+    return resolved, exact
+
+
 def _evidence_ref_artifacts(
     reference: str,
     evidence_text: str,
     registered: set[str],
+    raw_evidence_text: str | None = None,
     seen: set[str] | None = None,
-) -> set[str] | None:
+) -> tuple[set[str] | None, bool]:
     visited = set() if seen is None else set(seen)
     if reference in visited:
-        return None
+        return None, False
     visited.add(reference)
     block = _evidence_block(evidence_text, reference)
     if block is None:
-        return None
-    artifact_refs = ARTIFACT_REF_RE.findall(block)
-    if artifact_refs:
-        return _resolved_artifact_references(artifact_refs, registered)
-    linked_refs = {item for item in EVIDENCE_REF_RE.findall(block) if item != reference}
+        return None, False
+    resolved = _evidence_block_artifacts(
+        block,
+        evidence_text,
+        registered,
+        raw_evidence_text=raw_evidence_text,
+        ignored_refs={reference},
+        seen=visited,
+    )
+    if resolved[0] is not None:
+        return resolved
+    if _direct_artifact_references(block, registered) is not None:
+        return resolved
+    if set(EVIDENCE_REF_RE.findall(block)) - {reference}:
+        return resolved
+    if raw_evidence_text is None:
+        return resolved
+    raw_block = _evidence_block(raw_evidence_text, reference, visible_only=False)
+    if raw_block is None:
+        return resolved
+    raw_resolved = _direct_artifact_references(raw_block, registered)
+    if raw_resolved is None or raw_resolved[0] is None:
+        return resolved
+    return raw_resolved[0], False
+
+
+def _evidence_block_artifacts(
+    block: str,
+    evidence_text: str,
+    registered: set[str],
+    *,
+    raw_evidence_text: str | None,
+    ignored_refs: set[str],
+    seen: set[str],
+) -> tuple[set[str] | None, bool]:
     resolved: set[str] = set()
+    direct = _direct_artifact_references(block, registered)
+    if direct is not None:
+        return direct
+    exact = True
+    linked_refs = set(EVIDENCE_REF_RE.findall(block)) - ignored_refs
     for item in linked_refs:
-        linked_artifacts = _evidence_ref_artifacts(item, evidence_text, registered, visited)
-        if linked_artifacts:
-            resolved.update(linked_artifacts)
-    return resolved or None
+        linked_artifacts, linked_exact = _evidence_ref_artifacts(
+            item,
+            evidence_text,
+            registered,
+            raw_evidence_text,
+            seen,
+        )
+        if linked_artifacts is None:
+            return None, False
+        resolved.update(linked_artifacts)
+        exact = exact and linked_exact
+    return (resolved or None), exact
 
 
 def _evidence_ref_resolves(
@@ -1563,12 +2122,15 @@ def _evidence_ref_resolves(
     registered: set[str],
     seen: set[str] | None = None,
 ) -> bool:
-    return _evidence_ref_artifacts(reference, evidence_text, registered, seen) is not None
+    resolved, _ = _evidence_ref_artifacts(
+        reference, evidence_text, registered, seen=seen
+    )
+    return resolved is not None
 
 
-def _fragment_artifacts(
-    fragment: str, evidence_text: str, registered: set[str]
-) -> set[str] | None:
+def _fragment_block(
+    fragment: str, evidence_text: str
+) -> tuple[str, set[str]] | None:
     evidence_text = _without_fenced_code(evidence_text)
     normalized = " ".join(fragment.split()).casefold()
     headings = re.finditer(
@@ -1594,13 +2156,34 @@ def _fragment_artifacts(
                 else len(evidence_text)
             )
             block = evidence_text[block_start:block_end]
-            artifact_refs = ARTIFACT_REF_RE.findall(block)
-            return _resolved_artifact_references(artifact_refs, registered)
+            heading_refs = set(EVIDENCE_REF_RE.findall(heading_match.group(0)))
+            return block, heading_refs
     return None
 
 
+def _fragment_artifacts(
+    fragment: str,
+    evidence_text: str,
+    registered: set[str],
+    raw_evidence_text: str | None = None,
+) -> tuple[set[str] | None, bool]:
+    matched = _fragment_block(fragment, evidence_text)
+    if matched is None:
+        return None, False
+    block, heading_refs = matched
+    return _evidence_block_artifacts(
+        block,
+        evidence_text,
+        registered,
+        raw_evidence_text=raw_evidence_text,
+        ignored_refs=heading_refs,
+        seen=heading_refs,
+    )
+
+
 def _fragment_resolves(fragment: str, evidence_text: str, registered: set[str]) -> bool:
-    return _fragment_artifacts(fragment, evidence_text, registered) is not None
+    resolved, _ = _fragment_artifacts(fragment, evidence_text, registered)
+    return resolved is not None
 
 
 def _owner_carries_locator(
@@ -1738,6 +2321,7 @@ def _check_w10_mapping(
 
     for row_number, row in enumerate(rows, start=1):
         row_errors: list[str] = []
+        row_blocking: list[str] = []
         row_artifacts: set[str] = set()
         if len(row) != len(W10_MAPPING_FIELDS) or not all(row):
             row_errors.append("all five mapping cells must be non-empty")
@@ -1751,6 +2335,10 @@ def _check_w10_mapping(
             continue
 
         chapter_cell, claim_cell, owner_cell, evidence_cell, status_cell = row
+        normalized_status = re.split(r"[（(]", status_cell, maxsplit=1)[0].strip()
+        expected_status = W10_TO_MANIFEST_STATUS.get(normalized_status)
+        adopted_claim = expected_status == "adopted"
+        source_gaps: list[str] = []
         chapter_numbers, chapter_error = _parse_chapter_locator(chapter_cell)
         if chapter_error is not None:
             row_errors.append(chapter_error)
@@ -1793,30 +2381,56 @@ def _check_w10_mapping(
         if not evidence_refs and not artifact_refs and not fragments:
             row_errors.append("evidence locator must reference evidence.md or a manifest artifact")
         for reference in sorted(evidence_refs):
-            resolved = _evidence_ref_artifacts(reference, evidence_text, registered)
+            resolved, exact = _evidence_ref_artifacts(
+                reference,
+                evidence_text,
+                registered,
+                raw_evidence_text,
+            )
             if resolved is None:
                 row_errors.append(
                     f"evidence reference {reference!r} does not resolve to a manifest artifact"
                 )
+                if adopted_claim:
+                    source_gaps.append(f"evidence reference {reference!r}")
             else:
                 row_artifacts.update(resolved)
+                if not exact:
+                    row_errors.append(
+                        f"evidence reference {reference!r} does not resolve to a manifest artifact"
+                    )
         for artifact_ref in artifact_refs:
             if _resolved_artifact_references([artifact_ref], registered) is None:
                 row_errors.append(
                     f"artifact reference {artifact_ref!r} is not registered in manifest.json"
                 )
+                if adopted_claim:
+                    row_blocking.append(
+                        f"artifact reference {artifact_ref!r} is not registered in manifest.json"
+                    )
             elif artifact_ref not in evidence_text:
                 row_errors.append(f"artifact reference {artifact_ref!r} is absent from evidence.md")
             else:
                 row_artifacts.add(artifact_ref.strip("`'\".。;；,，"))
         for fragment in fragments:
-            resolved = _fragment_artifacts(fragment, evidence_text, registered)
+            resolved, exact = _fragment_artifacts(
+                fragment,
+                evidence_text,
+                registered,
+                raw_evidence_text,
+            )
             if resolved is None:
                 row_errors.append(
                     f"evidence.md fragment {fragment!r} does not resolve to a manifest artifact"
                 )
+                if adopted_claim and _fragment_block(fragment, evidence_text) is not None:
+                    source_gaps.append(f"evidence.md fragment {fragment!r}")
             else:
                 row_artifacts.update(resolved)
+                if not exact:
+                    row_errors.append(
+                        f"evidence.md fragment {fragment!r} does not resolve to a manifest artifact"
+                    )
 
         owners_without_locator = [
             owner
@@ -1831,11 +2445,10 @@ def _check_w10_mapping(
                 f"missing={sorted(owners_without_locator)!r}"
             )
 
-        normalized_status = re.split(r"[（(]", status_cell, maxsplit=1)[0].strip()
         if normalized_status not in W10_ADOPTION_VALUES:
             row_errors.append(f"adoption status must be controlled, got {status_cell!r}")
         else:
-            expected_status = W10_TO_MANIFEST_STATUS[normalized_status]
+            assert expected_status is not None
             mismatched = {
                 path: entry_statuses[path]
                 for path in sorted(row_artifacts)
@@ -1846,7 +2459,29 @@ def _check_w10_mapping(
                     "adoption status must match terminal manifest artifacts; "
                     f"expected={expected_status!r}, actual={mismatched!r}"
                 )
+                row_blocking.append(
+                    "adoption status must match terminal manifest artifacts; "
+                    f"expected={expected_status!r}, actual={mismatched!r}"
+                )
 
+        if source_gaps:
+            issues.append(
+                _issue(
+                    "trace.adopted_claim_missing_source",
+                    f"{relative_path}#row-{row_number}",
+                    "adopted report claim has evidence branches that do not reach "
+                    "any registered artifact: " + "; ".join(source_gaps),
+                )
+            )
+        if row_blocking:
+            issues.append(
+                _issue(
+                    "trace.report_claim_not_adopted",
+                    f"{relative_path}#row-{row_number}",
+                    "report claim rests on evidence that is not adopted: "
+                    + "; ".join(row_blocking),
+                )
+            )
         if row_errors:
             warnings.append(
                 _issue(
@@ -1855,6 +2490,248 @@ def _check_w10_mapping(
                     "; ".join(row_errors),
                 )
             )
+
+
+def _required_items_claim_canonical_computation(text: str) -> bool:
+    return any(
+        (
+            "canonical" in " ".join(row).casefold()
+            or "复算" in " ".join(row)
+            or "确定性计算" in " ".join(row)
+        )
+        and _inline_code_label(row[2]) in {"有", "替代取得"}
+        and row[4].startswith("满足：")
+        for row in (_find_table_rows(text, REQUIRED_ITEM_HEADER) or [])
+    )
+
+
+def _check_report_provenance(
+    research_root: Path,
+    registered: set[str],
+    entry_statuses: dict[str, str],
+    adopted_compute_owners: set[str],
+    issues: list[dict[str, str]],
+) -> None:
+    """Explicit provenance checks for the delivered report: cited evidence must
+    exist, report data may only reference adopted artifacts, failed records may
+    only be cited as execution/failure records inside the chapter-11
+    coverage/gap disclosure, and recomputation claims must be backed by adopted
+    derived/script artifacts. Structure only."""
+    report_path = research_root / "report.md"
+    if not report_path.is_file():
+        return
+    report_text = _without_fenced_code(report_path.read_text(encoding="utf-8"))
+    evidence_text = _without_fenced_code(
+        _read_optional_text(research_root / "evidence.md") or ""
+    )
+
+    scan_targets: list[tuple[str, str]] = [("report.md", report_text)]
+    for name in WORK_PACKAGES:
+        text = _read_optional_text(research_root / "work-packages" / f"{name}.md")
+        if text is not None:
+            scan_targets.append((f"work-packages/{name}.md", _without_fenced_code(text)))
+
+    if evidence_text:
+        declared_ids = set(EVIDENCE_REF_RE.findall(evidence_text))
+        for letter, start, end in re.findall(
+            r"(?<![A-Za-z0-9_])([EFCJU])(\d+)\s*[–—~～]\s*\1(\d+)(?![A-Za-z0-9_])",
+            evidence_text,
+        ):
+            first, last = int(start), int(end)
+            if first <= last <= first + 200:
+                declared_ids.update(f"{letter}{number}" for number in range(first, last + 1))
+        for relative, text in scan_targets:
+            for reference in sorted(set(EVIDENCE_REF_RE.findall(text))):
+                if reference not in declared_ids:
+                    issues.append(
+                        _issue(
+                            "trace.dangling_evidence_reference",
+                            relative,
+                            f"{relative} cites evidence reference {reference!r} "
+                            "that evidence.md does not declare",
+                        )
+                    )
+
+    # Per-occurrence provenance by chapter. Failed records (envelopes/log
+    # files, no usable result by contract) may only be cited as execution/
+    # failure records inside chapter 11 (数据覆盖、缺口、冲突与来源), the fixed
+    # process/gap disclosure chapter — table or prose. Anywhere else, business
+    # or boundary prose included, a failed reference would position the record
+    # as backing facts or computation inputs, so it is blocked regardless of
+    # table position. Superseded/not_adopted artifacts stay blocked everywhere.
+    process_disclosure_chapter = 11
+    sections = _report_sections(report_text)
+    section_spans = [(number, text) for number, text in sorted(sections.items())]
+    first_heading = report_text.find("\n## ")
+    preamble = report_text if first_heading == -1 else report_text[:first_heading]
+    line_scopes: list[tuple[int | None, str]] = [
+        (None, line) for line in preamble.splitlines()
+    ]
+    for number, section_text in section_spans:
+        line_scopes.extend((number, line) for line in section_text.splitlines())
+    for number, line in line_scopes:
+        refs = ARTIFACT_REF_RE.findall(line)
+        if not refs:
+            continue
+        location = f"report.md#{number}" if number is not None else "report.md"
+        for artifact_ref in refs:
+            cleaned = artifact_ref.rstrip("`'\".。;；,，)")
+            if cleaned not in registered:
+                issues.append(
+                    _issue(
+                        "trace.report_reference_not_adopted",
+                        location,
+                        f"report references artifact {cleaned!r} that manifest.json "
+                        "does not register",
+                    )
+                )
+                continue
+            status = entry_statuses.get(cleaned)
+            if status == "adopted":
+                continue
+            if status == "failed":
+                if number == process_disclosure_chapter:
+                    continue
+                where = (
+                    f"chapter {number}" if number is not None else "the report preamble"
+                )
+                issues.append(
+                    _issue(
+                        "trace.report_reference_not_adopted",
+                        location,
+                        f"report {where} references failed record {cleaned!r}; failed "
+                        "records may only be cited as execution records in the "
+                        "chapter-11 coverage/gap disclosure, never as business facts "
+                        "or computation inputs",
+                    )
+                )
+            else:
+                issues.append(
+                    _issue(
+                        "trace.report_reference_not_adopted",
+                        location,
+                        f"report references {entry_statuses.get(cleaned)!r} artifact "
+                        f"{cleaned!r}; report data may only come from adopted artifacts "
+                        "and failed records may only be referenced as execution records",
+                    )
+                )
+
+    for number, owner in ((5, "W5"), (6, "W6"), (7, "W7"), (8, "W8")):
+        chapter = sections.get(number, "")
+        if not CANONICAL_EXECUTION_CLAIM_RE.search(chapter):
+            continue
+        if owner not in adopted_compute_owners:
+            issues.append(
+                _issue(
+                    "trace.unbacked_recomputation_claim",
+                    f"report.md#{number}",
+                    f"report chapter {number} claims canonical computation for {owner} "
+                    "but manifest.json has no adopted derived/script artifact for that owner",
+                )
+            )
+    for name in WORK_PACKAGES[1:9]:
+        owner = name.split("-", 1)[0]
+        package_text = _read_optional_text(research_root / "work-packages" / f"{name}.md")
+        if package_text is None or not _required_items_claim_canonical_computation(
+            _without_fenced_code(package_text)
+        ):
+            continue
+        if owner not in adopted_compute_owners:
+            issues.append(
+                _issue(
+                    "trace.unbacked_recomputation_claim",
+                    f"work-packages/{name}.md",
+                    f"{owner} required-items table claims canonical computation but has no "
+                    "adopted derived/script artifact in manifest.json",
+                )
+            )
+
+
+def _probe_claim_candidate(text: str) -> bool:
+    """Narrates a probe plus its outcome without being the canonical honest
+    no-record wording. Candidate only — never a verdict; semantics decide."""
+    if not (PROBE_ACTION_RE.search(text) and PROBE_OUTCOME_RE.search(text)):
+        return False
+    return not all(phrase in text for phrase in HONEST_NO_RECORD_PHRASES)
+
+
+def _probe_claim_closed(
+    unit: str,
+    evidence_text: str,
+    registered: set[str],
+    evidence_cache: dict[str, set[str]],
+) -> bool:
+    direct = _direct_artifact_references(unit, registered)
+    if direct is not None and direct[0]:
+        return True
+    for reference in dict.fromkeys(EVIDENCE_REF_RE.findall(unit)):
+        if reference not in evidence_cache:
+            resolved = _evidence_ref_artifacts(reference, evidence_text, registered)[0]
+            evidence_cache[reference] = resolved or set()
+        if evidence_cache[reference]:
+            return True
+    return False
+
+
+def _check_execution_claim_records(
+    research_root: Path,
+    registered: set[str],
+    warnings: list[dict[str, str]],
+) -> None:
+    """Surface execution-claim candidates (probe success/failure/empty-return
+    narration) that carry no verifiable record reference. Warning-level only:
+    keywords find candidates, semantics decide — the W10 review must confirm a
+    saved response, error output or host log, or rewrite with the honest
+    no-record wording."""
+    evidence_text = _without_fenced_code(
+        _read_optional_text(research_root / "evidence.md") or ""
+    )
+    evidence_cache: dict[str, set[str]] = {}
+    seen: set[tuple[str, str]] = set()
+
+    def surface(relative: str, unit: str) -> None:
+        unit = " ".join(unit.split())
+        if not _probe_claim_candidate(unit):
+            return
+        if _probe_claim_closed(unit, evidence_text, registered, evidence_cache):
+            return
+        key = (relative, unit)
+        if key in seen:
+            return
+        seen.add(key)
+        excerpt = unit if len(unit) <= 90 else unit[:87] + "..."
+        warnings.append(
+            _issue(
+                "trace.execution_claim_record_candidate",
+                relative,
+                "execution-claim candidate without a verifiable record reference: "
+                f"{excerpt!r} — confirm a saved response, error output or host log "
+                "records this action, or rewrite with the honest no-record wording",
+            )
+        )
+
+    report_path = research_root / "report.md"
+    if report_path.is_file():
+        report_text = _without_fenced_code(report_path.read_text(encoding="utf-8"))
+        for _header, rows in _markdown_tables(report_text):
+            for row in rows:
+                surface("report.md", " ".join(row))
+
+    for name in WORK_PACKAGES:
+        package_path = research_root / "work-packages" / f"{name}.md"
+        if not package_path.is_file():
+            continue
+        package_text = _without_fenced_code(package_path.read_text(encoding="utf-8"))
+        for row in _find_table_rows(package_text, REQUIRED_ITEM_HEADER) or []:
+            if len(row) > 3 and row[2].strip() in GAP_ITEM_STATES:
+                surface(f"work-packages/{name}.md", row[3])
+
+    if evidence_text:
+        for line in evidence_text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            surface("evidence.md", stripped)
 
 
 def _check_scripts(
@@ -2459,6 +3336,7 @@ def check_run(
 
     registered: set[str] = set()
     entry_statuses: dict[str, str] = {}
+    manifest_data: dict[str, Any] | None = None
     if "manifest.json" not in missing:
         try:
             manifest = json.loads((research_root / "manifest.json").read_text(encoding="utf-8"))
@@ -2480,6 +3358,7 @@ def check_run(
                     )
                 )
             else:
+                manifest_data = manifest
                 registered, entry_statuses = _check_manifest(
                     research_root, manifest, issues, warnings
                 )
@@ -2514,7 +3393,16 @@ def check_run(
         )
     )
     if "report.md" not in missing:
-        _check_report(research_root, lock.get("model_id"), issues)
+        home_values = _check_report(research_root, lock.get("model_id"), issues)
+        if manifest_data is not None:
+            _check_phase4_quality(research_root, manifest_data, home_values, issues)
+            _check_data_mode_mirrors(research_root, manifest_data, home_values, issues)
+    checks.append(
+        _check(
+            "research.quality_contract",
+            not any(issue["code"].startswith("quality.") for issue in issues),
+        )
+    )
     checks.append(
         _check(
             "report.structure",
@@ -2560,6 +3448,40 @@ def check_run(
             ),
         )
     )
+
+    adopted_compute_owners = {
+        entry.get("work_package")
+        for entry in (
+            manifest_data.get("artifacts", []) if isinstance(manifest_data, dict) else []
+        )
+        if isinstance(entry, dict)
+        and entry.get("status") == "adopted"
+        and entry.get("type") in ("derived", "script")
+        and isinstance(entry.get("work_package"), str)
+    }
+    if "report.md" not in missing and manifest_data is not None:
+        _check_report_provenance(
+            research_root, registered, entry_statuses, adopted_compute_owners, issues
+        )
+    checks.append(
+        _check(
+            "trace.report_provenance",
+            not any(
+                issue["code"]
+                in {
+                    "trace.dangling_evidence_reference",
+                    "trace.report_reference_not_adopted",
+                    "trace.report_claim_not_adopted",
+                    "trace.adopted_claim_missing_source",
+                    "trace.unbacked_recomputation_claim",
+                }
+                for issue in issues
+            ),
+        )
+    )
+
+    if "report.md" not in missing and manifest_data is not None:
+        _check_execution_claim_records(research_root, registered, warnings)
 
     _check_data_artifacts(research_root, registered, issues)
     _check_scripts(research_root, registered, issues)

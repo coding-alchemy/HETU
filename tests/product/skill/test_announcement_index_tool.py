@@ -517,3 +517,207 @@ def test_cli_naive_as_of_exits_1_with_failure_envelope(tmp_path: Path) -> None:
     envelope = json.loads(output_path.read_text(encoding="utf-8"))
     assert envelope["status"] == "failed"
     assert "timezone-aware" in envelope["error_message"]
+
+
+def _search_index() -> dict[str, object]:
+    return {
+        "announcements": [
+            {
+                "title": "关于回购股份进展的公告",
+                "published_at": "2026-08-16T09:00:00+08:00",
+                "url": "https://static.cninfo.com.cn/finalpage/buyback-progress.PDF",
+                "category": "公司公告",
+            },
+            {
+                "title": "公司章程及回购管理制度（修订稿）",
+                "published_at": "2026-08-15T09:00:00+08:00",
+                "url": "https://static.cninfo.com.cn/finalpage/policy.PDF",
+                "category": "制度文件",
+            },
+            {
+                "title": "关于股份回购注销完成的公告",
+                "published_at": "2026-08-14T09:00:00+08:00",
+                "url": "https://static.cninfo.com.cn/finalpage/buyback-complete.PDF",
+                "category": None,
+            },
+        ]
+    }
+
+
+def test_title_search_scans_tail_and_returns_all_matches_verbatim() -> None:
+    result = announcements.search_announcement_titles(_search_index(), ["回购"])
+
+    assert result["scanned_count"] == 3
+    assert result["terms"] == [
+        {
+            "term": "回购",
+            "match_count": 3,
+            "matches": [
+                {
+                    "title": "关于回购股份进展的公告",
+                    "published_at": "2026-08-16T09:00:00+08:00",
+                    "url": "https://static.cninfo.com.cn/finalpage/buyback-progress.PDF",
+                },
+                {
+                    "title": "公司章程及回购管理制度（修订稿）",
+                    "published_at": "2026-08-15T09:00:00+08:00",
+                    "url": "https://static.cninfo.com.cn/finalpage/policy.PDF",
+                },
+                {
+                    "title": "关于股份回购注销完成的公告",
+                    "published_at": "2026-08-14T09:00:00+08:00",
+                    "url": "https://static.cninfo.com.cn/finalpage/buyback-complete.PDF",
+                },
+            ],
+        }
+    ]
+
+
+def test_title_search_keeps_overlapping_terms_as_separate_complete_results() -> None:
+    result = announcements.search_announcement_titles(
+        _search_index(), ["股份回购", "回购注销"]
+    )
+
+    assert result["scanned_count"] == 3
+    terms = result["terms"]
+    assert [item["term"] for item in terms] == ["股份回购", "回购注销"]
+    assert [item["match_count"] for item in terms] == [1, 1]
+    assert terms[0]["matches"][0]["title"] == "关于股份回购注销完成的公告"
+    assert terms[1]["matches"][0]["title"] == "关于股份回购注销完成的公告"
+
+
+def test_title_search_zero_match_is_explicit_without_event_judgment() -> None:
+    result = announcements.search_announcement_titles(_search_index(), ["重大诉讼"])
+
+    assert result == {
+        "scanned_count": 3,
+        "terms": [{"term": "重大诉讼", "match_count": 0, "matches": []}],
+    }
+
+
+def test_title_search_returns_policy_title_without_classifying_it() -> None:
+    result = announcements.search_announcement_titles(_search_index(), ["管理制度"])
+
+    assert result["terms"][0]["matches"] == [
+        {
+            "title": "公司章程及回购管理制度（修订稿）",
+            "published_at": "2026-08-15T09:00:00+08:00",
+            "url": "https://static.cninfo.com.cn/finalpage/policy.PDF",
+        }
+    ]
+    assert set(result) == {"scanned_count", "terms"}
+
+
+@pytest.mark.parametrize(
+    "bad_index",
+    (
+        {},
+        {"announcements": "not-a-list"},
+        {"announcements": [{"title": "公告", "published_at": None, "url": "x"}]},
+    ),
+)
+def test_title_search_rejects_bad_normalized_input_instead_of_returning_zero(
+    bad_index: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        announcements.search_announcement_titles(bad_index, ["公告"])
+
+
+def test_cli_title_terms_scan_a_saved_normalized_result(tmp_path: Path) -> None:
+    input_path = _write_json(tmp_path / "normalized-result.json", _search_index())
+    output_path = tmp_path / "title-search.json"
+
+    completed = _run_cli(
+        "--input",
+        str(input_path),
+        "--output",
+        str(output_path),
+        "--title-term",
+        "股份回购",
+        "--title-term",
+        "管理制度",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    envelope = json.loads(output_path.read_text(encoding="utf-8"))
+    assert envelope["status"] == "success"
+    assert envelope["result"]["scanned_count"] == 3
+    assert [item["match_count"] for item in envelope["result"]["terms"]] == [1, 1]
+
+
+def test_cli_title_terms_scan_a_canonical_success_envelope(tmp_path: Path) -> None:
+    canonical = {
+        "schema_version": "1.0",
+        "tool": "announcement_index",
+        "input_sha256": "0" * 64,
+        "status": "success",
+        "source": None,
+        "source_provided": False,
+        "result": _search_index(),
+    }
+    input_path = _write_json(tmp_path / "normalized-envelope.json", canonical)
+    output_path = tmp_path / "title-search.json"
+
+    completed = _run_cli(
+        "--input",
+        str(input_path),
+        "--output",
+        str(output_path),
+        "--title-term",
+        "回购注销",
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    envelope = json.loads(output_path.read_text(encoding="utf-8"))
+    assert envelope["status"] == "success"
+    assert envelope["result"]["scanned_count"] == 3
+    assert envelope["result"]["terms"][0]["match_count"] == 1
+
+
+def test_cli_title_search_rejects_a_canonical_failure_envelope(tmp_path: Path) -> None:
+    failed = {
+        "schema_version": "1.0",
+        "tool": "announcement_index",
+        "input_sha256": "0" * 64,
+        "status": "failed",
+        "source": None,
+        "source_provided": False,
+        "error_type": "ValueError",
+        "error_message": "synthetic failure",
+    }
+    input_path = _write_json(tmp_path / "failed-envelope.json", failed)
+    output_path = tmp_path / "title-search.json"
+
+    completed = _run_cli(
+        "--input",
+        str(input_path),
+        "--output",
+        str(output_path),
+        "--title-term",
+        "回购",
+    )
+
+    assert completed.returncode == 1
+    envelope = json.loads(output_path.read_text(encoding="utf-8"))
+    assert envelope["status"] == "failed"
+    assert "result" not in envelope
+    assert "success" in envelope["error_message"]
+
+
+def test_cli_title_search_bad_input_writes_failure_envelope(tmp_path: Path) -> None:
+    input_path = _write_json(tmp_path / "bad-result.json", {"announcements": []})
+    output_path = tmp_path / "title-search.json"
+
+    completed = _run_cli(
+        "--input",
+        str(input_path),
+        "--output",
+        str(output_path),
+        "--title-term",
+        "",
+    )
+
+    assert completed.returncode == 1
+    envelope = json.loads(output_path.read_text(encoding="utf-8"))
+    assert envelope["status"] == "failed"
+    assert "result" not in envelope

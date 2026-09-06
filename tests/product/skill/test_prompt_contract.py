@@ -12,6 +12,8 @@ RUNTIME_REFERENCES = (
     "references/recovery.md",
     "references/report-guidance.md",
     "references/host-tools.md",
+    "references/company-models.md",
+    "references/research-quality.md",
     "references/work-packages/catalog.md",
 )
 FORBIDDEN = (

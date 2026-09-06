@@ -26,6 +26,11 @@ from tests.product.skill.phase2_run_fixture import (
     NORMALIZED_REL,
     RAW_REL,
     WORK_PACKAGES,
+    _conclusion_boundary_table,
+    _method_selection_table,
+    _model_profile_table,
+    _quality_summary_table,
+    _required_items_table,
     build_valid_phase2_run,
     sha256_file,
 )
@@ -428,12 +433,20 @@ def test_existing_w1_with_unreadable_identity_warns_instead_of_skipping(
     _assert_nonblocking_warning(result, "identity.metadata_unreadable")
 
 
+def _default_w10_quality_summary() -> str:
+    return _quality_summary_table(
+        "standard", "standard", "完整", "有效", "合成经营模型（fixture）"
+    )
+
+
 def test_missing_w10_mapping_is_a_nonblocking_warning(
     checker: Any, tmp_path: Path
 ) -> None:
     research, delivery, lock = build_valid_phase2_run(tmp_path)
     (research / "work-packages/W10-report-review.md").write_text(
-        "# W10（合成，缺映射表）\n\n本工作包未创建或修改中间脚本。\n",
+        "# W10（合成，缺映射表）\n\n"
+        + _default_w10_quality_summary()
+        + "\n本工作包未创建或修改中间脚本。\n",
         encoding="utf-8",
     )
     _refresh_research_lock(checker, research, lock)
@@ -1943,7 +1956,7 @@ def test_evidence_heading_accepts_fullwidth_colon(checker: Any, tmp_path: Path) 
     assert result["mechanical_status"] == "PASS", result["issues"]
 
 
-def test_evidence_reference_cannot_bypass_unregistered_artifact_via_link(
+def test_adopted_evidence_cannot_bypass_unregistered_artifact_via_good_link(
     checker: Any, tmp_path: Path
 ) -> None:
     research, delivery, lock = build_valid_phase2_run(tmp_path)
@@ -1955,6 +1968,533 @@ def test_evidence_reference_cannot_bypass_unregistered_artifact_via_link(
             1,
         )
         + f"\n### E2 补充\n\n- 有效定位：`{RAW_REL}`。\n",
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "trace.adopted_claim_missing_source" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_adopted_w10_evidence_id_without_local_artifact_fails(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8")
+        + "\n### E17 公告事实\n\n- 原文定位：https://example.test/disclosure。\n",
+        encoding="utf-8",
+    )
+    owner = research / "work-packages/W0-task-framing.md"
+    owner.write_text(
+        owner.read_text(encoding="utf-8").replace("证据定位：E1。", "证据定位：E17。", 1),
+        encoding="utf-8",
+    )
+    w10 = research / "work-packages/W10-report-review.md"
+    w10.write_text(
+        w10.read_text(encoding="utf-8").replace(
+            "| W0 | E1 | adopted |", "| W0 | E17 | adopted |", 1
+        ),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.adopted_claim_missing_source" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_adopted_w10_indirect_reference_without_local_artifact_fails(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8")
+        + "\n### E17 间接事实\n\n- 另见 E18。\n"
+        + "\n### E18 外部定位\n\n- 原文定位：https://example.test/disclosure。\n",
+        encoding="utf-8",
+    )
+    owner = research / "work-packages/W0-task-framing.md"
+    owner.write_text(
+        owner.read_text(encoding="utf-8").replace("证据定位：E1。", "证据定位：E17。", 1),
+        encoding="utf-8",
+    )
+    w10 = research / "work-packages/W10-report-review.md"
+    w10.write_text(
+        w10.read_text(encoding="utf-8").replace(
+            "| W0 | E1 | adopted |", "| W0 | E17 | adopted |", 1
+        ),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.adopted_claim_missing_source" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_one_valid_reference_does_not_hide_another_dangling_adopted_reference(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8")
+        + "\n### E17 公告事实\n\n- 原文定位：https://example.test/disclosure。\n",
+        encoding="utf-8",
+    )
+    owner = research / "work-packages/W0-task-framing.md"
+    owner.write_text(
+        owner.read_text(encoding="utf-8") + "\n证据定位：E17。\n",
+        encoding="utf-8",
+    )
+    w10 = research / "work-packages/W10-report-review.md"
+    w10.write_text(
+        w10.read_text(encoding="utf-8").replace(
+            "| W0 | E1 | adopted |", "| W0 | E1、E17 | adopted |", 1
+        ),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.adopted_claim_missing_source" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_adopted_w10_indirect_reference_to_adopted_artifact_passes(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8") + "\n### E17 别名\n\n- 另见 E1。\n",
+        encoding="utf-8",
+    )
+    owner = research / "work-packages/W0-task-framing.md"
+    owner.write_text(
+        owner.read_text(encoding="utf-8").replace("证据定位：E1。", "证据定位：E17。", 1),
+        encoding="utf-8",
+    )
+    w10 = research / "work-packages/W10-report-review.md"
+    w10.write_text(
+        w10.read_text(encoding="utf-8").replace(
+            "| W0 | E1 | adopted |", "| W0 | E17 | adopted |", 1
+        ),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.adopted_claim_missing_source" not in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+def test_direct_adopted_artifact_remains_a_leaf_when_block_discloses_a_gap(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：`{RAW_REL}`；另见 U17（未取得的对照）。",
+            1,
+        )
+        + "\n### U17 未取得的对照\n\n- 未取得，作为缺口保留。\n",
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.adopted_claim_missing_source" not in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+def test_filtered_locator_only_supports_adopted_claim_when_artifact_is_adopted(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。", f"[unused]: {RAW_REL}", 1
+        ),
+        encoding="utf-8",
+    )
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["artifacts"][0].__setitem__("status", "not_adopted"),
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.report_claim_not_adopted" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_chinese_parenthetical_after_artifact_does_not_break_source_resolution(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：{RAW_REL}（输入：合成）。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.adopted_claim_missing_source" not in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+def test_exact_artifact_path_does_not_emit_mapping_warning(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.invalid_w10_mapping" not in {
+        warning["code"] for warning in result["warnings"]
+    }
+
+
+def test_exact_artifact_path_is_not_ambiguous_when_basenames_repeat(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    duplicate_rel = f"artifacts/raw/source-b/{Path(RAW_REL).name}"
+    duplicate = research / duplicate_rel
+    duplicate.parent.mkdir(parents=True)
+    duplicate.write_bytes((research / RAW_REL).read_bytes())
+
+    def add_duplicate(manifest: dict[str, Any]) -> None:
+        entry = dict(manifest["artifacts"][0])
+        entry["path"] = duplicate_rel
+        entry["source_id"] = "source-b"
+        manifest["artifacts"].append(entry)
+
+    _edit_json(research / "manifest.json", add_duplicate)
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert result["issues"] == []
+    assert "trace.invalid_w10_mapping" not in {
+        warning["code"] for warning in result["warnings"]
+    }
+
+
+@pytest.mark.parametrize("ellipsis", ("...", "…"))
+def test_unique_abbreviated_adopted_artifact_is_a_warning_not_a_missing_source(
+    checker: Any, tmp_path: Path, ellipsis: str
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    abbreviated = f"artifacts/raw/source-a/quote--{ellipsis}--de7fa80b.json"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：`{abbreviated}`。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    _assert_nonblocking_warning(result, "trace.invalid_w10_mapping")
+
+
+def test_unique_adopted_artifact_basename_is_a_warning_not_a_missing_source(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：`{Path(RAW_REL).name}`。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    _assert_nonblocking_warning(result, "trace.invalid_w10_mapping")
+
+
+def test_unique_nonadopted_artifact_basename_does_not_support_an_adopted_claim(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：`{Path(RAW_REL).name}`。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["artifacts"][0].__setitem__("status", "not_adopted"),
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.report_claim_not_adopted" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def _set_w0_mapping_locator(research: Path, old: str, new: str) -> None:
+    owner = research / "work-packages/W0-task-framing.md"
+    owner.write_text(
+        owner.read_text(encoding="utf-8").replace(
+            f"证据定位：{old}。", f"证据定位：{new}。", 1
+        ),
+        encoding="utf-8",
+    )
+    w10 = research / "work-packages/W10-report-review.md"
+    w10.write_text(
+        w10.read_text(encoding="utf-8").replace(
+            f"| W0 | {old} | adopted |", f"| W0 | {new} | adopted |", 1
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_indirect_reference_to_unique_adopted_basename_is_nonblocking(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：`{Path(RAW_REL).name}`。",
+            1,
+        )
+        + "\n### E17 间接定位\n\n- 另见 E1。\n",
+        encoding="utf-8",
+    )
+    _set_w0_mapping_locator(research, "E1", "E17")
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    _assert_nonblocking_warning(result, "trace.invalid_w10_mapping")
+
+
+def test_indirect_reference_to_nonadopted_basename_is_rejected(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：`{Path(RAW_REL).name}`。",
+            1,
+        )
+        + "\n### E17 间接定位\n\n- 另见 E1。\n",
+        encoding="utf-8",
+    )
+    _set_w0_mapping_locator(research, "E1", "E17")
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["artifacts"][0].__setitem__("status", "not_adopted"),
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.report_claim_not_adopted" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_fragment_with_unique_adopted_basename_is_nonblocking(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：`{Path(RAW_REL).name}`。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _set_w0_mapping_locator(research, "E1", "evidence.md#E1 时点")
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    _assert_nonblocking_warning(result, "trace.invalid_w10_mapping")
+
+
+def test_fragment_with_nonadopted_basename_is_rejected(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成时点证据：`{Path(RAW_REL).name}`。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _set_w0_mapping_locator(research, "E1", "evidence.md#E1 时点")
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["artifacts"][0].__setitem__("status", "not_adopted"),
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.report_claim_not_adopted" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_multiple_unique_adopted_basenames_in_one_block_are_nonblocking(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成来源一：`{Path(RAW_REL).name}`；"
+            f"来源二：`{Path(NORMALIZED_REL).name}`。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    _assert_nonblocking_warning(result, "trace.invalid_w10_mapping")
+
+
+def test_one_nonadopted_basename_invalidates_a_multi_basename_leaf(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(
+            f"- 合成时点证据：`{RAW_REL}`。",
+            f"- 合成来源一：`{Path(RAW_REL).name}`；"
+            f"来源二：`{Path(NORMALIZED_REL).name}`。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["artifacts"][1].__setitem__("status", "not_adopted"),
+    )
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.report_claim_not_adopted" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_indirect_evidence_cycle_does_not_resolve(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8")
+        + "\n### E17 循环一\n\n- 另见 E18。\n"
+        + "\n### E18 循环二\n\n- 另见 E17。\n",
+        encoding="utf-8",
+    )
+    _set_w0_mapping_locator(research, "E1", "E17")
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert "trace.adopted_claim_missing_source" in {
+        issue["code"] for issue in result["issues"]
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize("status", ("not_adopted", "failed"))
+def test_nonadopted_or_failed_w10_gap_remains_nonblocking(
+    checker: Any, tmp_path: Path, status: str
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8")
+        + "\n### E17 已披露缺口\n\n- 原文定位未保存。\n",
+        encoding="utf-8",
+    )
+    owner = research / "work-packages/W0-task-framing.md"
+    owner.write_text(
+        owner.read_text(encoding="utf-8").replace("证据定位：E1。", "证据定位：E17。", 1),
+        encoding="utf-8",
+    )
+    w10 = research / "work-packages/W10-report-review.md"
+    w10.write_text(
+        w10.read_text(encoding="utf-8").replace(
+            "| W0 | E1 | adopted |", f"| W0 | E17 | {status} |", 1
+        ),
         encoding="utf-8",
     )
     _refresh_research_lock(checker, research, lock)
@@ -1994,7 +2534,8 @@ def test_w10_mapping_rows_must_close_the_trace_chain(
     w10 = research / "work-packages/W10-report-review.md"
     w10.write_text(
         "# W10\n\n"
-        "| 报告章节 | 关键主张定位 | owner 工作包 | 证据定位 | 采用状态 |\n"
+        + _default_w10_quality_summary()
+        + "| 报告章节 | 关键主张定位 | owner 工作包 | 证据定位 | 采用状态 |\n"
         "| --- | --- | --- | --- | --- |\n"
         f"{row}\n\n"
         "本工作包未创建或修改中间脚本。\n",
@@ -2034,7 +2575,9 @@ def test_w10_artifact_locator_must_match_a_registered_file_not_a_directory(
 
     result = checker.check_run(research, delivery, lock)
 
-    _assert_nonblocking_warning(result, "trace.invalid_w10_mapping")
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "trace.report_claim_not_adopted" in codes
+    assert result["mechanical_status"] == "FAIL"
 
 
 @pytest.mark.parametrize(
@@ -2043,7 +2586,7 @@ def test_w10_artifact_locator_must_match_a_registered_file_not_a_directory(
         ("| 1. 任务与时点 |", "| 1. 任务与时点（伪后缀） |"),
         ("| 重要声明：合成内容，无研究意义。 |", "| 任务与时点 |"),
         ("| W0 | E1 | adopted |", "| W0 | evidence.md#时点 | adopted |"),
-        ("| W0 | E1 | adopted |", "| W0、W2 | E1 | adopted |"),
+        ("| W0 | E1 | adopted |", "| W0、W2 | E9 | adopted |"),
         ("| W0 | E1 | adopted |", "| W0、WX | E1 | adopted |"),
     ),
     ids=(
@@ -2058,6 +2601,12 @@ def test_invalid_w10_mapping_edits_are_nonblocking_warnings(
     checker: Any, tmp_path: Path, old_row: str, new_row: str
 ) -> None:
     research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8")
+        + f"\n### E9 回访定位\n\n- 合成证据：`{RAW_REL}`。\n",
+        encoding="utf-8",
+    )
     w10 = research / "work-packages/W10-report-review.md"
     w10.write_text(
         w10.read_text(encoding="utf-8").replace(
@@ -2197,7 +2746,9 @@ def test_w10_adoption_status_must_match_terminal_manifest_artifacts(
 
     result = checker.check_run(research, delivery, lock)
 
-    _assert_nonblocking_warning(result, "trace.invalid_w10_mapping")
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "trace.report_claim_not_adopted" in codes
+    assert result["mechanical_status"] == "FAIL"
 
 
 def test_w10_substitute_obtained_means_the_terminal_artifact_is_adopted(
@@ -2260,6 +2811,12 @@ def test_w10_owner_evidence_id_match_uses_token_boundaries(
     checker: Any, tmp_path: Path
 ) -> None:
     research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8")
+        + f"\n### E10 词边界\n\n- 合成证据：`{RAW_REL}`。\n",
+        encoding="utf-8",
+    )
     owner = research / "work-packages/W0-task-framing.md"
     owner.write_text(
         owner.read_text(encoding="utf-8").replace("E1", "E10"),
@@ -2569,3 +3126,1208 @@ def test_cli_rejects_symlinked_output_parent_into_research_root(tmp_path: Path) 
     assert completed.returncode == 2
     assert "Traceback" not in completed.stderr
     assert not (research / "checker-result.json").exists()
+
+
+# --- Phase 4 quality contract: mechanical structure only, no business verdicts ---
+
+
+def _phase4_result(
+    checker: Any,
+    research: Path,
+    delivery: Path,
+    lock: Path,
+    *,
+    refresh_lock: bool = True,
+) -> tuple[dict[str, Any], set[str]]:
+    if refresh_lock:
+        _refresh_research_lock(checker, research, lock)
+    result = checker.check_run(research, delivery, lock)
+    return result, {issue["code"] for issue in result["issues"]}
+
+
+@pytest.mark.parametrize(
+    ("requested", "actual", "completeness", "validity"),
+    (
+        ("quick", "quick", "完整", "有效"),
+        ("standard", "quick", "不完整", "有效"),
+        ("deep", "standard", "不完整", "有效"),
+        ("deep", "quick", "完整", "受限"),
+        ("deep", "未达到 quick", "不完整", "受限"),
+    ),
+)
+def test_phase4_quality_combinations_pass(
+    checker: Any,
+    tmp_path: Path,
+    requested: str,
+    actual: str,
+    completeness: str,
+    validity: str,
+) -> None:
+    run_id = f"合成公司-000001.SZ-{requested}-20260630T190000+0800"
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path,
+        run_id=run_id,
+        requested_depth=requested,
+        actual_depth=actual,
+        information_completeness=completeness,
+        analysis_validity=validity,
+    )
+    result = checker.check_run(research, delivery, lock)
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+@pytest.mark.parametrize(
+    ("old_row", "new_row", "expected_code"),
+    (
+        (
+            "| 请求深度 | standard |",
+            "| 请求深度 | 超深度 |",
+            "quality.invalid_value",
+        ),
+        (
+            "| 实际深度 | standard |",
+            "| 实际深度 | fast |",
+            "quality.invalid_value",
+        ),
+        (
+            "| 信息完整性 | 完整 |",
+            "| 信息完整性 | 部分 |",
+            "quality.invalid_value",
+        ),
+        (
+            "| 分析有效性 | 有效 |",
+            "| 分析有效性 | 无效 |",
+            "quality.invalid_value",
+        ),
+        (
+            "| 实际深度 | standard |",
+            "| 实际深度 | deep |",
+            "quality.depth_order",
+        ),
+        (
+            "| 请求深度 | standard |",
+            "| 请求深度 | deep |",
+            "quality.request_depth_mismatch",
+        ),
+    ),
+)
+def test_phase4_home_value_and_depth_relations_are_enforced(
+    checker: Any,
+    tmp_path: Path,
+    old_row: str,
+    new_row: str,
+    expected_code: str,
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _replace_quality_field_everywhere(research, old_row, new_row)
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert codes == {expected_code}
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize(
+    ("completeness", "validity"),
+    (
+        ("不完整", "有效"),
+        ("完整", "受限"),
+    ),
+)
+def test_phase4_limited_research_must_not_claim_requested_depth(
+    checker: Any,
+    tmp_path: Path,
+    completeness: str,
+    validity: str,
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path,
+        information_completeness=completeness,
+        analysis_validity=validity,
+    )
+
+    result, codes = _phase4_result(
+        checker, research, delivery, lock, refresh_lock=False
+    )
+
+    assert "quality.request_depth_claim" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def _rewrite_package(
+    research: Path, package_filename: str, edit: Callable[[str], str]
+) -> None:
+    path = research / "work-packages" / package_filename
+    path.write_text(edit(path.read_text(encoding="utf-8")), encoding="utf-8")
+
+
+def _without_table(text: str, table: str) -> str:
+    assert table in text
+    return text.replace(table, "", 1)
+
+
+def _replace_quality_field_everywhere(
+    research: Path, old_row: str, new_row: str
+) -> None:
+    for relative in (
+        "report.md",
+        "checkpoint.md",
+        "work-packages/W10-report-review.md",
+    ):
+        path = research / relative
+        text = path.read_text(encoding="utf-8")
+        assert old_row in text
+        path.write_text(text.replace(old_row, new_row, 1), encoding="utf-8")
+
+
+@pytest.mark.parametrize(
+    ("package_filename", "expected_code"),
+    (
+        ("W3-industry-competition.md", "quality.missing_required_items"),
+        ("W8-market-signals.md", "quality.missing_required_items"),
+        ("W4-business-governance.md", "quality.missing_model_profile"),
+        ("W6-forecast-scenarios.md", "quality.missing_method_selection"),
+        ("W9-thesis-counterevidence.md", "quality.missing_conclusion_boundary"),
+    ),
+)
+def test_phase4_owner_tables_are_required(
+    checker: Any,
+    tmp_path: Path,
+    package_filename: str,
+    expected_code: str,
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    removals = {
+        "W3-industry-competition.md": lambda text: _without_table(
+            text, _required_items_table("standard")
+        ),
+        "W8-market-signals.md": lambda text: _without_table(
+            text, _required_items_table("standard")
+        ),
+        "W4-business-governance.md": lambda text: _without_table(
+            text, _model_profile_table("合成经营模型（fixture）")
+        ),
+        "W6-forecast-scenarios.md": lambda text: _without_table(
+            text, _method_selection_table()
+        ),
+        "W9-thesis-counterevidence.md": lambda text: _without_table(
+            text, _conclusion_boundary_table()
+        ),
+    }
+    _rewrite_package(research, package_filename, removals[package_filename])
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert expected_code in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize(
+    ("old_row", "new_row"),
+    (
+        (
+            "| 合成必需项 | standard 共通底线 | 有 | E1，合成查询范围 | 满足：无额外限制 |",
+            "| 合成必需项 | standard 共通底线 | 遗失 | E1，合成查询范围 | 满足：无额外限制 |",
+        ),
+        (
+            "| 合成必需项 | standard 共通底线 | 有 | E1，合成查询范围 | 满足：无额外限制 |",
+            "| 合成必需项 | standard 共通底线 | 未发现 | E1，合成查询范围 | 满足：无额外限制 |",
+        ),
+    ),
+)
+def test_phase4_required_item_status_and_prefix_must_agree(
+    checker: Any,
+    tmp_path: Path,
+    old_row: str,
+    new_row: str,
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _rewrite_package(
+        research,
+        "W3-industry-competition.md",
+        lambda text: text.replace(old_row, new_row, 1),
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "quality.invalid_required_item" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_phase4_rejects_an_incomplete_required_item_row(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    valid_row = (
+        "| 合成必需项 | standard 共通底线 | 有 | E1，合成查询范围 | "
+        "满足：无额外限制 |"
+    )
+    incomplete_row = (
+        "| 合成残缺项 | standard 共通底线 | 有 | | 满足：无额外限制 |"
+    )
+    _rewrite_package(
+        research,
+        "W3-industry-competition.md",
+        lambda text: text.replace(valid_row, f"{valid_row}\n{incomplete_row}", 1),
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "quality.invalid_required_item" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize(
+    ("target", "edit"),
+    (
+        ("checkpoint", lambda text: _without_table(
+            text, _quality_summary_table(
+                "standard", "standard", "完整", "有效", "合成经营模型（fixture）"
+            )
+        )),
+        ("W10", lambda text: _without_table(
+            text, _quality_summary_table(
+                "standard", "standard", "完整", "有效", "合成经营模型（fixture）"
+            )
+        )),
+    ),
+)
+def test_phase4_quality_summary_is_required(
+    checker: Any, tmp_path: Path, target: str, edit: Callable[[str], str]
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    if target == "checkpoint":
+        path = research / "checkpoint.md"
+    else:
+        path = research / "work-packages/W10-report-review.md"
+    path.write_text(edit(path.read_text(encoding="utf-8")), encoding="utf-8")
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "quality.missing_summary" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize("target", ("checkpoint", "W10"))
+def test_phase4_summary_must_mirror_the_report(
+    checker: Any, tmp_path: Path, target: str
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    path = (
+        research / "checkpoint.md"
+        if target == "checkpoint"
+        else research / "work-packages/W10-report-review.md"
+    )
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            "| 实际深度 | standard |", "| 实际深度 | quick |", 1
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "quality.summary_mismatch" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize(
+    ("build_kwargs", "edit"),
+    (
+        (
+            {},
+            lambda text: text.replace(
+                "| 合成必需项 | standard 共通底线 | 有 | E1，合成查询范围 | 满足：无额外限制 |",
+                "| 合成必需项 | standard 共通底线 | 未取得 | E1，合成查询范围 "
+                "| 未满足：限制合成结论 |",
+                1,
+            ),
+        ),
+        (
+            {"information_completeness": "不完整", "actual_depth": "quick"},
+            lambda text: text.replace(
+                "| 合成必需项 | standard 共通底线 | 未取得 | E1，合成查询范围 "
+                "| 未满足：限制合成结论 |",
+                "| 合成必需项 | standard 共通底线 | 有 | E1，合成查询范围 | 满足：无额外限制 |",
+                1,
+            ),
+        ),
+    ),
+)
+def test_phase4_completeness_must_match_explicit_required_items(
+    checker: Any,
+    tmp_path: Path,
+    build_kwargs: dict[str, Any],
+    edit: Callable[[str], str],
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path, **build_kwargs)
+    _rewrite_package(
+        research, "W5-financial-validation.md", edit
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "quality.summary_mismatch" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_phase4_restricted_validity_accepts_an_excluded_method_with_missing_input(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, analysis_validity="受限", actual_depth="quick"
+    )
+    w5 = (research / "work-packages/W5-financial-validation.md").read_text(
+        encoding="utf-8"
+    )
+    assert "| 合成方法 | 排除 |" in w5
+    assert "| 合成方法 | 受限 |" not in w5
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+def test_phase4_restricted_validity_requires_an_observable_method_constraint(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, analysis_validity="受限", actual_depth="quick"
+    )
+    _rewrite_package(
+        research,
+        "W5-financial-validation.md",
+        lambda text: text.replace(
+            _method_selection_table(limited=True), _method_selection_table(), 1
+        ),
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert codes == {"quality.summary_mismatch"}
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize("field", ("关键资料缺口", "当前不能得出的结论"))
+def test_phase4_formatted_none_does_not_hide_a_limited_summary(
+    checker: Any, tmp_path: Path, field: str
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, analysis_validity="受限", actual_depth="quick"
+    )
+    report = research / "report.md"
+    text = report.read_text(encoding="utf-8")
+    text, replacements = re.subn(
+        rf"^\| {re.escape(field)} \| .* \|$",
+        f"| {field} | **无** |",
+        text,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    assert replacements == 1
+    report.write_text(text, encoding="utf-8")
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "quality.summary_mismatch" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_phase4_checker_has_no_business_model_or_method_whitelist(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, company_model="未列入六类的证据型自定义模型"
+    )
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+def test_phase4_limited_conclusion_points_to_the_owner_of_the_gap(
+    tmp_path: Path,
+) -> None:
+    research, _, _ = build_valid_phase2_run(
+        tmp_path, information_completeness="不完整", actual_depth="quick"
+    )
+    w9 = (research / "work-packages/W9-thesis-counterevidence.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "| 合成受限结论 | 合成资料或方法限制 | W5 | 取得合成关键输入 |" in w9
+
+
+def test_decorated_report_model_label_breaks_the_identity_mirror(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "| 分析模型 | 合成模型标识（fixture） |",
+            "| 分析模型 | 合成模型标识（fixture）（宿主实际暴露标识） |",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "lock.model_id_mismatch" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_manifest_runtime_skill_hash_must_match_the_lock(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["run"]["runtime_skill"].__setitem__(
+            "sha256", "1" * 64
+        ),
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "lock.runtime_skill_mismatch" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def _register_raw_fixture(
+    research: Path,
+    *,
+    stem: str,
+    content: str,
+    media_format: str,
+    work_package: str,
+    status: str,
+    failure: str | None = None,
+) -> str:
+    digest = hashlib.sha256(content.encode()).hexdigest()
+    relative = (
+        f"artifacts/raw/source-a/{stem}--source-a--20260630T190500+0800--"
+        f"{digest[:8]}.{media_format}"
+    )
+    (research / relative).write_text(content, encoding="utf-8")
+
+    def register(manifest: dict[str, Any]) -> None:
+        entry: dict[str, Any] = {
+            "path": relative,
+            "type": "raw",
+            "media_format": media_format,
+            "work_package": work_package,
+            "sha256": digest,
+            "source_id": "source-a",
+            "period_or_asof": "2026-06-30",
+            "created_at": "2026-06-30T19:05:00+08:00",
+            "schema_version": None,
+            "inputs": [],
+            "status": status,
+        }
+        if failure is not None:
+            entry["failure"] = failure
+        manifest["artifacts"].append(entry)
+
+    _edit_json(research / "manifest.json", register)
+    return relative
+
+
+@pytest.mark.parametrize(
+    ("status", "normalized", "expected_status"),
+    (
+        pytest.param("transport_error", None, "FAIL", id="failed-cannot-be-adopted"),
+        pytest.param(
+            "success", {"price": "10.00"}, "PASS", id="success-stays-adoptable"
+        ),
+    ),
+)
+def test_source_adapter_envelope_adoption_matches_status(
+    checker: Any,
+    tmp_path: Path,
+    status: str,
+    normalized: dict[str, str] | None,
+    expected_status: str,
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    envelope = {
+        "schema_version": "1.0",
+        "adapter": "source_fetch",
+        "domain": "quotes",
+        "source_id": "source-a",
+        "called": True,
+        "disabled": False,
+        "status": status,
+        "source_metadata": {},
+        "normalized": normalized,
+        "equivalence": None,
+        "raw_input_sha256": "0" * 64,
+    }
+    content = json.dumps(envelope, ensure_ascii=False) + "\n"
+    _register_raw_fixture(
+        research,
+        stem="fetch",
+        content=content,
+        media_format="json",
+        work_package="W2",
+        status="adopted",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert result["mechanical_status"] == expected_status, result["issues"]
+    assert ("manifest.envelope_failure_adopted" in codes) == (expected_status == "FAIL")
+
+
+def test_failed_canonical_tool_envelope_cannot_be_adopted_as_derived(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    envelope = {
+        "tool": "market_series_metrics",
+        "status": "failed",
+        "error_type": "upstream_unavailable",
+        "error_message": "fixture failure",
+        "input_sha256": "0" * 64,
+    }
+    content = json.dumps(envelope, ensure_ascii=False) + "\n"
+    (research / DERIVED_REL).write_text(content, encoding="utf-8")
+
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: next(
+            entry for entry in manifest["artifacts"] if entry["path"] == DERIVED_REL
+        ).__setitem__("sha256", hashlib.sha256(content.encode()).hexdigest()),
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "manifest.envelope_failure_adopted" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def _append_report_line(research: Path, line: str) -> None:
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8") + "\n" + line + "\n", encoding="utf-8"
+    )
+
+
+def test_report_cannot_reference_superseded_artifacts(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["artifacts"][2].__setitem__("status", "superseded"),
+    )
+    _append_report_line(research, f"过程产物见 `{DERIVED_REL}`（留档）。")
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.report_reference_not_adopted" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_report_cannot_reference_unregistered_artifacts(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    ghost = "artifacts/raw/source-a/ghost--source-a--20260630T190500+0800--deadbeef.json"
+    _append_report_line(research, f"另见 `{ghost}`。")
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.report_reference_not_adopted" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_dangling_evidence_references_are_rejected(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _append_report_line(research, "补充证据：E9（不存在的证据编号）。")
+    w3 = research / "work-packages/W3-industry-competition.md"
+    w3.write_text(
+        w3.read_text(encoding="utf-8") + "\n另见 F7。\n", encoding="utf-8"
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+    targets = [
+        i["path"]
+        for i in result["issues"]
+        if i["code"] == "trace.dangling_evidence_reference"
+    ]
+
+    assert "report.md" in targets
+    assert "work-packages/W3-industry-competition.md" in targets
+    assert result["mechanical_status"] == "FAIL"
+
+
+def _move_fixture_derived_compute_to_owner(research: Path, owner: str) -> None:
+    relocated = DERIVED_REL.replace("artifacts/derived/W5/", f"artifacts/derived/{owner}/")
+    (research / relocated).parent.mkdir(parents=True)
+    (research / DERIVED_REL).rename(research / relocated)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8").replace(DERIVED_REL, relocated),
+        encoding="utf-8",
+    )
+
+    def move(manifest: dict[str, Any]) -> None:
+        for entry in manifest["artifacts"]:
+            if entry["path"] == DERIVED_REL:
+                entry["path"] = relocated
+                entry["work_package"] = owner
+            elif entry["type"] == "script":
+                entry["status"] = "not_adopted"
+
+    _edit_json(research / "manifest.json", move)
+
+
+def test_report_chapter_seven_recomputation_claim_requires_w7_compute_artifact(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _move_fixture_derived_compute_to_owner(research, "W8")
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "## 7. 估值与隐含预期",
+            "## 7. 估值与隐含预期\n\nW7 canonical 复算已执行。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.unbacked_recomputation_claim" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_report_chapter_seven_prefix_execution_claim_requires_w7_compute_artifact(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _move_fixture_derived_compute_to_owner(research, "W8")
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "## 7. 估值与隐含预期",
+            "## 7. 估值与隐含预期\n\n已执行 canonical 复算。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.unbacked_recomputation_claim" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_w7_recomputation_claim_needs_w7_adopted_compute_artifact(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _move_fixture_derived_compute_to_owner(research, "W8")
+    w7 = research / "work-packages/W7-valuation-expectations.md"
+    w7.write_text(
+        w7.read_text(encoding="utf-8").replace(
+            "| 合成必需项 |",
+            "| PE/PB canonical 复算 |",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.unbacked_recomputation_claim" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_w7_required_item_recomputation_claim_accepts_w7_compute_artifact(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _move_fixture_derived_compute_to_owner(research, "W7")
+    w7 = research / "work-packages/W7-valuation-expectations.md"
+    w7.write_text(
+        w7.read_text(encoding="utf-8").replace(
+            "| 合成必需项 |",
+            "| PE/PB canonical 复算 |",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.unbacked_recomputation_claim" not in codes
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+def test_unmet_required_item_does_not_claim_recomputation_was_executed(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _move_fixture_derived_compute_to_owner(research, "W8")
+    w7 = research / "work-packages/W7-valuation-expectations.md"
+    w7.write_text(
+        w7.read_text(encoding="utf-8").replace(
+            "| 合成必需项 | standard 共通底线 | 有 | E1，合成查询范围 | 满足：无额外限制 |",
+            "| PE/PB canonical 复算 | quick | 未取得 | 输入缺失 | 未满足：不输出估值 |",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    _, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.unbacked_recomputation_claim" not in codes
+
+
+def test_w10_summary_and_ordinary_canonical_rule_do_not_claim_execution(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    for relative, line in (
+        (
+            "work-packages/W10-report-review.md",
+            "汇总 W5/W7/W8 确定性计算链。",
+        ),
+        (
+            "work-packages/W7-valuation-expectations.md",
+            "估值判断按 canonical 规则执行。",
+        ),
+    ):
+        path = research / relative
+        path.write_text(path.read_text(encoding="utf-8") + "\n" + line + "\n", encoding="utf-8")
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.unbacked_recomputation_claim" not in codes
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+def test_report_chapter_seven_recomputation_claim_accepts_w7_compute_artifact(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _move_fixture_derived_compute_to_owner(research, "W7")
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "## 7. 估值与隐含预期",
+            "## 7. 估值与隐含预期\n\nW7 canonical 复算已执行。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.unbacked_recomputation_claim" not in codes
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+@pytest.mark.parametrize("relative", ("checkpoint.md", "work-packages/W0-task-framing.md"))
+def test_data_mode_with_user_qualification_is_still_mirrored(
+    checker: Any, tmp_path: Path, relative: str
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "| 数据模式 | public |", "| 数据模式 | authorized |", 1
+        ),
+        encoding="utf-8",
+    )
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["run"].__setitem__("data_mode", "authorized"),
+    )
+    path = research / relative
+    path.write_text(
+        path.read_text(encoding="utf-8") + "\n数据模式：public（用户指定）\n",
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "quality.data_mode_mismatch" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_data_mode_must_match_report_manifest_checkpoint_and_work_packages(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "| 数据模式 | public |", "| 数据模式 | authorized |", 1
+        ),
+        encoding="utf-8",
+    )
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["run"].__setitem__("data_mode", "authorized"),
+    )
+    for relative in ("checkpoint.md", "work-packages/W0-task-framing.md"):
+        path = research / relative
+        path.write_text(
+            path.read_text(encoding="utf-8") + "\n数据模式：public\n",
+            encoding="utf-8",
+        )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "quality.data_mode_mismatch" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+W5_GAP_ROW = (
+    "| 合成必需项 | standard 共通底线 | 未取得 | E1，合成查询范围 | "
+    "未满足：限制合成结论 |"
+)
+
+
+def _rewrite_w5_gap_row(research: Path, cell: str) -> None:
+    path = research / "work-packages/W5-financial-validation.md"
+    text = path.read_text(encoding="utf-8")
+    assert W5_GAP_ROW in text
+    replaced = text.replace(
+        W5_GAP_ROW,
+        W5_GAP_ROW.replace("E1，合成查询范围", cell),
+        1,
+    )
+    path.write_text(replaced, encoding="utf-8")
+
+
+def _claim_candidate_warnings(result: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        warning
+        for warning in result["warnings"]
+        if warning["code"] == "trace.execution_claim_record_candidate"
+    ]
+
+
+def test_probe_failure_claim_without_record_is_surfaced_as_candidate(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    _rewrite_w5_gap_row(
+        research,
+        "上交所 query 接口返回空/被拒（2026-09-05 多次尝试），官方字段无可得路径",
+    )
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+    candidates = _claim_candidate_warnings(result)
+
+    assert len(candidates) == 1
+    assert candidates[0]["path"] == "work-packages/W5-financial-validation.md"
+    assert "接口返回空" in candidates[0]["message"]
+    assert result["mechanical_status"] == "PASS"
+
+
+def test_probe_failure_claim_closed_by_evidence_record_is_not_flagged(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    _rewrite_w5_gap_row(research, "合成接口返回空（E1）")
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+
+    assert _claim_candidate_warnings(result) == []
+    assert result["mechanical_status"] == "PASS"
+
+
+def test_probe_failure_claim_closed_by_saved_error_output_is_not_flagged(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    _rewrite_w5_gap_row(research, f"接口返回空，原始响应留档 `{RAW_REL}`")
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+
+    assert _claim_candidate_warnings(result) == []
+    assert result["mechanical_status"] == "PASS"
+
+
+def test_honest_no_record_wording_is_not_flagged(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    _rewrite_w5_gap_row(
+        research,
+        "本次未取得该字段，也没有可核验的接口探测记录，不能判断接口是否可用。",
+    )
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+
+    assert _claim_candidate_warnings(result) == []
+    assert result["mechanical_status"] == "PASS"
+
+
+def test_report_coverage_probe_claim_is_surfaced_as_candidate(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "| 合成域 | 有 | 合成来源 | 2026-06-30 | 不适用 | 无 |",
+            "| 合成域 | 有 | 合成来源 | 2026-06-30 | 上交所官方接口空返回 | 无 |",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+    candidates = _claim_candidate_warnings(result)
+
+    assert len(candidates) == 1
+    assert candidates[0]["path"] == "report.md"
+    assert result["mechanical_status"] == "PASS"
+
+
+def _register_failed_probe_record(research: Path) -> str:
+    content = "上游 504 响应留档（fixture）\n"
+    return _register_raw_fixture(
+        research,
+        stem="sse-probe",
+        content=content,
+        media_format="txt",
+        work_package="W8",
+        status="failed",
+        failure="真实执行失败：上交所动态接口返回空（fixture）",
+    )
+
+
+@pytest.mark.parametrize(
+    "cell",
+    (
+        "接口请求结果不能判断（返回空或被拒均未见留档）。",
+        "没有可核验的接口探测记录，接口返回空/被拒也未见留档。",
+    ),
+)
+def test_partial_honest_wording_is_still_surfaced(
+    checker: Any, tmp_path: Path, cell: str
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    _rewrite_w5_gap_row(research, cell)
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+
+    assert len(_claim_candidate_warnings(result)) == 1
+    assert result["mechanical_status"] == "PASS"
+
+
+@pytest.mark.parametrize(
+    "cell",
+    (
+        "来源原文提到接口，未见相关内容。",
+        "尚未尝试任何接口请求。",
+    ),
+)
+def test_probe_mention_without_outcome_is_not_flagged(
+    checker: Any, tmp_path: Path, cell: str
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    _rewrite_w5_gap_row(research, cell)
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+
+    assert _claim_candidate_warnings(result) == []
+    assert result["mechanical_status"] == "PASS"
+
+
+def test_probe_claim_citing_unresolvable_evidence_is_surfaced(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    _rewrite_w5_gap_row(research, "合成接口返回空（E9）")
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert len(_claim_candidate_warnings(result)) == 1
+    assert "trace.dangling_evidence_reference" in codes
+
+
+def test_failed_envelope_record_closes_probe_claim(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    record_relative = _register_failed_probe_record(research)
+    _rewrite_w5_gap_row(
+        research,
+        f"上交所动态接口返回空/被拒（多次尝试），原始响应留档 `{record_relative}`",
+    )
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+
+    assert _claim_candidate_warnings(result) == []
+    assert result["mechanical_status"] == "PASS"
+
+
+def test_propagated_probe_claim_copies_surface_per_file(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, actual_depth="quick", information_completeness="不完整"
+    )
+    claim = "上交所 query 接口返回空/被拒（多次尝试）"
+    _rewrite_w5_gap_row(research, claim)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8") + f"\n- {claim}。\n",
+        encoding="utf-8",
+    )
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8") + f"\n- 接口返回空，留档 `{RAW_REL}`。\n",
+        encoding="utf-8",
+    )
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "| 合成域 | 有 | 合成来源 | 2026-06-30 | 不适用 | 无 |",
+            f"| 合成域 | 有 | 合成来源 | 2026-06-30 | {claim} | 无 |",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, _ = _phase4_result(checker, research, delivery, lock)
+    candidates = _claim_candidate_warnings(result)
+
+    assert {candidate["path"] for candidate in candidates} == {
+        "report.md",
+        "evidence.md",
+        "work-packages/W5-financial-validation.md",
+    }
+    assert result["mechanical_status"] == "PASS"
+
+
+def _register_failed_log_record(research: Path) -> str:
+    content = "curl exit 52 upstream empty（fixture 失败日志）\n"
+    return _register_raw_fixture(
+        research,
+        stem="kline-failure",
+        content=content,
+        media_format="txt",
+        work_package="W8",
+        status="failed",
+        failure="真实执行失败：K 线接口返回空（fixture）",
+    )
+
+
+def test_report_source_table_failed_log_reference_is_a_legitimate_record(
+    checker: Any, tmp_path: Path
+) -> None:
+    """Integration positive: the report's source-coverage table may cite a
+    registered failed log as the record behind an 'interface returned empty'
+    process disclosure — no candidate warning, no provenance FAIL."""
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    record_relative = _register_failed_log_record(research)
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "| 合成域 | 有 | 合成来源 | 2026-06-30 | 不适用 | 无 |",
+            f"| 合成域 | 有 | 合成来源 | 2026-06-30 | 接口返回空，留档 `{record_relative}` | 无 |",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.report_reference_not_adopted" not in codes
+    assert _claim_candidate_warnings(result) == []
+    assert result["mechanical_status"] == "PASS"
+
+
+def test_report_reference_to_not_adopted_artifact_still_fails(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _edit_json(
+        research / "manifest.json",
+        lambda manifest: manifest["artifacts"][2].__setitem__("status", "not_adopted"),
+    )
+    _append_report_line(research, f"另见 `{DERIVED_REL}`（留档）。")
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert "trace.report_reference_not_adopted" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize(
+    ("target", "replacement", "allowed"),
+    (
+        pytest.param(
+            "| 合成方法 | 合成输入 | 2026-06-30 | 结果 | 预期 | 限制 |",
+            "| 合成方法 | 接口返回空，留档 `{record}` | 2026-06-30 | 结果 | 预期 | 限制 |",
+            False,
+            id="business-table-blocked",
+        ),
+        pytest.param(
+            "## 5. 财务验证与经营质量",
+            "## 5. 财务验证与经营质量\n\n公司营业收入为 100 亿元，依据：`{record}`。",
+            False,
+            id="business-prose-blocked",
+        ),
+        pytest.param(
+            "## 11. 数据覆盖、缺口、冲突与来源",
+            (
+                "## 11. 数据覆盖、缺口、冲突与来源\n\n"
+                "上交所动态接口返回空，原始响应留档 `{record}`，该来源本期不可用。"
+            ),
+            True,
+            id="chapter-11-gap-prose-allowed",
+        ),
+    ),
+)
+def test_failed_record_report_reference_depends_on_chapter(
+    checker: Any,
+    tmp_path: Path,
+    target: str,
+    replacement: str,
+    allowed: bool,
+) -> None:
+    """Failed records describe process gaps in chapter 11 only, not facts."""
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    record_relative = _register_failed_log_record(research)
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            target,
+            replacement.format(record=record_relative),
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    result, codes = _phase4_result(checker, research, delivery, lock)
+
+    assert ("trace.report_reference_not_adopted" not in codes) == allowed
+    expected_status = "PASS" if allowed else "FAIL"
+    assert result["mechanical_status"] == expected_status, result["issues"]

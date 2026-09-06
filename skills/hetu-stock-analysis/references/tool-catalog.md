@@ -64,12 +64,12 @@
 
 - 状态：`adopted`
 - 文件路径：`skills/hetu-stock-analysis/scripts/announcement_index.py`
-- 用途：把已保存的巨潮公告分页响应合并、跨页去重并按发布时间降序建索引，只保留不晚于时区化 `as_of` 的公告。
-- 输入 Schema：JSON 对象 `{"pages": [{"pageNum": 整数, "totalAnnouncement": 非负整数, "announcements": [{"announcementTitle": 字符串, "announcementTime": 毫秒整数, "adjunctUrl": 相对路径字符串, "announcementTypeName"?: 字符串列表或 null}]}], "as_of": "带时区 ISO-8601"}`。CLI 参数：`--input`、`--output`。
-- 输出 Schema：`result = {"total_count", "returned_count", "usable_count", "page_complete", "announcements": [{"title", "published_at", "url", "category"}]}`；附件 URL 只拼接到 `https://static.cninfo.com.cn/`；总数不一致、页码缺失/重复/不连续、返回数与总数不一致（多于或少于）时 `page_complete=false`，不得据此写"无公告"。
-- 失败异常：`as_of` 无时区或日期型、payload 非对象、附件 URL 非相对路径（任意 scheme 前缀如 `http`/`https`/`ftp`/`javascript`/`data`、以 `/` 或 `\\` 开头、含反斜杠、原始或百分号解码后含 `..` 父目录段（含 `%2e%2e`、`..%2F` 与双重编码）、空值）或非法字段类型时抛 `ValueError`（退出 1）；参数/输入缺失或不可读（含二次读取失败）/输出冲突（含并发创建）退出 2，且均不产生部分产物。
+- 用途：把已保存的巨潮公告分页响应合并、跨页去重并按发布时间降序建索引，只保留不晚于时区化 `as_of` 的公告；也可对 Agent 显式保存的 normalized result 以 Agent 显式提供的标题检索词做本地字面扫描。
+- 输入 Schema：无 `--title-term` 时，JSON 对象为 `{"pages": [{"pageNum": 整数, "totalAnnouncement": 非负整数, "announcements": [{"announcementTitle": 字符串, "announcementTime": 毫秒整数, "adjunctUrl": 相对路径字符串, "announcementTypeName"?: 字符串列表或 null}]}], "as_of": "带时区 ISO-8601"}`。标题扫描时，`--input` 可直接使用本工具的 canonical 成功信封（`status="success"` 且 `result.announcements` 存在），也兼容已保存的 normalized `result` 对象（顶层含 `announcements: [{title, published_at, url, ...}]`）；canonical 失败信封拒绝扫描，不伪装零命中。检索词以可重复的 `--title-term TERM` 逐个提供；同义词由 Agent 分别提供，不内置词典。共同 CLI 参数为 `--input`、`--output`。
+- 输出 Schema：normalize 模式的 `result = {"total_count", "returned_count", "usable_count", "page_complete", "announcements": [{"title", "published_at", "url", "category"}]}`；附件 URL 只拼接到 `https://static.cninfo.com.cn/`；总数不一致、页码缺失/重复/不连续、返回数与总数不一致（多于或少于）时 `page_complete=false`，不得据此写"无公告"。标题扫描模式的 `result = {"scanned_count": 实际扫描条数, "terms": [{"term", "match_count", "matches": [{"title", "published_at", "url"}]}]}`；每个词保留全部命中，重叠词分别返回同一命中，零命中只返回空 `matches`，不表示事件不存在。
+- 失败异常：normalize 模式中 `as_of` 无时区或日期型、payload 非对象、附件 URL 非相对路径（任意 scheme 前缀如 `http`/`https`/`ftp`/`javascript`/`data`、以 `/` 或 `\\` 开头、含反斜杠、原始或百分号解码后含 `..` 父目录段（含 `%2e%2e`、`..%2F` 与双重编码）、空值）或非法字段类型时抛 `ValueError`（退出 1）；标题扫描模式中检索词为空、`announcements` 非列表或命中必需字段缺失/类型错误同样退出 1 并写失败信封，不伪装成零命中；参数/输入缺失或不可读（含二次读取失败）/输出冲突（含并发创建）退出 2，且均不产生部分产物。
 - 是否可离线重放：是。
-- 禁止边界：不决定检索窗口和证据采用；不选择来源、不决定换源、不裁决冲突、不生成报告结论、不生成交易信号。
+- 禁止边界：标题扫描只做 Agent 提供词的字面匹配，不补同义词、不判断事件类型、风险或不存在；不决定检索窗口和证据采用；不选择来源、不决定换源、不裁决冲突、不生成报告结论、不生成交易信号。
 - 实际测试文件：`tests/product/skill/test_announcement_index_tool.py`、`tests/product/skill/test_tool_cli_contract.py`、`tests/product/skill/test_deterministic_tool_io.py`。
 
 ### numeric_consistency.py
@@ -147,7 +147,7 @@
 
 - 状态：`mechanical_helper`（机械检查器，不是第七个分析候选工具）
 - 文件路径：`skills/hetu-stock-analysis/scripts/check-run-artifacts.py`
-- 用途：对一次已完成研究的产物做无状态单次机械检查——必需文件（W0–W10、checkpoint、evidence、manifest、report）、manifest JSON 解析与条目/输入的路径安全和哈希、条目状态封闭集（`adopted/superseded/failed/not_adopted`，failed 条目须带失败原因、script 条目须带脚本元数据块）、manifest 闭合 Schema（顶层 `schema_version`/`run` 必填块、非空 `artifacts`、条目封闭键集与 type/work_package 合法值——稳定码 `manifest.schema`）、十二章固定顺序、首页固定字段（含“分析模型”）与第 2 章十行核心发现固定行均须为表格行（散文关键词不通过）、W10 报告映射须为含五字段表头＋至少一行数据的表格、`artifacts/scripts/` 实际文件对 manifest 的登记与属主目录归属（属主限 W0–W10，未知属主判 `script.unknown_owner`）、无脚本工作包的“未创建或修改中间脚本”声明、lock record 的最终消息哈希与研究树哈希重算及记录路径绑定（伪造路径判 `lock.message_path_mismatch`/`lock.research_path_mismatch`，父字段类型错误按不可读输入退出 2；缺失或类型错误的绑定哈希字段直接产生 issue，绝不静默放行；`PASS` 同时要求零 issue 且全部 check 为 ok）。不判断自然语言真假、来源适用性或采用裁决。
+- 用途：对一次已完成研究的产物做无状态单次机械检查——必需文件（W0–W10、checkpoint、evidence、manifest、report）、manifest JSON 解析与条目/输入的路径安全和哈希、条目状态封闭集（`adopted/superseded/failed/not_adopted`，failed 条目须带失败原因、script 条目须带脚本元数据块）、manifest 闭合 Schema（顶层 `schema_version`/`run` 必填块、非空 `artifacts`、条目封闭键集与 type/work_package 合法值——稳定码 `manifest.schema`）、十二章固定顺序、首页固定字段（含“分析模型”）与第 2 章十行核心发现固定行均须为表格行（散文关键词不通过）、W10 报告映射须为含五字段表头＋至少一行数据的表格；明示 `adopted`/等价中文的事实映射中，每条证据编号或已匹配 fragment 分支必须闭合到已登记产物，且终端产物状态必须为 `adopted`（无实际产物链为 `trace.adopted_claim_missing_source`，终端状态不符沿用 `trace.report_claim_not_adopted`），一条有效分支不能遮蔽另一条悬空分支；中文括注可作为路径边界，完整 basename 或 `...`/`…` 前后缀可唯一定位 adopted 登记文件时保留追溯 warning 而不误判无源；未采用、失败和其他纯格式定位警告不因此升级。检查器还核对 `artifacts/scripts/` 实际文件对 manifest 的登记与属主目录归属（属主限 W0–W10，未知属主判 `script.unknown_owner`）、无脚本工作包的“未创建或修改中间脚本”声明、lock record 的最终消息哈希与研究树哈希重算及记录路径绑定（伪造路径判 `lock.message_path_mismatch`/`lock.research_path_mismatch`，父字段类型错误按不可读输入退出 2；缺失或类型错误的绑定哈希字段直接产生 issue，绝不静默放行；`PASS` 同时要求零 issue 且全部 check 为 ok）。不判断自然语言真假、来源适用性或采用裁决。
 - 输入：`check_run(research_root, delivery_message, lock_record)`；CLI `--research-root`/`--delivery-message`/`--lock-record`/`--output`。
 - 输出 Schema：`{schema_version, mechanical_status, message_input_status, checks, issues}`；issue 固定 `{code, path, message}`；最终消息缺失时 `message_input_status="not_checked"`，整体不得 `PASS`。
 - 失败异常：有 issue 时仍写结果并退出 1；参数错误、输入不可读、输入为符号链接或输出已存在退出 2，无部分产物（输出经临时文件＋原子 link 落盘）。

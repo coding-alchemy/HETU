@@ -371,11 +371,12 @@ def test_success_envelope_without_source_reports_source_provided_false(
     assert _read_envelope(output_path)["source_provided"] is False
 
 
+@pytest.mark.parametrize("invalid_source", ("bad", None))
 def test_non_object_source_is_rejected_with_failure_envelope(
-    artifact_io: ModuleType, tmp_path: Path
+    artifact_io: ModuleType, tmp_path: Path, invalid_source: object
 ) -> None:
     input_path = _write_input(
-        tmp_path / "input.json", {"source": "bad", "records": []}
+        tmp_path / "input.json", {"source": invalid_source, "records": []}
     )
     output_path = tmp_path / "envelope.json"
 
@@ -401,11 +402,12 @@ def test_scripts_directory_contains_only_approved_files() -> None:
     present = {
         path.relative_to(SCRIPTS_DIR).as_posix()
         for path in SCRIPTS_DIR.rglob("*")
-        if path.is_file()
+        if path.is_file() and "__pycache__" not in path.parts
     }
     assert present == set(APPROVED_SCRIPTS), (
         f"scripts directory must equal the stage whitelist exactly "
-        f"(recursively; __pycache__ or stray files are rejected); "
+        f"(recursively; stray files are rejected; __pycache__ build "
+        f"artifacts from running the scripts are tolerated); "
         f"missing={sorted(set(APPROVED_SCRIPTS) - present)} "
         f"unapproved={sorted(present - set(APPROVED_SCRIPTS))}"
     )

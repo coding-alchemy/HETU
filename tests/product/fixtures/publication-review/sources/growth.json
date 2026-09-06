@@ -1,0 +1,8 @@
+{
+  "source": "metrics.txt",
+  "periods": ["2023", "2024"],
+  "input_unit": "万元人民币",
+  "inputs": {"previous_revenue": 10000, "current_revenue": 12000},
+  "revenue_yi": {"formula": "12000 / 10000", "value": 1.2},
+  "growth_percent": {"formula": "(12000 / 10000 - 1) * 100", "value": 20}
+}

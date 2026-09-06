@@ -12,12 +12,14 @@ count that disagrees with the reported total in either direction — set
 ``page_complete`` to ``False``; the tool never concludes "no announcements" on
 the caller's behalf.
 
-CLI: ``announcement_index.py --input IN --output OUT`` where the input JSON
-object holds ``pages`` (list of saved page payloads) and a timezone-aware
-``as_of`` ISO-8601 datetime. Exit 0 writes a success envelope; exit 1 writes a
-failure envelope for unparseable input or a rejected payload; exit 2 covers
-argument errors, unreadable input, an output path equal to the input path, or
-an existing output file.
+CLI: ``announcement_index.py --input IN --output OUT`` keeps the normalization
+behavior above. Supplying one or more ``--title-term TERM`` arguments instead
+scans an explicitly saved normalized result object or this tool's canonical
+success envelope and returns every literal title match for each caller-provided
+term. Exit 0 writes a success envelope; exit 1 writes a failure envelope for
+unparseable input or a rejected payload;
+exit 2 covers argument errors, unreadable input, an output path equal to the
+input path, or an existing output file.
 """
 
 from __future__ import annotations
@@ -200,7 +202,58 @@ def normalize_announcement_pages(
     }
 
 
-def _transform(payload: dict[str, Any]) -> object:
+def search_announcement_titles(
+    normalized: dict[str, object], title_terms: list[str]
+) -> dict[str, object]:
+    """Return all literal title matches from one saved normalized result."""
+    if not isinstance(normalized, dict):
+        raise ValueError("normalized input must be an object")
+    if "status" in normalized:
+        if normalized.get("status") != "success":
+            raise ValueError("normalized envelope status must be success")
+        result = normalized.get("result")
+        if not isinstance(result, dict):
+            raise ValueError("successful normalized envelope must contain a result object")
+        normalized = result
+    items = normalized.get("announcements")
+    if not isinstance(items, list):
+        raise ValueError("normalized input must contain an announcements list")
+    if not isinstance(title_terms, list) or not title_terms:
+        raise ValueError("title_terms must be a non-empty list")
+    if any(not isinstance(term, str) or not term.strip() for term in title_terms):
+        raise ValueError("each title term must be a non-empty string")
+
+    searchable: list[dict[str, str]] = []
+    for position, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise ValueError(f"announcements[{position}] must be an object")
+        match = {}
+        for field in ("title", "published_at", "url"):
+            value = item.get(field)
+            if not isinstance(value, str) or not value:
+                raise ValueError(
+                    f"announcements[{position}] {field} must be a non-empty string"
+                )
+            match[field] = value
+        searchable.append(match)
+
+    terms: list[dict[str, object]] = []
+    for term in title_terms:
+        folded_term = term.casefold()
+        matches = [
+            item for item in searchable if folded_term in item["title"].casefold()
+        ]
+        terms.append(
+            {"term": term, "match_count": len(matches), "matches": matches}
+        )
+    return {"scanned_count": len(searchable), "terms": terms}
+
+
+def _transform(
+    payload: dict[str, Any], *, title_terms: list[str] | None = None
+) -> object:
+    if title_terms is not None:
+        return search_announcement_titles(payload, title_terms)
     pages = payload.get("pages")
     if not isinstance(pages, list):
         raise ValueError("input must contain a pages list")
@@ -218,8 +271,13 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Normalize saved CNINFO announcement pages into one index."
     )
-    parser.add_argument("--input", required=True, help="saved pages JSON path")
+    parser.add_argument("--input", required=True, help="saved JSON input path")
     parser.add_argument("--output", required=True, help="envelope JSON path to create")
+    parser.add_argument(
+        "--title-term",
+        action="append",
+        help="literal title term to scan in a saved normalized result; repeatable",
+    )
     args = parser.parse_args(argv)
 
     input_path = Path(args.input)
@@ -239,7 +297,10 @@ def main(argv: list[str] | None = None) -> int:
             tool_name="announcement_index",
             input_path=input_path,
             output_path=output_path,
-            transform=_transform,
+            transform=lambda payload: _transform(
+                payload, title_terms=args.title_term
+            ),
+            allow_null_source=args.title_term is not None,
         )
     except _artifact_io.OutputConflictError as error:
         print(f"{type(error).__name__}: {error}", file=sys.stderr)
