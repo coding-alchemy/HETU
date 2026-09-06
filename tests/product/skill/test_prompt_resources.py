@@ -195,6 +195,36 @@ def test_runtime_completion_rules_cover_observed_dual_model_failures() -> None:
         assert all(phrase in text for phrase in phrases), (relative, phrases)
 
 
+def test_phase4_owner_contracts_carry_revisit_method_and_boundary_tables() -> None:
+    w4 = _read("references/work-packages/core/W4-business-governance.md")
+    assert "may_reopen: [W2, W3, W5, W6, W7, W8, W9, W10]" in w4
+    for target in ("W2", "W3", "W8"):
+        assert re.search(rf"^- {target}: \S", w4, re.MULTILINE)
+    assert "公司经营模型规则" in w4
+    assert "主要经营模型、次要模型或适用分部" in w4
+
+    for relative in (
+        "references/work-packages/core/W5-financial-validation.md",
+        "references/work-packages/core/W6-forecast-scenarios.md",
+        "references/work-packages/core/W7-valuation-expectations.md",
+    ):
+        text = _read(relative)
+        assert (
+            "方法 | 处理 | 使用或排除理由 | 所需输入 | 实际输入 | 适用分部 | 限制" in text
+        ), relative
+        assert "W4 最新模型画像" in text, relative
+        assert "关键输入不足时不输出该方法结果" in text, relative
+
+    w9 = _read("references/work-packages/core/W9-thesis-counterevidence.md")
+    assert "当前不能得出的结论 | 原因 | owner | 恢复条件" in w9
+    assert "不新增事实" in w9
+
+    w10 = _read("references/work-packages/core/W10-report-review.md")
+    assert "质量字段 | 当前状态" in w10
+    for phrase in ("信息完整性", "分析有效性", "实际深度"):
+        assert phrase in w10
+
+
 def test_excluded_requests_short_circuit_before_research() -> None:
     text = _read("SKILL.md")
 

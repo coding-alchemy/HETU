@@ -50,6 +50,8 @@ def read(relative: str) -> str:
         "references/report-guidance.md",
         "references/tool-catalog.md",
         "references/source-contracts.md",
+        "references/company-models.md",
+        "references/research-quality.md",
     ),
 )
 def test_phase2_resource_exists(relative: str) -> None:
@@ -69,6 +71,13 @@ def test_report_contract_has_exact_twelve_chapter_floor() -> None:
         "补充表格",
         "不得新增、改名、删除或重排二级章节",
         "report.md 之外的独有事实",
+        "请求深度",
+        "实际深度",
+        "信息完整性",
+        "分析有效性",
+        "主要经营模型",
+        "关键资料缺口",
+        "当前不能得出的结论",
     ):
         assert phrase in text
 
@@ -87,6 +96,9 @@ def test_work_package_result_contract_is_closed_and_safe() -> None:
         "十二节必须按序连续出现",
         "无适用内容时保留节标题并写正式状态语义与原因",
         "不得删除或省略任何节标题",
+        "必需项 | 要求来源 | 状态 | 证据或查询范围 | 对结论的影响",
+        "满足：",
+        "未满足：",
     ):
         assert phrase in text
     assert "省略本节" not in text

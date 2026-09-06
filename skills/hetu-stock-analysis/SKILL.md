@@ -36,14 +36,20 @@ description: Analyze one China A-share stock with public or explicitly authorize
 3. 按需读取 W1，使用交易所、发行人或监管来源核验证券、发行人、板块、上市和交易状态。
    唯一映射时生成正式 `run_id`、创建正式研究目录，把 W0/W1 写入 `checkpoint.md`、`manifest.json`
    和各自工作包文件，更新并展示正式任务卡后自动继续；歧义或异常状态时说明影响并等待确认。
+   W1 唯一核验后读取[研究质量规则](references/research-quality.md)，先建立共通底线、请求深度和
+   特殊状态必需项。
 4. 正式任务卡形成后，各工作包选择具体来源时读取[来源合同](references/source-contracts.md)的适用
    条目；`quick`、`standard`、`deep` 均按实际来源选择读取，不把来源合同当作流程节点。随后根据开始前依赖、
    定稿前依赖、共享基准、用户关注点、证据和工具能力自由选择、交错或合并 W2–W9；编号不代表顺序。
-   必要时拆分临时研究子问题并汇回工作包。
+   必要时拆分临时研究子问题并汇回工作包。W4 形成或修订公司经营模型时读取
+   [公司经营模型规则](references/company-models.md)，画像定稿后补充模型特有必需项并复核已有清单；
+   W5–W7 选择或复核方法时消费 W4 最新模型画像，需要核对方法与模型边界时按需回读该规则。
 5. 记录证据、冲突、替代和缺口。新证据命中回访条件时撤销受影响终态，重开直接目标并递归
    复核受影响下游，保留原结论和失败历史。
 6. W9 综合支持、反证、最大未知、成立/失效条件和监控语义。W10 由 Agent 写报告，依次完成
-   研究自检和安全自检；可修正问题触发重开，非阻断缺口促使收缩结论，阻断问题停止交付。
+   研究自检（含定稿前独立证据核对）和安全自检；可修正问题触发重开，非阻断缺口促使收缩结论，阻断问题停止交付。
+   进入 W9、进入 W10 时按需读取研究质量规则，只汇总各 owner 最新提交的必需项、方法限制和
+   结论边界。
 
 运行时总原则：能自动修复就修复，能降级就降级，格式问题只提示；事实、安全或授权问题按 owner
 重开，无法解决时停止。工作包的采用集合或计算口径发生修正时，按对应 owner 规则同步全部引用；
@@ -66,6 +72,8 @@ description: Analyze one China A-share stock with public or explicitly authorize
 - 启动时读取[工作包目录](references/work-packages/catalog.md)，判断领域适用性；核心包仍从下节直接读取。
 - W1 唯一核验后首次建立正式研究产物，或恢复既有任务时，读取[检查点规则](references/checkpoint.md)。
 - W1 唯一核验后首次建立正式研究目录时读取[研究产物合同](references/artifact-contract.md)和[工作包结果结构](references/work-package-result.md)，按固定结构落盘目录、`manifest.json` 与各工作包独立文件。
+- W1 唯一核验后建立共通底线、请求深度和特殊状态必需项，W4 模型画像定稿后补充模型特有必需项，以及进入 W9、W10 汇总质量状态时，按需读取[研究质量规则](references/research-quality.md)。
+- W4 形成或修订公司经营模型时读取[公司经营模型规则](references/company-models.md)；W5–W7 选择或复核方法时消费 W4 最新模型画像，需要核对方法与模型边界时按需回读。
 - 需要确定性处理或来源失败分类时读取[工具目录](references/tool-catalog.md)；各深度在工作包选择具体来源时读取[来源合同](references/source-contracts.md)的适用条目。工具目录的六个确定性脚本已 `adopted`，另有阶段 04 机械助手 `source_adapter.py`（只解析显式保存输入，是否调用与是否采用由 Agent 决定）。
 - 当 Agent 已按来源合同明确选择 `cninfo-announcement-index`、`sina-financial-statements` 或 `tencent-quote-snapshot` 时，可读取工具目录并调用可选的 `source_fetch.py`；脚本失败只形成局部缺口，不改变 Agent 的来源选择、采用或后续判断责任。
 - 工具、来源、授权或恢复出现问题时读取[恢复规则](references/recovery.md)。
@@ -99,5 +107,6 @@ description: Analyze one China A-share stock with public or explicitly authorize
 
 默认交付 `report.md`，由 Agent 根据当前有效证据直接撰写。最终消息必须直接呈现报告，或给出
 宿主中可打开的报告定位并明确它是最终报告；仅生成文件、仅回复完成或只给摘要不算交付。
-报告明确区分请求深度、实际覆盖和技术完成状态，保留有效引用、反证、未知、冲突与缺口；
+报告明确区分请求深度、实际深度、信息完整性、分析有效性和技术完成状态，保留有效引用、反证、
+未知、冲突与缺口；
 W10 两轮自检完成、发布阻断问题为零且必要回访重新定稿后才能交付。

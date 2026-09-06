@@ -53,7 +53,12 @@ def _write_json(path: Path, envelope: dict[str, object]) -> None:
 
 
 def run_transform(
-    *, tool_name: str, input_path: Path, output_path: Path, transform: Transform
+    *,
+    tool_name: str,
+    input_path: Path,
+    output_path: Path,
+    transform: Transform,
+    allow_null_source: bool = False,
 ) -> dict[str, object]:
     if input_path.resolve() == output_path.resolve():
         raise ValueError("output_path must differ from input_path")
@@ -77,9 +82,12 @@ def run_transform(
     source: dict[str, object] | None = None
     try:
         if "source" in payload:
-            if not isinstance(payload["source"], dict):
+            if payload["source"] is None and allow_null_source:
+                source = None
+            elif not isinstance(payload["source"], dict):
                 raise ValueError("source must be an object")
-            source = payload["source"]
+            else:
+                source = payload["source"]
         result = transform(payload)
     except Exception as error:
         _write_json(

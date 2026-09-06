@@ -53,6 +53,8 @@ Agent 撰写内容使用 UTF-8 Markdown；规则化层级数据使用 UTF-8 JSON
 
 不同来源、期间、Schema、口径或尝试必须形成不同文件；重试不得静默覆盖，相同内容可以复用哈希但仍记录本次尝试。`source-id`、数据集名、Schema 版本和计算版本来自受控清单，不得同名异义。标准化和派生数据保留原始输入定位、主体、期间或基准日、范围、单位、来源时间、获取时间和 `as_of` 判断。命名模板用于提高可读性；manifest 中的完整路径、类型、版本、输入关系和 SHA-256 才是机械身份依据，等价但未满足模板的文件名只记录 warning，不否定内容质量。
 
+两类格式的机械边界必须遵守：`normalized` 产物的文件扩展名与 `media_format` 只能是 `json` 或 `csv`，规则化数据不得用 Markdown 承载（Markdown 只用于手写文档）；`raw` 原始材料文件名中的 `<source-id>` 段不得省略，失败与替代记录同样遵守。产物路径不得在 `<source-id>` 或 `<work-package-id>` 之下再建子目录，多个对象用文件名区分。声明为 `json`、`csv` 或 `txt` 的产物必须是相应格式可解析的 UTF-8 文件；原始响应无法如此保存时按实际格式声明 `media_format`（如 `bin`），不得把非 UTF-8 或不可解析内容登记为 `txt`/`json`。
+
 ## manifest.json 最小 Schema
 
 `manifest.json` 是产物索引，不是事实、工作包状态或发布许可。最小顶层结构为：
@@ -113,6 +115,14 @@ Agent 撰写内容使用 UTF-8 Markdown；规则化层级数据使用 UTF-8 JSON
 - `"failure": "<失败分类与原因>"`：仅 `status=failed` 条目必须出现；非 failed 条目**不得包含**该键（不写 null）。
 
 `inputs` 数组记录该产物的全部本地 artifact 输入：raw 首次采集和直接访问外部端点的采集脚本可以为空数组 `[]`；外部请求的端点、参数或用途写入脚本元数据，不伪造本地输入路径。`normalized`、`derived` 与有本地输入的 `script` 至少一条，每条同时给出 `path` 与 `sha256`；确定性计算不得遗漏实际输入。`script.input` 声明的本地路径必须出现在 `inputs` 数组中；`script.output` 必须明确指向本 manifest 已登记的 raw、normalized 或 derived 产物，不能使用“输出另列”等占位文字。派生文件名中的 hash8 仅为可读提示，manifest 完整输入哈希为权威身份。
+
+身份镜像与脚本登记的机械口径（不满足即机械检查失败）：
+
+- `run.model.id`、报告首页“分析模型”与工作包元数据“实际模型”三处必须逐字相同，不加括注、单位或说明后缀。
+- `run.runtime_skill.sha256` 固定为 canonical Skill 的 `MANIFEST.json` 文件本身的 SHA-256，运行时对当前 Skill 目录实际计算，不哈希 `SKILL.md` 或目录树。
+- `script.executed_at` 使用带时区的 ISO 8601；`script.input` 只能填本 manifest 已登记的具体产物路径（字符串或路径数组），无本地输入时写空数组 `[]`，不得填写目录路径、外部端点或描述文字（端点与参数写入 `purpose` 或 `safe_call`）。
+- `inputs` 只引用本 manifest 已登记的产物，且不得构成环路。
+- 执行成功但结果错误的脚本或产物版本用 `not_adopted` 登记；`failed` 仅限真实执行失败（`exit_status` 非零）或残缺产物。
 
 SHA-256 只用于验证同一封存版本后来是否变化、manifest artifact 身份、确定性工具输入输出和实际 runtime/Skill/checker 身份。不同运行的时间戳、`as_of`、请求和报告本来可以不同，不比较其报告哈希，不用哈希评分或判断语义等价。
 

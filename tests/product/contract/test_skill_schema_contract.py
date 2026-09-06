@@ -17,7 +17,9 @@ def test_canonical_manifest_matches_every_installed_resource() -> None:
     actual = {
         path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
         for path in ROOT.rglob("*")
-        if path.is_file() and path.name != "MANIFEST.json"
+        if path.is_file()
+        and path.name != "MANIFEST.json"
+        and "__pycache__" not in path.parts
     }
     assert manifest == {"files": dict(sorted(actual.items()))}
 
