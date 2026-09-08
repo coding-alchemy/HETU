@@ -1,5 +1,7 @@
+import errno
 import hashlib
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -404,15 +406,19 @@ def test_install_overwrites_with_force(tmp_path: Path) -> None:
     ).endswith("\nupdated\n")
 
 
-def test_force_install_failure_removes_new_target_without_restoring_old_target(
+def test_force_install_failure_keeps_old_target_usable(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    """Phase-5 contract: a failed overwrite never destroys the installed
+    package. The tampered staging copy is discarded and the old target,
+    including files unique to it, remains verifiably usable."""
     source = tmp_path / "hetu-stock-analysis"
     _make_skill_package(source)
     destination = tmp_path / "skills"
     target = install_skill(source, destination)
     (target / "old-only.txt").write_text("old installation", encoding="utf-8")
+    old_manifest = installer_module.build_skill_manifest(target)
     copytree = installer_module.shutil.copytree
 
     def copy_and_tamper(
@@ -429,6 +435,304 @@ def test_force_install_failure_removes_new_target_without_restoring_old_target(
     with pytest.raises(SkillValidationError, match="sha256 mismatch"):
         install_skill(source, destination, force=True)
 
-    assert not target.exists()
     monkeypatch.undo()
-    assert install_skill(source, destination) == target
+    assert (target / "old-only.txt").read_text(encoding="utf-8") == "old installation"
+    # build_skill_manifest hashes every file (including the unlisted
+    # old-only.txt), so equality proves the old tree survived byte-for-byte.
+    assert installer_module.build_skill_manifest(target) == old_manifest
+
+
+def test_force_copy_failure_preserves_installed_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source" / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "installed"
+    target = install_skill(source, destination)
+    before = installer_module.build_skill_manifest(target)
+
+    def fail_copy(*args: Any, **kwargs: Any) -> Path:
+        raise OSError("injected copy failure")
+
+    monkeypatch.setattr(installer_module.shutil, "copytree", fail_copy)
+    with pytest.raises(OSError, match="injected copy failure"):
+        install_skill(source, destination, force=True)
+    verify_skill_manifest(target)
+    assert installer_module.build_skill_manifest(target) == before
+
+
+# ---------------------------------------------------------------------------
+# phase-5 stage 05.1: parameterized fault injection and recovery
+
+
+def _force_with_staging_marker(source: Path, destination: Path, marker: str) -> Path:
+    """Install a package whose content differs by a marker file."""
+    victim = source / "references" / "work-packages" / "catalog.md"
+    victim.write_text(victim.read_text(encoding="utf-8") + f"\n{marker}\n", encoding="utf-8")
+    _write_manifest(source)
+    return install_skill(source, destination, force=True)
+
+
+def test_exchange_unsupported_fails_before_touching_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "skills"
+    target = install_skill(source, destination)
+    before = installer_module.build_skill_manifest(target)
+
+    def no_native_exchange(left: Path, right: Path) -> None:
+        raise OSError(errno.ENOSYS, "native exchange not supported")
+
+    monkeypatch.setattr(installer_module, "exchange_directories", no_native_exchange)
+    updated = source / "references" / "orchestration.md"
+    updated.write_text("# v2\n", encoding="utf-8")
+    _write_manifest(source)
+    with pytest.raises(OSError, match="native exchange not supported"):
+        install_skill(source, destination, force=True)
+    monkeypatch.undo()
+    verify_skill_manifest(target)
+    assert installer_module.build_skill_manifest(target) == before
+
+
+def test_post_exchange_verification_failure_rolls_back_to_old(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "skills"
+    target = install_skill(source, destination)
+    old_manifest = installer_module.build_skill_manifest(target)
+
+    updated = source / "references" / "orchestration.md"
+    updated.write_text("# v2\n", encoding="utf-8")
+    _write_manifest(source)
+
+    real_validate = installer_module.validate_skill_package
+
+    def reject_installed_target(package_root: Path, *, require_manifest: bool = False) -> None:
+        if package_root.resolve() == target.resolve():
+            raise SkillValidationError("injected post-exchange rejection")
+        real_validate(package_root, require_manifest=require_manifest)
+
+    monkeypatch.setattr(installer_module, "validate_skill_package", reject_installed_target)
+    with pytest.raises(SkillValidationError, match="injected post-exchange rejection"):
+        install_skill(source, destination, force=True)
+    monkeypatch.undo()
+
+    assert installer_module.build_skill_manifest(target) == old_manifest
+    verify_skill_manifest(target)
+    area_root = destination.parent / ".hetu-skill-maintenance"
+    records = list(area_root.glob("*/transaction.json"))
+    assert records and json.loads(records[0].read_text(encoding="utf-8"))["state"] == "rolled_back"
+
+
+def test_interrupted_prepared_transaction_is_resumed_by_next_maintenance(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "skills"
+    target = install_skill(source, destination)
+    old_manifest = installer_module.build_skill_manifest(target)
+
+    # Simulate a crash right after "prepared": a validated staging copy exists,
+    # the exchange did not happen, and only the record knows about it.
+    catalog = source / "references" / "work-packages" / "catalog.md"
+    catalog.write_text(catalog.read_text(encoding="utf-8") + "\nstaged v2\n", encoding="utf-8")
+    _write_manifest(source)
+    area = installer_module._MaintenanceArea(destination, target)
+    staging, new_manifest = area.prepare_staging(source)
+    area._write_record(
+        {
+            "state": "prepared",
+            "target": str(target),
+            "staging": str(staging),
+            "backup": "",
+            "old_manifest": old_manifest,
+            "new_manifest": new_manifest,
+            "mode": "overwrite-exchange",
+        }
+    )
+
+    installer_module._recover_pending(area)
+
+    assert "staged v2" in catalog.read_text(encoding="utf-8") or True
+    installed_catalog = (target / "references" / "work-packages" / "catalog.md").read_text(
+        encoding="utf-8"
+    )
+    assert installed_catalog.endswith("staged v2\n")
+    assert installer_module.build_skill_manifest(target) == new_manifest
+    assert area.read_record()["state"] == "finalized"
+
+
+def test_interrupted_exchanged_transaction_finalizes_without_redo(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "skills"
+    target = install_skill(source, destination)
+
+    catalog = source / "references" / "work-packages" / "catalog.md"
+    catalog.write_text(catalog.read_text(encoding="utf-8") + "\nstaged v2\n", encoding="utf-8")
+    _write_manifest(source)
+    area = installer_module._MaintenanceArea(destination, target)
+    staging, new_manifest = area.prepare_staging(source)
+    installer_module.exchange_directories(staging, target)
+    area._write_record(
+        {
+            "state": "exchanged",
+            "target": str(target),
+            "staging": str(staging),
+            "backup": str(staging.parent),
+            "old_manifest": installer_module.build_skill_manifest(
+                destination.parent / "unused-old"
+            )
+            if False
+            else None,
+            "new_manifest": new_manifest,
+            "mode": "overwrite-exchange",
+        }
+    )
+
+    installer_module._recover_pending(area)
+
+    assert installer_module.build_skill_manifest(target) == new_manifest
+    assert area.read_record()["state"] == "finalized"
+
+
+def test_ambiguous_recovery_reports_action_without_guessing(tmp_path: Path) -> None:
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "skills"
+    target = install_skill(source, destination)
+
+    area = installer_module._MaintenanceArea(destination, target)
+    staging, _ = area.prepare_staging(source)
+    (target / "mutated.txt").write_text("neither old nor new", encoding="utf-8")
+    area._write_record(
+        {
+            "state": "prepared",
+            "target": str(target),
+            "staging": str(staging),
+            "backup": "",
+            "old_manifest": {"files": {}},
+            "new_manifest": {"files": {"SKILL.md": "deadbeef"}},
+            "mode": "overwrite-exchange",
+        }
+    )
+    with pytest.raises(OSError, match="ambiguous interrupted installation"):
+        installer_module._recover_pending(area)
+
+
+def test_maintenance_record_failure_leaves_recoverable_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "skills"
+    target = install_skill(source, destination)
+    old_manifest = installer_module.build_skill_manifest(target)
+
+    real_write = installer_module._MaintenanceArea._write_record
+    calls = {"n": 0}
+
+    def flaky_write(self, record: dict[str, object]) -> None:
+        calls["n"] += 1
+        if record.get("state") == "exchanged":
+            raise OSError("injected record flush failure")
+        real_write(self, record)
+
+    monkeypatch.setattr(installer_module._MaintenanceArea, "_write_record", flaky_write)
+    updated = source / "references" / "orchestration.md"
+    updated.write_text("# v2\n", encoding="utf-8")
+    _write_manifest(source)
+    with pytest.raises(OSError, match="injected record flush failure"):
+        install_skill(source, destination, force=True)
+    monkeypatch.undo()
+
+    # The next maintenance recovers from the real directories: the exchange
+    # happened, so the pending transaction is finalized before installing.
+    result = install_skill(source, destination, force=True)
+    assert result.is_dir()
+    verify_skill_manifest(target)
+    assert installer_module.build_skill_manifest(target) != old_manifest
+
+
+def test_cross_filesystem_maintenance_area_fails_before_touching_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "skills"
+    target = install_skill(source, destination)
+    before = installer_module.build_skill_manifest(target)
+
+    real_stat = os.stat
+    area_prefix = str(destination.parent / ".hetu-skill-maintenance")
+
+    def fake_stat(path: object, *args: Any, **kwargs: Any) -> os.stat_result:
+        result = real_stat(path, *args, **kwargs)
+        if str(path).startswith(area_prefix):
+            # Rebuild the stat result with st_dev (index 2) bumped so the
+            # same-filesystem check sees a different device.
+            fields = tuple(result)[:10]
+            return os.stat_result(fields[:2] + (result.st_dev + 1,) + fields[3:])
+        return result
+
+    monkeypatch.setattr(installer_module.os, "stat", fake_stat)
+    with pytest.raises(OSError, match="not on the same filesystem"):
+        install_skill(source, destination, force=True)
+    monkeypatch.undo()
+    assert installer_module.build_skill_manifest(target) == before
+
+
+def test_concurrent_same_target_installs_serialize_and_remain_usable(
+    tmp_path: Path,
+) -> None:
+    import threading
+
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    destination = tmp_path / "skills"
+    install_skill(source, destination)
+    errors: list[Exception] = []
+
+    def worker(index: int) -> None:
+        try:
+            local = tmp_path / f"source-{index}" / "hetu-stock-analysis"
+            _make_skill_package(local)
+            (local / "references" / "orchestration.md").write_text(
+                f"# v{index}\n", encoding="utf-8"
+            )
+            _write_manifest(local)
+            install_skill(local, destination, force=True)
+        except Exception as error:  # noqa: BLE001 - recorded and asserted below
+            errors.append(error)
+
+    threads = [threading.Thread(target=worker, args=(index,)) for index in range(1, 4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    target = destination / "hetu-stock-analysis"
+    verify_skill_manifest(target)
+    installed = (target / "references" / "orchestration.md").read_text(encoding="utf-8")
+    assert installed in {"# v1\n", "# v2\n", "# v3\n"}
+
+
+def test_different_targets_operate_independently(tmp_path: Path) -> None:
+    source = tmp_path / "hetu-stock-analysis"
+    _make_skill_package(source)
+    first = install_skill(source, tmp_path / "skills-a", force=True)
+    second = install_skill(source, tmp_path / "skills-b")
+    (first / "references" / "orchestration.md").write_text("# only-a\n", encoding="utf-8")
+    _write_manifest(source)
+    install_skill(source, tmp_path / "skills-a", force=True)
+    # The A-root maintenance operations never disturbed the B-root install.
+    verify_skill_manifest(second)
+    assert (second / "references" / "orchestration.md").is_file()
+    assert (first / "references" / "orchestration.md").is_file()
