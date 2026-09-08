@@ -182,3 +182,19 @@ canonical Skill 负责综合与撰写，不再由 `hetu-stock` 命令行渲染�
 任何渲染命令。authorized 来源失败时只阻塞相关数据，
 运行保持 authorized 直到用户显式决定；public 研究在 helper 不可用时仍可借助宿主
 等价工具继续。
+
+## 五期观察入口（阶段 01，尚未认证）
+
+`scripts/host_acceptance.py` 提供确定性计量与宿主观察入口，供五期验收使用；普通研究不需要调用它。
+
+```bash
+python scripts/host_acceptance.py probe --host zcode --output <新的观察目录>
+python scripts/host_acceptance.py run  --host <host> --case <研究侧 case.json> --output <新的观察目录>
+python scripts/host_acceptance.py check --evidence <已有观察目录> --output <结果.json>
+```
+
+- `probe` 只核对原生能力（版本、观测目录、metadata usage 样例、可选的带标注实况小探针），不分析股票；`host` 取 `codex|claude|opencode|zcode`。能力不成立时退出非零并列出缺口。ZCode 另有 `--isolation` 模式：对协调层按受控诱饵程序派发的两个子代理（受限例＋放任反例）做转录扫描，生成只含布尔、计数与判定依据的最小隔离证据（受限例 hold、放任例须检出、初始加载/历史注入/资料访问三项控制全部 verified 才判 pass）；`--staging-dir` 可核验轮转前快照。
+- `run` 只校验并登记单个显式 case（证券、中性请求、时点、模式、深度、复用开关、获准材料），拒绝任意 shell 内容与评审答案；真实派发由协调上下文按 case 执行，脚本不决定研究下一步。ZCode attach 模式以 `--watch-agent <原生id>=<scope>`（可重复，scope 必须显式）同时观察多个会话：子代理按 metadata 解析、`sess_*` 直观察协调者会话、`file:<路径>=<scope>` 观察"日志轮转前快照"。采集按完整行推进游标、退前排空、轮转/截断/坏行/非 completed 终态均写入 `collection-gaps.jsonl` 并按代数分段；工具事件只保留 id/name/分类（wrapper 派发单列），正文、参数与凭据不落盘。`--request-at`/`--delivered-at` 记录真实用户请求与协调交付时点。
+- `check` 离线复核观察目录中的用量与计时：按来源会话与消息 id 去重、累计快照按段压缩（起始快照按基线相减）、缓存口径未知不归一、完整性逐指标判定（输入/输出任一为 null 即不完整）、截断行与 collection gap 即失败、非 probe 运行必须声明至少 research＋review 必需范围；隔离证据须实际存在、可解析、对应本任务并满足两案例与三项控制要求。passed=false 即证据不完整；交付端点未独立观察（coordinator-reported/last-scope-completed）、实际发生而未声明的 scope、隔离证据未覆盖的参与上下文均判失败，探针通过与完整基线资格（baseline_qualification）分开输出。
+
+已验证（2026-09-08，第三轮修复后）：ZCode 受控链路探针（非股票分析）四 scope（研究/核对/修正/协调）全程采集可用；修正判定后交付尾部为已知缺口，结果如实为“小计＋缺口”（passed=false，非完整计量），证据见 .hetu/validation/phase-5/20260908-stage01-fix3/chain-probe/。隔离证据按旧任务数据边界核验研究/核对/修正三个参与上下文的初始加载、历史注入与资料访问（空/损转录不证隔离、越界访问即失败），verdict=pass，证明范围限于受控种子标记设置。B04 核对事件回放与审计值精确一致（33,319 输出 token、46 个工具调用、缓存读取 1,279,616 与写入 0 分列）。**宿主限制（重要）**：claude 无头模式实测无可用路径级隔离（证据见 .hetu/validation/phase-5/20260908-stage01-fix/probe-isolation/），且其观察器按 mtime 初选转录、未绑定启动进程的原生会话 id，可能采到并发任务会话——这两点使 claude 当前不满足完整计量与隔离前提；Codex/OpenCode 未接入。ZCode 隔离无法观察未知自动注入机制，**每次真实采样须重立隔离证据**；交付端点为协调者申报制，未独立观察前完整基线资格不成立。**轮转风险（重要）**：本机 rollout 为全局小轮转池（约 3 个文件）且被并发会话共享——采集必须紧贴任务执行，或先用 stage-agent-transcript.sh 快照再以 file: 规格观察；快照是含完整请求的工作副本，仅存放 /tmp 并在采集后删除，证据只保留白名单字段与布尔判定。以上均不能视为宿主正式支持认证。
