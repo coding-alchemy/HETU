@@ -1577,3 +1577,361 @@ def test_sb_contradictory_semantics_on_same_identity_block_the_range():
     assert result["input_tokens"] is None
     assert result["complete"] is False
     assert any(g["type"] == "cache_semantics_conflict" for g in result["gaps"])
+
+
+# ---------------------------------------------------------------------------
+# SW: the delivery turn is observable only after `run` exits; a follow-up
+# `sweep` closes the request->delivery arc and `check` refuses anything less
+
+
+def _iso(epoch: float) -> str:
+    from datetime import UTC, datetime
+
+    return datetime.fromtimestamp(epoch, tz=UTC).isoformat()
+
+
+def _pending_meta(**overrides: object) -> dict:
+    meta = _base_meta(
+        probe_mode=False,
+        expected_scopes=["research", "review", "coordination"],
+        request_at=1000.0,
+        delivered_at=None,
+        delivery_source="pending-sweep",
+        delivery_marker="delivery-message.md",
+        delivery_session="sess_c",
+        delivery_scope="coordination",
+        timing_intervals=[
+            {"category": "research", "start": 1000.0, "end": 1050.0, "clock": "wall"},
+            {"category": "review", "start": 1010.0, "end": 1060.0, "clock": "wall"},
+        ],
+    )
+    meta.update(overrides)
+    return meta
+
+
+def _delivery_observation(**overrides: object) -> dict:
+    observation = {
+        "source": "independently-observed",
+        "session_id": "sess_c",
+        "scope": "coordination",
+        "marker": "delivery-message.md",
+        "marker_mtime_epoch": 1090.0,
+        "delivered_at_epoch": 1100.0,
+        "delivered_at_iso": _iso(1100.0),
+        "delivery_request_id": "rq-delivery",
+        "events_appended": 1,
+        "swept_at": _iso(1200.0),
+    }
+    observation.update(overrides)
+    return observation
+
+
+def _write_pending_evidence(directory: Path, delivered_at_epoch: float = 1100.0):
+    events = [
+        _good_research_event(),
+        _good_research_event(scope="review", session_id="s1", message_id="v1"),
+        _good_research_event(scope="coordination", session_id="sess_c",
+                             message_id="rq-delivery"),
+    ]
+    _write_evidence(directory, events, _pending_meta())
+    marker = directory / "delivery-message.md"
+    marker.write_text("delivery message", encoding="utf-8")
+    import os
+
+    os.utime(marker, (delivered_at_epoch - 10, delivered_at_epoch - 10))
+    return marker
+
+
+def test_sw_check_pending_sweep_without_observation_fails(tmp_path):
+    evidence = tmp_path / "ev"
+    events = [_good_research_event(), _good_research_event(scope="review",
+                                                           message_id="v1")]
+    _write_evidence(evidence, events, _pending_meta())
+    (evidence / "delivery-message.md").write_text("delivery", encoding="utf-8")
+    result_path = tmp_path / "result.json"
+    code = load_module()["main"](
+        ["check", "--evidence", str(evidence), "--output", str(result_path)]
+    )
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert code == 1
+    assert payload["passed"] is False
+    assert payload["baseline_qualification"] == "not_established"
+    assert any("sweep" in failure for failure in payload["failures"])
+
+
+def test_sw_check_resolves_observed_delivery_and_establishes_baseline(tmp_path):
+    evidence = tmp_path / "ev"
+    _write_pending_evidence(evidence)
+    _isolation_evidence(evidence)
+    (evidence / "delivery-observation.json").write_text(
+        json.dumps(_delivery_observation()), encoding="utf-8"
+    )
+    result_path = tmp_path / "result.json"
+    code = load_module()["main"](
+        ["check", "--evidence", str(evidence), "--output", str(result_path)]
+    )
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert code == 0, payload["failures"]
+    assert payload["passed"] is True
+    assert payload["baseline_qualification"] == "established"
+    assert payload["timing"]["complete"] is True
+    # the coordination interval now spans request -> observed delivery
+    assert payload["timing"]["total_wait"] == pytest.approx(100.0)
+    assert payload["timing"]["uncovered"] == pytest.approx(0.0)
+
+
+def test_sw_marker_modified_after_endpoint_cannot_observe_delivery(tmp_path):
+    evidence = tmp_path / "ev"
+    _write_pending_evidence(evidence)
+    import os
+
+    marker = evidence / "delivery-message.md"
+    os.utime(marker, (1200.0, 1200.0))
+    (evidence / "delivery-observation.json").write_text(
+        json.dumps(_delivery_observation()), encoding="utf-8"
+    )
+    result_path = tmp_path / "result.json"
+    code = load_module()["main"](
+        ["check", "--evidence", str(evidence), "--output", str(result_path)]
+    )
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert code == 1
+    assert any("marker" in failure for failure in payload["failures"])
+
+
+def test_sw_observation_from_another_session_fails(tmp_path):
+    evidence = tmp_path / "ev"
+    _write_pending_evidence(evidence)
+    (evidence / "delivery-observation.json").write_text(
+        json.dumps(_delivery_observation(session_id="sess_other")), encoding="utf-8"
+    )
+    result_path = tmp_path / "result.json"
+    code = load_module()["main"](
+        ["check", "--evidence", str(evidence), "--output", str(result_path)]
+    )
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert code == 1
+    assert any("session" in failure for failure in payload["failures"])
+
+
+def _fake_rollout(home: Path, session: str, records: list[dict]) -> Path:
+    rollout = home / ".zcode" / "cli" / "rollout"
+    rollout.mkdir(parents=True, exist_ok=True)
+    transcript = rollout / f"model-io-{session}.jsonl"
+    transcript.write_text(
+        "".join(json.dumps(record, ensure_ascii=False) + "\n" for record in records),
+        encoding="utf-8",
+    )
+    return transcript
+
+
+def _rollout_record(request_id: str, start: float, end: float) -> dict:
+    return {
+        "requestId": request_id,
+        "startedAt": _iso(start),
+        "completedAt": _iso(end),
+        "sessionId": "sess_c",
+        "type": "model_io",
+        "model": {"modelId": "GLM-5.3-Flash"},
+        "response": {
+            "usage": {"inputTokens": 50, "outputTokens": 5,
+                      "cacheReadTokens": 40, "cacheWriteTokens": 0},
+            "toolCalls": [],
+        },
+    }
+
+
+def test_sw_sweep_captures_delivery_turn_from_rollout(tmp_path, monkeypatch):
+    base = 1_700_000_000.0
+    home = tmp_path / "home"
+    home.mkdir()
+    _fake_rollout(home, "sess_c", [
+        _rollout_record("rq1", base + 10, base + 30),
+        _rollout_record("rq-delivery", base + 140, base + 160),
+        _rollout_record("rq-post", base + 200, base + 210),
+    ])
+    monkeypatch.setattr(Path, "home", lambda: home)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "case-record.json").write_text("{}", encoding="utf-8")
+    _write_evidence(evidence, [], _pending_meta(request_at=base))
+    marker = evidence / "delivery-message.md"
+    marker.write_text("delivery", encoding="utf-8")
+    import os
+
+    os.utime(marker, (base + 150, base + 150))
+    module = load_module()
+    result = module["main"](
+        ["sweep", "--evidence", str(evidence), "--session", "sess_c"]
+    )
+    assert result == 0
+    observation = json.loads(
+        (evidence / "delivery-observation.json").read_text(encoding="utf-8")
+    )
+    assert observation["source"] == "independently-observed"
+    assert observation["delivered_at_epoch"] == base + 210
+    assert observation["delivery_request_id"] == "rq-post"
+    assert observation["marker_mtime_epoch"] == base + 150
+    events = [json.loads(line)
+              for line in (evidence / "usage-events.jsonl").read_text(
+                  encoding="utf-8").splitlines() if line]
+    # the whole tail is consumed — the conservative direction, so a late
+    # sweep can only overcount and never silently drop the delivery turn
+    assert len(events) == 3
+    assert sorted(event["message_id"] for event in events) == [
+        "rq-delivery", "rq-post", "rq1",
+    ]
+    assert all(event["scope"] == "coordination" for event in events)
+    # a stamp is final: a second sweep must never move the endpoint
+    assert module["main"](
+        ["sweep", "--evidence", str(evidence), "--session", "sess_c"]
+    ) == 2
+
+
+def test_sw_sweep_refuses_missing_marker_or_non_pending_evidence(tmp_path):
+    module = load_module()
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "case-record.json").write_text("{}", encoding="utf-8")
+    _write_evidence(evidence, [], _pending_meta())
+    # marker missing
+    assert module["main"](
+        ["sweep", "--evidence", str(evidence), "--session", "sess_c"]
+    ) == 2
+    assert not (evidence / "delivery-observation.json").exists()
+    # evidence not pending a sweep
+    _write_evidence(tmp_path / "ev2", [], _base_meta())
+    assert module["main"](
+        ["sweep", "--evidence", str(tmp_path / "ev2"), "--session", "sess_c"]
+    ) == 2
+
+
+def test_sw_run_pending_mode_records_no_delivery_gap(tmp_path, monkeypatch):
+    import time as time_module
+
+    base = time_module.time()
+    home = tmp_path / "home"
+    agents_dir = home / ".zcode" / "cli" / "agents" / "sess_x"
+    agents_dir.mkdir(parents=True)
+    (agents_dir / "agent_a1x").mkdir()
+    (agents_dir / "agent_a1x" / "metadata.json").write_text(json.dumps({
+        "status": "completed",
+        "createdAt": _iso(base + 5),
+        "completedAt": _iso(base + 50),
+        "childSessionId": "sess_child",
+    }), encoding="utf-8")
+    _fake_rollout(home, "sess_child", [_rollout_record("rq-r", base + 10, base + 40)])
+    _fake_rollout(home, "sess_coord", [
+        _rollout_record("rq-c1", base + 12, base + 42),
+        _rollout_record("rq-c2", base + 44, base + 48),
+    ])
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    case = tmp_path / "case.json"
+    case.write_text(json.dumps({
+        "case_id": "CASE-PENDING",
+        "security": "NONE",
+        "neutral_request": "controlled run-shape probe",
+        "as_of": "2026-09-09T00:00:00+08:00",
+        "data_mode": "public",
+        "depth": "probe",
+        "reuse_previous_task_data": False,
+        "probe_mode": True,
+    }), encoding="utf-8")
+    out = tmp_path / "obs"
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(case), "--output", str(out),
+        "--watch-agent", "agent_a1x=research",
+        "--watch-agent", "sess_coord=coordination",
+        "--delivery-sweep", "--watch-timeout", "30",
+    ])
+    assert code == 0
+    meta = json.loads((out / "check-input.json").read_text(encoding="utf-8"))
+    assert meta["delivery_source"] == "pending-sweep"
+    assert meta["delivered_at"] is None
+    assert meta["delivery_session"] == "sess_coord"
+    assert meta["delivery_marker"] == "delivery-message.md"
+    gaps_file = out / "collection-gaps.jsonl"
+    recorded = (gaps_file.read_text(encoding="utf-8").splitlines()
+                if gaps_file.exists() else [])
+    assert not any("delivery_tail" in line for line in recorded)
+    sweep_state = json.loads((out / "sweep-state.json").read_text(encoding="utf-8"))
+    assert sweep_state["session_id"] == "sess_coord"
+    assert sweep_state["state"]["offset"] > 0
+    events = [json.loads(line)
+              for line in (out / "usage-events.jsonl").read_text(
+                  encoding="utf-8").splitlines() if line]
+    assert {event["scope"] for event in events} == {"research", "coordination"}
+
+
+def test_sw_run_sweep_requires_a_coordination_watcher(tmp_path):
+    case = tmp_path / "case.json"
+    case.write_text(json.dumps({
+        "case_id": "CASE-NOCOORD",
+        "security": "NONE",
+        "neutral_request": "controlled run-shape probe",
+        "as_of": "2026-09-09T00:00:00+08:00",
+        "data_mode": "public",
+        "depth": "probe",
+        "reuse_previous_task_data": False,
+        "probe_mode": True,
+    }), encoding="utf-8")
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(case),
+        "--output", str(tmp_path / "obs"),
+        "--watch-agent", "agent_a1x=research",
+        "--delivery-sweep",
+    ])
+    assert code == 2
+
+
+def test_sw_sweep_accepts_explicit_transcript_snapshot(tmp_path, monkeypatch):
+    """Rotation can replace the live rollout between run and sweep; sweeping
+    a pre-rotation snapshot must then work from offset 0 and rely on usage
+    dedup, never on the stale sweep-state cursor."""
+    import json as json_module
+
+    base = 1_800_000_000.0
+    home = tmp_path / "home"
+    home.mkdir()
+    # the live rollout is gone (rotated away): only the snapshot remains
+    snapshot = tmp_path / "staging" / "model-io-sess_c.jsonl"
+    snapshot.parent.mkdir()
+    records = [
+        _rollout_record("rq-old", base + 10, base + 30),
+        _rollout_record("rq-delivery", base + 90, base + 110),
+    ]
+    snapshot.write_text(
+        "".join(json_module.dumps(r) + "\n" for r in records), encoding="utf-8"
+    )
+    monkeypatch.setattr(Path, "home", lambda: home)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "case-record.json").write_text("{}", encoding="utf-8")
+    _write_evidence(evidence, [], _pending_meta(request_at=base))
+    # a stale cursor from the pre-rotation live file must not gate the snapshot
+    (evidence / "sweep-state.json").write_text(json.dumps({
+        "session_id": "sess_c", "scope": "coordination",
+        "state": {"identity": [123, 456], "offset": 999999, "generation": 0},
+    }), encoding="utf-8")
+    marker = evidence / "delivery-message.md"
+    marker.write_text("delivery", encoding="utf-8")
+    import os
+
+    os.utime(marker, (base + 100, base + 100))
+    module = load_module()
+    code = module["main"]([
+        "sweep", "--evidence", str(evidence), "--session", "sess_c",
+        "--transcript", str(snapshot),
+    ])
+    assert code == 0
+    observation = json.loads(
+        (evidence / "delivery-observation.json").read_text(encoding="utf-8")
+    )
+    assert observation["delivered_at_epoch"] == base + 110
+    events = [json.loads(line)
+              for line in (evidence / "usage-events.jsonl").read_text(
+                  encoding="utf-8").splitlines() if line]
+    assert len(events) == 2

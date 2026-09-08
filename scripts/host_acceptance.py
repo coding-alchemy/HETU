@@ -103,6 +103,9 @@ ALLOWED_CHECK_INPUT_FIELDS = {
     "request_at",
     "delivered_at",
     "delivery_source",
+    "delivery_marker",
+    "delivery_session",
+    "delivery_scope",
     "timing_intervals",
     "isolation",
 }
@@ -125,11 +128,26 @@ ALLOWED_ISOLATION_FIELDS = {
     "verified_at",
     "cases",
 }
+ALLOWED_DELIVERY_OBSERVATION_FIELDS = {
+    "source",
+    "session_id",
+    "scope",
+    "marker",
+    "marker_mtime_epoch",
+    "delivered_at_epoch",
+    "delivered_at_iso",
+    "delivery_request_id",
+    "events_appended",
+    "swept_at",
+}
 
 # Delivery endpoint provenance. Only an independently observed delivery
-# (a future adapter that captures the user-facing final message itself) may
-# claim the delivery arc is fully metered; anything else stays a gap.
+# (the delivery turn's own rollout record, captured by `sweep` after the
+# coordinator has delivered) may claim the delivery arc is fully metered;
+# anything else stays a gap. `pending-sweep` means `run` deferred the
+# endpoint on purpose and a sweep observation must still arrive.
 DELIVERY_SOURCE_OBSERVED = "independently-observed"
+DELIVERY_SOURCE_PENDING_SWEEP = "pending-sweep"
 UNOBSERVED_DELIVERY_SOURCES = ("coordinator-reported", "last-scope-completed")
 
 
@@ -2137,6 +2155,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
         except ValueError as error:
             print(str(error), file=sys.stderr)
             return 2
+        coordination_watchers = [
+            watcher for watcher in specs if watcher[1] == "coordination"
+        ]
+        if args.delivery_sweep and (
+            len(coordination_watchers) != 1 or args.delivered_at
+        ):
+            # the sweep needs exactly one coordination session to observe
+            # after the fact; a coordinator-provided endpoint would defeat it
+            print(
+                "--delivery-sweep needs exactly one <id>=coordination watcher "
+                "and no --delivered-at",
+                file=sys.stderr,
+            )
+            return 2
 
         request_at = time.time()
         if args.request_at:
@@ -2404,8 +2436,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "at": datetime.now(UTC).isoformat(),
                 },
             )
-        if delivered_at_provided is not None:
-            delivered_at: float | None = delivered_at_provided
+        coordination_watcher = next(
+            (watcher for watcher in watchers if watcher["scope"] == "coordination"),
+            None,
+        )
+        if args.delivery_sweep:
+            # the delivery turn happens after this process exits, so no
+            # endpoint is claimed here; `sweep` observes it after the fact
+            delivered_at: float | None = None
+            delivery_source = DELIVERY_SOURCE_PENDING_SWEEP
+        elif delivered_at_provided is not None:
+            delivered_at = delivered_at_provided
             delivery_source = "coordinator-reported"
         else:
             ended = [
@@ -2416,7 +2457,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
             ]
             delivered_at = max(ended) if ended else time.time()
             delivery_source = "last-scope-completed"
-        if delivery_source != DELIVERY_SOURCE_OBSERVED:
+        if delivery_source not in (DELIVERY_SOURCE_OBSERVED,
+                                   DELIVERY_SOURCE_PENDING_SWEEP):
             # the real delivery turn happens after collection stops; the gap
             # must live in the machine judgment, not in a prose caveat
             append_collection_gap(
@@ -2433,7 +2475,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "at": datetime.now(UTC).isoformat(),
                 },
             )
-        if any(watcher["scope"] == "coordination" for watcher in watchers):
+        if coordination_watcher is not None and not args.delivery_sweep:
             intervals.append(
                 {
                     "category": "coordination",
@@ -2465,6 +2507,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     f"{output_dir}; recording not_verified",
                     file=sys.stderr,
                 )
+        if args.delivery_sweep:
+            _write_json(
+                output_dir / "sweep-state.json",
+                {
+                    "session_id": coordination_watcher["session_id"],
+                    "scope": coordination_watcher["scope"],
+                    "state": coordination_watcher["state"],
+                },
+            )
         _write_json(
             output_dir / "check-input.json",
             {
@@ -2477,6 +2528,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 "request_at": request_at,
                 "delivered_at": delivered_at,
                 "delivery_source": delivery_source,
+                "delivery_marker": (
+                    args.delivery_marker if args.delivery_sweep else None
+                ),
+                "delivery_session": (
+                    coordination_watcher["session_id"]
+                    if args.delivery_sweep
+                    else None
+                ),
+                "delivery_scope": (
+                    coordination_watcher["scope"] if args.delivery_sweep else None
+                ),
                 "timing_intervals": intervals,
                 "isolation": isolation_input,
             },
@@ -2600,6 +2662,282 @@ def _verify_isolation(
     return failures
 
 
+def _resolve_sweep_delivery(
+    evidence_dir: Path, meta: dict[str, Any], intervals: list[dict[str, Any]]
+) -> tuple[list[str], float | None, list[dict[str, Any]]]:
+    """Resolve a pending-sweep delivery endpoint from the sweep observation.
+
+    The endpoint value is the delivery turn's native ``completedAt``; the
+    marker's mtime only orders events (the marker is written inside the
+    delivery turn, so the observed endpoint must not precede it). Returns
+    ``(failures, delivered_at, intervals)``; on failure the arc stays open
+    and the check fails — never silently passes."""
+    failures: list[str] = []
+    observation_path = evidence_dir / "delivery-observation.json"
+    if not observation_path.exists():
+        return (
+            [
+                "delivery endpoint is pending a sweep but "
+                "delivery-observation.json is missing; run `sweep --evidence "
+                "<dir> --session <coordination session>` after delivering"
+            ],
+            meta.get("delivered_at"),
+            intervals,
+        )
+    try:
+        observation = _load_json(observation_path)
+        _reject_unknown_fields(
+            observation, ALLOWED_DELIVERY_OBSERVATION_FIELDS, "delivery-observation"
+        )
+    except (OSError, json.JSONDecodeError, ValueError) as error:
+        return (
+            [f"delivery-observation.json unreadable: {error}"],
+            meta.get("delivered_at"),
+            intervals,
+        )
+    endpoint = observation.get("delivered_at_epoch")
+    if observation.get("source") != DELIVERY_SOURCE_OBSERVED:
+        failures.append(
+            f"delivery observation source is {observation.get('source')!r}, "
+            f"not {DELIVERY_SOURCE_OBSERVED!r}"
+        )
+    if not isinstance(endpoint, (int, float)) or isinstance(endpoint, bool):
+        failures.append("delivery observation lacks a numeric delivered_at_epoch")
+        endpoint = None
+    else:
+        request_at = meta.get("request_at")
+        if not isinstance(request_at, (int, float)) or endpoint < request_at:
+            failures.append(
+                "observed delivery endpoint precedes the request start"
+            )
+    marker_name = meta.get("delivery_marker")
+    marker = evidence_dir / marker_name if marker_name else None
+    if not marker or not marker.exists():
+        failures.append(
+            f"delivery marker {marker_name!r} missing from the evidence "
+            "directory"
+        )
+    elif (
+        isinstance(endpoint, (int, float))
+        and marker.stat().st_mtime > endpoint
+    ):
+        failures.append(
+            "delivery marker was last modified after the observed endpoint; "
+            "the observed tail does not include the delivery turn"
+        )
+    expected_session = meta.get("delivery_session")
+    if expected_session and observation.get("session_id") != expected_session:
+        failures.append(
+            f"delivery observation was taken from session "
+            f"{observation.get('session_id')!r}, not the watched "
+            f"coordination session {expected_session!r}"
+        )
+    if isinstance(endpoint, (int, float)):
+        intervals = [dict(item) for item in intervals]
+        if (
+            "coordination" in (meta.get("expected_scopes") or [])
+            and not any(
+                item.get("category") == "coordination" for item in intervals
+            )
+        ):
+            intervals.append(
+                {
+                    "category": "coordination",
+                    "start": meta.get("request_at"),
+                    "end": endpoint,
+                    "clock": "wall",
+                }
+            )
+    return failures, endpoint, intervals
+
+
+def _cmd_sweep(args: argparse.Namespace) -> int:
+    """Observe the delivery tail after the coordinator has delivered.
+
+    `run` exits before the coordinator's delivery turn, so that turn — its
+    usage and its endpoint — is only observable afterwards. `sweep` consumes
+    the coordination session's complete rollout tail and stamps the endpoint
+    as the last record's native ``completedAt``. The delivery marker only
+    proves delivery happened before the sweep (marker mtime must not exceed
+    the endpoint); it does not partition records, because a turn spans
+    several API calls and a cut at the marker would drop the turn's own
+    tail. Everything found in the tail is therefore consumed into the task
+    total — the conservative direction: sweeping late can only overcount,
+    never silently drop the delivery turn. The stamp is written once;
+    re-running sweep refuses so the endpoint can never move."""
+    evidence_dir = Path(args.evidence)
+    meta_path = evidence_dir / "check-input.json"
+    case_path = evidence_dir / "case-record.json"
+    for required in (meta_path, case_path):
+        if not required.exists():
+            print(f"missing required evidence file: {required}", file=sys.stderr)
+            return 2
+    observation_path = evidence_dir / "delivery-observation.json"
+    if observation_path.exists():
+        print(
+            f"refusing to replace existing delivery observation: "
+            f"{observation_path}",
+            file=sys.stderr,
+        )
+        return 2
+    meta = _load_json(meta_path)
+    if meta.get("delivery_source") != DELIVERY_SOURCE_PENDING_SWEEP:
+        print("evidence is not pending a delivery sweep", file=sys.stderr)
+        return 2
+    marker_name = meta.get("delivery_marker") or "delivery-message.md"
+    marker = evidence_dir / marker_name
+    if not marker.exists():
+        print(f"delivery marker not found: {marker}", file=sys.stderr)
+        return 2
+    expected_session = meta.get("delivery_session")
+    if expected_session and args.session != expected_session:
+        print(
+            f"--session {args.session!r} does not match the watched "
+            f"coordination session {expected_session!r}",
+            file=sys.stderr,
+        )
+        return 2
+    transcript_path: Path | None = None
+    if args.transcript:
+        transcript_path = Path(args.transcript)
+        if not transcript_path.exists():
+            print(f"transcript snapshot not found: {transcript_path}", file=sys.stderr)
+            return 2
+        # snapshot mode: the live file may have been rotated away, so the
+        # stale cursor does not apply; consume the snapshot from offset 0
+        # and rely on usage dedup to keep repeated identities single-counted
+        state = {"identity": None, "offset": 0, "generation": 0}
+        transcript = transcript_path
+    else:
+        transcript = (
+            Path.home()
+            / ".zcode"
+            / "cli"
+            / "rollout"
+            / f"model-io-{args.session}.jsonl"
+        )
+        if not transcript.exists():
+            print(f"rollout transcript not found: {transcript}", file=sys.stderr)
+            return 2
+    scope = meta.get("delivery_scope") or "coordination"
+    state: dict[str, Any] = {"identity": None, "offset": 0, "generation": 0}
+    state_path = evidence_dir / "sweep-state.json"
+    if state_path.exists() and transcript_path is None:
+        try:
+            stored = _load_json(state_path).get("state") or {}
+            state.update(
+                {
+                    key: stored[key]
+                    for key in ("identity", "offset", "generation")
+                    if key in stored
+                }
+            )
+        except (OSError, json.JSONDecodeError):
+            pass
+    lines, state, lost_tail = _poll_complete_lines(transcript, state)
+    if lost_tail is not None:
+        append_collection_gap(
+            evidence_dir,
+            {
+                "type": "transcript_" + lost_tail["reason"],
+                "detail": (
+                    f"{transcript.name}: bytes from "
+                    f"{lost_tail['lost_bytes_from']} in generation "
+                    f"{lost_tail['generation']} were never consumed; the "
+                    "delivery tail is unrecoverable"
+                ),
+                "generation": lost_tail["generation"],
+                "session_id": args.session,
+                "at": datetime.now(UTC).isoformat(),
+            },
+        )
+        print("rollout rotated or truncated since the run; nothing swept", file=sys.stderr)
+        return 1
+    if not lines:
+        print("no new rollout records since the run ended; nothing to sweep", file=sys.stderr)
+        return 1
+    marker_mtime = marker.stat().st_mtime
+    request_at = meta.get("request_at")
+    endpoint_epoch: float | None = None
+    endpoint_iso: str | None = None
+    delivery_request_id: str | None = None
+    appended = 0
+    for line in lines:
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            append_collection_gap(
+                evidence_dir,
+                {
+                    "type": "corrupt_line",
+                    "detail": f"{transcript.name}: complete line failed to parse",
+                    "generation": state["generation"],
+                    "session_id": args.session,
+                    "at": datetime.now(UTC).isoformat(),
+                },
+            )
+            continue
+        completed_at = payload.get("completedAt")
+        try:
+            value = _iso_to_epoch(completed_at) if completed_at else None
+        except (ValueError, TypeError):
+            value = None
+        if value is not None and (endpoint_epoch is None or value >= endpoint_epoch):
+            endpoint_epoch = value
+            endpoint_iso = completed_at
+            delivery_request_id = payload.get("requestId")
+        event = _zcode_line_event(
+            payload,
+            session_id=args.session,
+            scope=scope,
+            segment_id="sweep",
+            request_at=request_at if isinstance(request_at, (int, float)) else 0.0,
+        )
+        if event is None:
+            continue
+        event["captured_at"] = datetime.now(UTC).isoformat()
+        append_event(evidence_dir / "usage-events.jsonl", event)
+        appended += 1
+    if endpoint_epoch is None:
+        print(
+            "no swept record carries a usable completedAt; nothing stamped",
+            file=sys.stderr,
+        )
+        return 1
+    if not isinstance(request_at, (int, float)) or endpoint_epoch < request_at:
+        print("observed endpoint precedes the request start; nothing stamped", file=sys.stderr)
+        return 1
+    if marker_mtime > endpoint_epoch:
+        print(
+            "delivery marker was written after the last observed turn "
+            "completed; deliver before sweeping",
+            file=sys.stderr,
+        )
+        return 1
+    flush_segment(evidence_dir / "usage-events.jsonl")
+    if transcript_path is None:
+        _write_json(
+            state_path, {"session_id": args.session, "scope": scope, "state": state}
+        )
+    _write_json(
+        observation_path,
+        {
+            "source": DELIVERY_SOURCE_OBSERVED,
+            "session_id": args.session,
+            "scope": scope,
+            "marker": marker_name,
+            "marker_mtime_epoch": marker_mtime,
+            "delivered_at_epoch": endpoint_epoch,
+            "delivered_at_iso": endpoint_iso,
+            "delivery_request_id": delivery_request_id,
+            "events_appended": appended,
+            "swept_at": datetime.now(UTC).isoformat(),
+        },
+    )
+    print(f"delivery observed at {endpoint_iso}; run `check` for completeness")
+    return 0
+
+
 def _cmd_check(args: argparse.Namespace) -> int:
     evidence_dir = Path(args.evidence)
     output_path = Path(args.output)
@@ -2639,13 +2977,19 @@ def _cmd_check(args: argparse.Namespace) -> int:
 
     events, diagnostics = load_events(events_path)
     result = summarize_usage(events, expected_scopes=expected_scopes)
+    timing_intervals = meta.get("timing_intervals") or []
+    delivered_at = meta.get("delivered_at")
+    delivery_failures: list[str] = []
+    if meta.get("delivery_source") == DELIVERY_SOURCE_PENDING_SWEEP:
+        delivery_failures, delivered_at, timing_intervals = (
+            _resolve_sweep_delivery(evidence_dir, meta, timing_intervals)
+        )
     timing = summarize_timing(
-        meta.get("timing_intervals") or [],
+        timing_intervals,
         request_at=meta.get("request_at"),
-        delivered_at=meta.get("delivered_at"),
+        delivered_at=delivered_at,
     )
-
-    failures: list[str] = []
+    failures: list[str] = list(delivery_failures)
     if not events:
         failures.append("no usage events recorded")
     if not expected_scopes:
@@ -2846,6 +3190,25 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run.add_argument(
+        "--delivery-sweep",
+        dest="delivery_sweep",
+        action="store_true",
+        help=(
+            "zcode: defer the delivery endpoint to a post-delivery `sweep` "
+            "instead of recording an unobserved-delivery gap; needs exactly "
+            "one <id>=coordination watcher and no --delivered-at"
+        ),
+    )
+    run.add_argument(
+        "--delivery-marker",
+        dest="delivery_marker",
+        default="delivery-message.md",
+        help=(
+            "evidence-directory file the coordinator writes when delivering; "
+            "`sweep` uses it to attribute the delivery turn"
+        ),
+    )
+    run.add_argument(
         "--watch-timeout",
         dest="watch_timeout",
         type=int,
@@ -2858,6 +3221,28 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "name of an isolation evidence file inside the output directory to "
             "reference from check-input (its content is verified by `check`)"
+        ),
+    )
+
+    sweep = sub.add_parser(
+        "sweep",
+        help=(
+            "observe the delivery tail after the coordinator has delivered "
+            "(offline; never starts a host)"
+        ),
+    )
+    sweep.add_argument("--evidence", required=True, help="run observation directory pending sweep")
+    sweep.add_argument(
+        "--session",
+        required=True,
+        help="coordination rollout session id (sess_*) recorded by run",
+    )
+    sweep.add_argument(
+        "--transcript",
+        dest="transcript",
+        help=(
+            "observe this transcript snapshot instead of the live rollout "
+            "file (rotation-safe: taken after delivery, before sweeping)"
         ),
     )
 
@@ -2874,6 +3259,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_probe(args)
     if args.command == "run":
         return _cmd_run(args)
+    if args.command == "sweep":
+        return _cmd_sweep(args)
     if args.command == "check":
         return _cmd_check(args)
     parser.error(f"unknown command {args.command}")
