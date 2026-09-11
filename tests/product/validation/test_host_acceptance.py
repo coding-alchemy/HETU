@@ -1935,3 +1935,530 @@ def test_sw_sweep_accepts_explicit_transcript_snapshot(tmp_path, monkeypatch):
               for line in (evidence / "usage-events.jsonl").read_text(
                   encoding="utf-8").splitlines() if line]
     assert len(events) == 2
+
+
+# ---------------------------------------------------------------------------
+# --watch-control: runtime watcher registration and finalize lifecycle
+# (2026-09-10 minimal fix; real dispatch order registers review/correction
+# only after research completes, so their ids cannot be known at run start)
+
+
+def _fake_agent(home, agent_id, child_session, records, *,
+                status="completed", created=5.0, completed=50.0, base=None):
+    import time as time_module
+
+    if base is None:
+        base = time_module.time() - 60
+    agents_dir = home / ".zcode" / "cli" / "agents" / "sess_parent"
+    agent_dir = agents_dir / f"agent_{agent_id}"
+    agent_dir.mkdir(parents=True)
+    (agent_dir / "metadata.json").write_text(json.dumps({
+        "status": status,
+        "createdAt": _iso(base + created),
+        "completedAt": _iso(base + completed),
+        "childSessionId": child_session,
+    }), encoding="utf-8")
+    return _fake_rollout(home, child_session, records)
+
+
+def _wg_case(tmp_path, case_id, probe=True):
+    case = tmp_path / f"case-{case_id}.json"
+    case.write_text(json.dumps({
+        "case_id": case_id,
+        "security": "NONE",
+        "neutral_request": "controlled watch-control probe",
+        "as_of": "2026-09-10T00:00:00+08:00",
+        "data_mode": "public",
+        "depth": "probe",
+        "reuse_previous_task_data": False,
+        "probe_mode": probe,
+    }), encoding="utf-8")
+    return case
+
+
+def test_wg_control_registers_late_watchers_into_one_directory(
+    tmp_path, monkeypatch
+):
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"
+    home.mkdir()
+    _fake_agent(home, "a1", "sess_r", [
+        _rollout_record("rq-r1", base + 10, base + 20),
+        _rollout_record("rq-r2", base + 22, base + 30),
+    ], base=base)
+    _fake_agent(home, "v1", "sess_v", [
+        _rollout_record("rq-v1", base + 35, base + 40),
+        _rollout_record("rq-v2", base + 41, base + 45),
+    ], base=base)
+    _fake_agent(home, "x1", "sess_x", [
+        _rollout_record("rq-x1", base + 46, base + 48),
+    ], base=base)
+    _fake_rollout(home, "sess_coord", [
+        _rollout_record("rq-c1", base + 10, base + 30),
+    ])
+    control = tmp_path / "control.jsonl"
+    control.write_text(
+        '{"op": "watch", "id": "agent_v1", "scope": "review"}\n'
+        '{"op": "watch", "id": "agent_x1", "scope": "correction"}\n'
+        '{"op": "finalize"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    out = tmp_path / "obs"
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(_wg_case(tmp_path, "WG-REG")),
+        "--output", str(out),
+        "--watch-agent", "agent_a1=research",
+        "--watch-agent", "sess_coord=coordination",
+        "--delivery-sweep", "--watch-timeout", "30",
+        "--watch-control", str(control),
+        "--request-at", _iso(base),
+    ])
+    assert code == 0
+    meta = json.loads((out / "check-input.json").read_text(encoding="utf-8"))
+    assert meta["expected_scopes"] == [
+        "coordination", "correction", "research", "review",
+    ]
+    events = [json.loads(line)
+              for line in (out / "usage-events.jsonl").read_text(
+                  encoding="utf-8").splitlines() if line]
+    by_scope = {}
+    for event in events:
+        by_scope.setdefault(event["scope"], set()).add(event["message_id"])
+    assert by_scope == {
+        "research": {"rq-r1", "rq-r2"},
+        "review": {"rq-v1", "rq-v2"},
+        "correction": {"rq-x1"},
+        "coordination": {"rq-c1"},
+    }
+    gaps = (out / "collection-gaps.jsonl")
+    assert not gaps.exists() or not gaps.read_text(encoding="utf-8").strip()
+
+
+def test_wg_control_rejections_are_recorded_as_gaps(tmp_path, monkeypatch):
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"
+    home.mkdir()
+    _fake_agent(home, "a1", "sess_r", [
+        _rollout_record("rq-r1", base + 10, base + 20),
+    ], base=base)
+    _fake_rollout(home, "sess_coord", [
+        _rollout_record("rq-c1", base + 10, base + 30),
+    ])
+    control = tmp_path / "control.jsonl"
+    control.write_text(
+        # duplicate id under a different scope: misattribution risk
+        '{"op": "watch", "id": "agent_a1", "scope": "review"}\n'
+        # unknown op
+        '{"op": "nope"}\n'
+        # malformed scope
+        '{"op": "watch", "id": "agent_v1", "scope": "Bad Scope"}\n'
+        # second coordination watcher under --delivery-sweep
+        '{"op": "watch", "id": "sess_other", "scope": "coordination"}\n'
+        '{"op": "finalize"}\n'
+        # registration after finalize is an ordering error
+        '{"op": "watch", "id": "agent_v1", "scope": "review"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    out = tmp_path / "obs"
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(_wg_case(tmp_path, "WG-REJ")),
+        "--output", str(out),
+        "--watch-agent", "agent_a1=research",
+        "--watch-agent", "sess_coord=coordination",
+        "--delivery-sweep", "--watch-timeout", "30",
+        "--watch-control", str(control),
+    ])
+    assert code == 0
+    gaps = [json.loads(line) for line
+            in (out / "collection-gaps.jsonl").read_text(
+                encoding="utf-8").splitlines() if line]
+    assert [gap["type"] for gap in gaps] == ["control_line_rejected"] * 5
+    meta = json.loads((out / "check-input.json").read_text(encoding="utf-8"))
+    assert meta["expected_scopes"] == ["coordination", "research"]
+
+
+def test_wg_missing_finalize_before_timeout_is_a_gap(tmp_path, monkeypatch):
+    import time as time_module
+
+    home = tmp_path / "home"
+    home.mkdir()
+    _fake_rollout(home, "sess_coord", [])
+    control = tmp_path / "control.jsonl"
+    control.write_text("", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    out = tmp_path / "obs"
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(_wg_case(tmp_path, "WG-DL")),
+        "--output", str(out),
+        "--watch-agent", "sess_coord=coordination",
+        "--delivery-sweep", "--watch-timeout", "0",
+        "--watch-control", str(control),
+    ])
+    assert code == 0
+    gaps = [json.loads(line) for line
+            in (out / "collection-gaps.jsonl").read_text(
+                encoding="utf-8").splitlines() if line]
+    types = [gap["type"] for gap in gaps]
+    assert types.count("watch_deadline_exceeded") == 2
+    assert any("finalize" in gap["detail"] for gap in gaps)
+
+
+def test_wg_run_waits_for_finalize_beyond_last_watcher(tmp_path, monkeypatch):
+    """The lifecycle must not exit when every current watcher finished:
+    late review/correction sessions and coordination records keep arriving
+    until the coordinator declares delivery closeout."""
+    import threading
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"
+    home.mkdir()
+    _fake_agent(home, "a1", "sess_r", [
+        _rollout_record("rq-r1", base + 10, base + 20),
+    ], base=base)
+    _fake_rollout(home, "sess_coord", [
+        _rollout_record("rq-c1", base + 10, base + 30),
+    ])
+    control = tmp_path / "control.jsonl"
+    control.write_text("", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    out = tmp_path / "obs"
+    module = load_module()
+    outcome: dict = {}
+
+    def drive() -> None:
+        outcome["code"] = module["main"]([
+            "run", "--host", "zcode",
+            "--case", str(_wg_case(tmp_path, "WG-WAIT")),
+            "--output", str(out),
+            "--watch-agent", "agent_a1=research",
+            "--watch-agent", "sess_coord=coordination",
+            "--delivery-sweep", "--watch-timeout", "40",
+            "--watch-control", str(control),
+            "--request-at", _iso(base),
+        ])
+
+    thread = threading.Thread(target=drive, daemon=True)
+    thread.start()
+    # the research agent finished long before this point; an old-lifecycle
+    # run would already have exited
+    time_module.sleep(8.5)
+    assert thread.is_alive(), "run exited before finalize was declared"
+    with open(control, "a", encoding="utf-8") as handle:
+        handle.write('{"op": "finalize"}\n')
+        handle.flush()
+    thread.join(timeout=25)
+    assert not thread.is_alive()
+    assert outcome["code"] == 0
+    gaps = out / "collection-gaps.jsonl"
+    assert not gaps.exists() or not gaps.read_text(encoding="utf-8").strip()
+    events = [json.loads(line)
+              for line in (out / "usage-events.jsonl").read_text(
+                  encoding="utf-8").splitlines() if line]
+    assert {event["scope"] for event in events} == {"research", "coordination"}
+    meta = json.loads((out / "check-input.json").read_text(encoding="utf-8"))
+    assert meta["delivery_source"] == "pending-sweep"
+
+
+def test_wg_control_full_chain_establishes_single_directory(
+    tmp_path, monkeypatch
+):
+    """Offline acceptance shape: research done -> review joins -> correction
+    joins -> finalize -> delivery turn -> sweep -> check established, all
+    scopes in ONE evidence directory."""
+    import os
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"
+    home.mkdir()
+    _fake_agent(home, "a1", "sess_r", [
+        _rollout_record("rq-r1", base + 10, base + 20),
+    ], base=base)
+    _fake_agent(home, "v1", "sess_v", [
+        _rollout_record("rq-v1", base + 30, base + 35),
+    ], base=base)
+    _fake_agent(home, "x1", "sess_x", [
+        _rollout_record("rq-x1", base + 40, base + 45),
+    ], base=base)
+    _fake_rollout(home, "sess_coord", [
+        _rollout_record("rq-c1", base + 10, base + 30),
+    ])
+    control = tmp_path / "control.jsonl"
+    control.write_text(
+        '{"op": "watch", "id": "agent_v1", "scope": "review"}\n'
+        '{"op": "watch", "id": "agent_x1", "scope": "correction"}\n'
+        '{"op": "finalize"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    out = tmp_path / "obs"
+    out.mkdir()
+    _isolation_evidence(
+        out, task_identity="zcode-task:WG-CHAIN",
+        covered_sessions=["sess_r", "sess_v", "sess_x"],
+    )
+    (out / "isolation-evidence.json").replace(out / "evidence.json")
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode",
+        "--case", str(_wg_case(tmp_path, "WG-CHAIN", probe=False)),
+        "--output", str(out),
+        "--watch-agent", "agent_a1=research",
+        "--watch-agent", "sess_coord=coordination",
+        "--delivery-sweep", "--watch-timeout", "30",
+        "--watch-control", str(control),
+        "--request-at", _iso(base),
+        "--isolation-evidence", "evidence.json",
+    ])
+    assert code == 0
+
+    # the delivery turn happens after the run exited, then sweep stamps it
+    coordination = (home / ".zcode" / "cli" / "rollout"
+                    / "model-io-sess_coord.jsonl")
+    now = time_module.time()
+    with open(coordination, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_rollout_record(
+            "rq-delivery", now, now + 5)) + "\n")
+    marker = out / "delivery-message.md"
+    marker.write_text("delivery", encoding="utf-8")
+    os.utime(marker, (now, now))
+    assert module["main"]([
+        "sweep", "--evidence", str(out), "--session", "sess_coord",
+    ]) == 0
+
+    result_path = tmp_path / "result.json"
+    code = module["main"]([
+        "check", "--evidence", str(out), "--output", str(result_path),
+    ])
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert code == 0, payload["failures"]
+    assert payload["passed"] is True
+    assert payload["baseline_qualification"] == "established"
+    assert payload["usage"]["scopes"].keys() == {
+        "research", "review", "correction", "coordination",
+    }
+    assert payload["usage"]["scopes"]["coordination"]["events"] == 2
+
+
+# ---------------------------------------------------------------------------
+# --resume / watch-state persistence / native session ids / status
+# (2026-09-10 infrastructure repair: a killed collector must bound its loss
+# to the dead window and be resumable; file-scope and agent-scope watchers
+# must report the same session-id form as the isolation scan)
+
+
+def _wh_records(path, count, prefix="rq-r"):
+    import time as time_module
+
+    base = time_module.time() - 60
+    path.write_text(
+        "".join(json.dumps(_rollout_record(f"{prefix}-{n}",
+                                           base + n, base + n + 1)) + "\n"
+                for n in range(1, count + 1)),
+        encoding="utf-8",
+    )
+    return base
+
+
+def test_wh_resume_continues_from_saved_cursor(tmp_path, monkeypatch):
+    import os
+    import time as time_module
+
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    transcript = tmp_path / "model-io-sess_r.jsonl"
+    base = _wh_records(transcript, 4)
+    head = transcript.read_text(encoding="utf-8").splitlines(keepends=True)
+    consumed_bytes = sum(len(line.encode()) for line in head[:2])
+    stat = os.stat(transcript)
+    obs = tmp_path / "obs"
+    obs.mkdir()
+    case = tmp_path / "case.json"
+    case.write_text(json.dumps({
+        "case_id": "WH-RES", "security": "NONE",
+        "neutral_request": "resume probe", "as_of": "2026-09-10T00:00:00+08:00",
+        "data_mode": "public", "depth": "probe",
+        "reuse_previous_task_data": False, "probe_mode": True,
+    }), encoding="utf-8")
+    (obs / "case-record.json").write_text("{}", encoding="utf-8")
+    (obs / "watch-state.json").write_text(json.dumps({
+        "watchers": [{
+            "native_id": f"file:{transcript}", "scope": "research",
+            "kind": "file", "metadata_path": None, "session_id": "sess_r",
+            "transcript": str(transcript),
+            "state": {"identity": [stat.st_dev, stat.st_ino],
+                      "offset": consumed_bytes, "generation": 0},
+            "done": False, "started_epoch": None, "ended_epoch": None,
+        }],
+        "control": None, "request_at": base,
+        "saved_at": "2026-09-10T00:00:00+00:00",
+    }), encoding="utf-8")
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(case), "--output", str(obs),
+        "--resume", "--watch-timeout", "5",
+    ])
+    assert code == 0
+    events = [json.loads(line)
+              for line in (obs / "usage-events.jsonl").read_text(
+                  encoding="utf-8").splitlines() if line]
+    # only the two unconsumed records are appended — no duplicates
+    assert [event["message_id"] for event in events] == ["rq-r-3", "rq-r-4"]
+    assert (obs / "check-input.json").exists()
+    # the only expected gap is the by-design unobserved delivery tail
+    gaps = [json.loads(line) for line
+            in (obs / "collection-gaps.jsonl").read_text(
+                encoding="utf-8").splitlines() if line]
+    assert [gap["type"] for gap in gaps] == ["delivery_tail_unobserved"]
+
+
+def test_wh_resume_detects_truncation_and_reconsumes(tmp_path, monkeypatch):
+    import os
+    import time as time_module
+
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    transcript = tmp_path / "model-io-sess_t.jsonl"
+    _wh_records(transcript, 3, prefix="rq-t")
+    stat = os.stat(transcript)
+    obs = tmp_path / "obs"
+    obs.mkdir()
+    case = tmp_path / "case.json"
+    case.write_text(json.dumps({
+        "case_id": "WH-TRUNC", "security": "NONE",
+        "neutral_request": "resume probe", "as_of": "2026-09-10T00:00:00+08:00",
+        "data_mode": "public", "depth": "probe",
+        "reuse_previous_task_data": False, "probe_mode": True,
+    }), encoding="utf-8")
+    (obs / "case-record.json").write_text("{}", encoding="utf-8")
+    (obs / "watch-state.json").write_text(json.dumps({
+        "watchers": [{
+            "native_id": f"file:{transcript}", "scope": "research",
+            "kind": "file", "metadata_path": None, "session_id": "sess_t",
+            "transcript": str(transcript),
+            "state": {"identity": [stat.st_dev, stat.st_ino],
+                      "offset": stat.st_size + 500, "generation": 0},
+            "done": False, "started_epoch": None, "ended_epoch": None,
+        }],
+        "control": None, "request_at": 1000.0,
+        "saved_at": "2026-09-10T00:00:00+00:00",
+    }), encoding="utf-8")
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(case), "--output", str(obs),
+        "--resume", "--watch-timeout", "5",
+    ])
+    assert code == 0
+    gaps = [json.loads(line) for line
+            in (obs / "collection-gaps.jsonl").read_text(
+                encoding="utf-8").splitlines() if line]
+    assert [gap["type"] for gap in gaps] == [
+        "transcript_truncated", "delivery_tail_unobserved"]
+    events = [json.loads(line)
+              for line in (obs / "usage-events.jsonl").read_text(
+                  encoding="utf-8").splitlines() if line]
+    assert len(events) == 3
+
+
+def test_wh_file_and_agent_watchers_share_native_session_ids(
+    tmp_path, monkeypatch
+):
+    """The isolation scan and every watcher kind must report the same id
+    form, or check-side coverage comparisons can never match."""
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"
+    home.mkdir()
+    _fake_agent(home, "a1", "sess_r", [
+        _rollout_record("rq-r1", base + 10, base + 20),
+    ], base=base)
+    snapshot_dir = tmp_path / "staging"
+    snapshot_dir.mkdir()
+    snapshot = snapshot_dir / "model-io-sess_subagent_agent_a1.jsonl"
+    snapshot.write_text(
+        "".join(json.dumps(r) + "\n" for r in [
+            _rollout_record("rq-r1", base + 10, base + 20)]),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    module = load_module()
+    out = tmp_path / "obs"
+    module["main"]([
+        "run", "--host", "zcode", "--case", str(_wg_case(tmp_path, "WH-IDS")),
+        "--output", str(out),
+        "--watch-agent", f"file:{snapshot}=research",
+        "--watch-agent", "agent_a1=review",
+        "--watch-timeout", "10", "--request-at", _iso(base),
+    ])
+    events = [json.loads(line)
+              for line in (out / "usage-events.jsonl").read_text(
+                  encoding="utf-8").splitlines() if line]
+    ids = {event["scope"]: event["session_id"] for event in events}
+    # the file-scope watcher reports the stripped native id of its snapshot
+    # and the agent-scope watcher the metadata childSessionId — both without
+    # the model-io- prefix, so coverage comparisons can match either kind
+    assert ids == {"research": "sess_subagent_agent_a1", "review": "sess_r"}
+    probe_out = tmp_path / "iso"
+    module["main"]([
+        "probe", "--host", "zcode", "--output", str(probe_out), "--isolation",
+        "--agent", "agent_a1", "--sanity-agent", "agent_a1",
+        "--task-identity", "zcode-task:WH-IDS",
+        "--decoy-marker", "M", "--decoy-path", "/nope/marker.txt",
+        "--allowed-path", str(tmp_path), "--staging-dir", str(snapshot_dir),
+    ])
+    covered = json.loads(
+        (probe_out / "isolation-evidence-zcode.json").read_text(
+            encoding="utf-8"))["covered_sessions"]
+    assert covered == ["sess_subagent_agent_a1"]
+    # the isolation scan and the file-scope watcher agree on the id form
+    assert covered[0] == ids["research"]
+
+
+def test_wh_status_reports_state_events_and_gaps(tmp_path, monkeypatch, capsys):
+    import os
+    import time as time_module
+
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    transcript = tmp_path / "model-io-sess_s.jsonl"
+    _wh_records(transcript, 2, prefix="rq-s")
+    stat = os.stat(transcript)
+    obs = tmp_path / "obs"
+    obs.mkdir()
+    (obs / "usage-events.jsonl").write_text("", encoding="utf-8")
+    (obs / "collection-gaps.jsonl").write_text(json.dumps({
+        "type": "transcript_rotated", "detail": "x",
+        "generation": 1, "session_id": "sess_s",
+        "at": "2026-09-10T00:00:00+00:00"}) + "\n", encoding="utf-8")
+    (obs / "watch-state.json").write_text(json.dumps({
+        "watchers": [{
+            "native_id": f"file:{transcript}", "scope": "research",
+            "kind": "file", "metadata_path": None, "session_id": "sess_s",
+            "transcript": str(transcript),
+            "state": {"identity": [stat.st_dev, stat.st_ino],
+                      "offset": 0, "generation": 1},
+            "done": False, "started_epoch": None, "ended_epoch": None,
+        }],
+        "control": None, "request_at": 1000.0,
+        "saved_at": "2026-09-10T00:00:00+00:00",
+    }), encoding="utf-8")
+    module = load_module()
+    code = module["main"](["status", "--evidence", str(obs)])
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "watch-state saved_at" in out
+    assert "watcher research" in out
+    assert "gaps: 1" in out

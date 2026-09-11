@@ -1025,6 +1025,40 @@ def _load_json(path: Path) -> Any:
         return json.load(handle)
 
 
+def _replace_json(path: Path, payload: Any) -> None:
+    """Atomically replace a mutable continuation file (not a first-writer
+    stamp): the sweep cursor must advance in place, so create-only
+    semantics do not apply — durability and atomicity still do."""
+    path = Path(path)
+    temp = path.with_name(path.name + f".tmp-{os.getpid()}")
+    with open(temp, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, ensure_ascii=False, indent=1)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temp, path)
+
+
+def _coerce_state_identity(state: dict[str, Any]) -> None:
+    """JSON round-trips the (dev, inode) cursor identity into a list; make
+    stored cursors comparable again so a resumed watcher never mistakes its
+    own file for a rotation."""
+    identity = state.get("identity")
+    if isinstance(identity, list):
+        state["identity"] = tuple(identity)
+
+
+def _native_session_id(stem: str) -> str:
+    """Normalize a rollout transcript stem to the native session id.
+
+    Transcript files are named ``model-io-<session>.jsonl``; both file-scope
+    watchers and the isolation scan must report the SAME id form as the
+    agent-kind watcher (the native session id), or coverage comparisons in
+    `check` can never match across watcher kinds."""
+    prefix = "model-io-"
+    return stem[len(prefix):] if stem.startswith(prefix) else stem
+
+
 def _claude_project_slug(cwd: str) -> str:
     return re.sub(r"[^A-Za-z0-9]", "-", cwd)
 
@@ -1666,6 +1700,69 @@ def _parse_watch_specs(values: list[str]) -> list[tuple[str, str]]:
     return specs
 
 
+def _valid_watch_scope(scope: Any) -> bool:
+    return (
+        isinstance(scope, str)
+        and bool(scope)
+        and "#" not in scope
+        and bool(re.fullmatch(r"[a-z_][a-z0-9_-]*", scope))
+    )
+
+
+def _make_zcode_watcher(
+    native_id: str, scope: str, rollout_root: Path
+) -> dict[str, Any]:
+    """Build one watcher record from a watch spec (id or file: path).
+
+    Shared by the at-start ``--watch-agent`` specs and by runtime
+    ``--watch-control`` registrations so both entry points resolve kinds,
+    transcripts and agent metadata identically."""
+    base: dict[str, Any] = {
+        "native_id": native_id,
+        "scope": scope,
+        "state": {"identity": None, "offset": 0, "generation": 0},
+        "done": False,
+        "quiet": 0,
+        "started_epoch": None,
+        "ended_epoch": None,
+    }
+    if native_id.startswith("file:"):
+        transcript = Path(native_id[len("file:"):])
+        return {
+            **base,
+            "kind": "file",
+            "metadata_path": None,
+            "session_id": _native_session_id(transcript.stem),
+            "transcript": transcript,
+        }
+    if native_id.startswith("sess_"):
+        return {
+            **base,
+            "kind": "session",
+            "metadata_path": None,
+            "session_id": native_id,
+            "transcript": rollout_root / f"model-io-{native_id}.jsonl",
+        }
+    watcher: dict[str, Any] = {
+        **base,
+        "kind": "agent",
+        "metadata_path": None,
+        "session_id": native_id,
+        "transcript": None,
+    }
+    metadata_path, transcript = _zcode_agent_records(native_id)
+    if metadata_path is not None:
+        watcher["metadata_path"] = metadata_path
+        watcher["transcript"] = transcript
+        try:
+            payload = _load_json(metadata_path)
+            if payload.get("childSessionId"):
+                watcher["session_id"] = payload["childSessionId"]
+        except (OSError, json.JSONDecodeError):
+            pass
+    return watcher
+
+
 def _zcode_line_event(
     payload: dict[str, Any],
     *,
@@ -1847,7 +1944,7 @@ def _zcode_isolation_scan(
         or scan["marker_in_responses"] > 0
         or scan["decoy_path_in_tool_inputs"] > 0
     )
-    record["session_id"] = transcript.stem
+    record["session_id"] = _native_session_id(transcript.stem)
     # a transcript with no usable request payload cannot verify anything
     record["valid_coverage"] = scan["request_count"] > 0
     record.update(scan)
@@ -2076,12 +2173,30 @@ def _cmd_run(args: argparse.Namespace) -> int:
         "collection-gaps.jsonl",
     )
     existing = [name for name in run_artifacts if (output_dir / name).exists()]
-    if existing:
+    if existing and not args.resume:
         print(
             f"refusing to overwrite existing run artifacts in {output_dir}: {existing}",
             file=sys.stderr,
         )
         return 2
+    resume_state: dict[str, Any] | None = None
+    if args.resume:
+        state_path = output_dir / "watch-state.json"
+        if args.watch_agent:
+            print(
+                "--resume takes its watchers from the saved state; "
+                "omit --watch-agent",
+                file=sys.stderr,
+            )
+            return 2
+        if not state_path.exists():
+            print(f"--resume requires an existing {state_path}", file=sys.stderr)
+            return 2
+        try:
+            resume_state = _load_json(state_path)
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"--resume cannot read the saved state: {error}", file=sys.stderr)
+            return 2
     case = _load_json(Path(args.case))
     try:
         _validate_case(case)
@@ -2090,7 +2205,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         return 2
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    _write_json(output_dir / "case-record.json", case)
+    if resume_state is None:
+        _write_json(output_dir / "case-record.json", case)
 
     from datetime import datetime
 
@@ -2141,7 +2257,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print("native chain captured; run `check` for metering completeness")
         return 0
 
-    if args.host == "zcode" and args.watch_agent:
+    if args.host == "zcode" and (args.watch_agent or args.resume):
         # Attach mode for one coordinated task: every watched native session
         # is declared with an explicit scope (<id>=<scope>, repeatable), so
         # research, review, correction and coordination are collected as the
@@ -2150,11 +2266,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
         # directly. The cursor consumes complete lines only, drains after
         # the observed process finishes, and rotation/truncation and non-
         # completed terminal states are recorded as explicit gaps.
-        try:
-            specs = _parse_watch_specs(args.watch_agent)
-        except ValueError as error:
-            print(str(error), file=sys.stderr)
-            return 2
+        # --resume rebuilds the watcher set and every cursor from the saved
+        # watch-state.json after an abnormal termination, so a killed
+        # collector bounds its loss to the dead window instead of the whole
+        # task.
+        if resume_state is not None:
+            specs = [
+                (item["native_id"], item["scope"])
+                for item in resume_state.get("watchers") or []
+            ]
+        else:
+            try:
+                specs = _parse_watch_specs(args.watch_agent)
+            except ValueError as error:
+                print(str(error), file=sys.stderr)
+                return 2
         coordination_watchers = [
             watcher for watcher in specs if watcher[1] == "coordination"
         ]
@@ -2173,68 +2299,46 @@ def _cmd_run(args: argparse.Namespace) -> int:
         request_at = time.time()
         if args.request_at:
             request_at = _iso_to_epoch(args.request_at)
+        if resume_state is not None and not args.request_at:
+            request_at = resume_state.get("request_at") or request_at
         delivered_at_provided: float | None = None
         if args.delivered_at:
             delivered_at_provided = _iso_to_epoch(args.delivered_at)
 
         rollout_root = Path.home() / ".zcode" / "cli" / "rollout"
-        watchers: list[dict[str, Any]] = []
-        for native_id, scope in specs:
-            if native_id.startswith("file:"):
-                watcher: dict[str, Any] = {
-                    "native_id": native_id,
-                    "scope": scope,
-                    "kind": "file",
-                    "metadata_path": None,
-                    "session_id": Path(native_id[len("file:"):]).stem,
-                    "transcript": Path(native_id[len("file:"):]),
-                    "state": {"identity": None, "offset": 0, "generation": 0},
-                    "done": False,
-                    "quiet": 0,
-                    "started_epoch": None,
-                    "ended_epoch": None,
-                }
-            elif native_id.startswith("sess_"):
+        if resume_state is not None:
+            watchers = []
+            for item in resume_state.get("watchers") or []:
                 watcher = {
-                    "native_id": native_id,
-                    "scope": scope,
-                    "kind": "session",
-                    "metadata_path": None,
-                    "session_id": native_id,
-                    "transcript": rollout_root / f"model-io-{native_id}.jsonl",
-                    "state": {"identity": None, "offset": 0, "generation": 0},
-                    "done": False,
+                    "native_id": item["native_id"],
+                    "scope": item["scope"],
+                    "kind": item["kind"],
+                    "metadata_path": (
+                        Path(item["metadata_path"])
+                        if item.get("metadata_path") else None
+                    ),
+                    "session_id": item["session_id"],
+                    "transcript": (
+                        Path(item["transcript"]) if item.get("transcript") else None
+                    ),
+                    "state": dict(item.get("state") or {}),
+                    "done": bool(item.get("done")),
                     "quiet": 0,
-                    "started_epoch": None,
-                    "ended_epoch": None,
+                    "started_epoch": item.get("started_epoch"),
+                    "ended_epoch": item.get("ended_epoch"),
                 }
-            else:
-                watcher = {
-                    "native_id": native_id,
-                    "scope": scope,
-                    "kind": "agent",
-                    "metadata_path": None,
-                    "session_id": native_id,
-                    "transcript": None,
-                    "state": {"identity": None, "offset": 0, "generation": 0},
-                    "done": False,
-                    "quiet": 0,
-                    "started_epoch": None,
-                    "ended_epoch": None,
-                }
-                metadata_path, transcript = _zcode_agent_records(native_id)
-                if metadata_path is not None:
-                    watcher["metadata_path"] = metadata_path
-                    watcher["transcript"] = transcript
-                    try:
-                        payload = _load_json(metadata_path)
-                        if payload.get("childSessionId"):
-                            watcher["session_id"] = payload["childSessionId"]
-                    except (OSError, json.JSONDecodeError):
-                        pass
-            watchers.append(watcher)
+                _coerce_state_identity(watcher["state"])
+                watchers.append(watcher)
+        else:
+            watchers: list[dict[str, Any]] = [
+                _make_zcode_watcher(native_id, scope, rollout_root)
+                for native_id, scope in specs
+            ]
+
+        dirty = False
 
         def drain_once(watcher: dict[str, Any]) -> bool:
+            nonlocal dirty
             transcript = watcher["transcript"]
             if transcript is None or not transcript.exists():
                 return False
@@ -2298,12 +2402,185 @@ def _cmd_run(args: argparse.Namespace) -> int:
                         value = _iso_to_epoch(payload["completedAt"])
                         if watcher["ended_epoch"] is None or value > watcher["ended_epoch"]:
                             watcher["ended_epoch"] = value
+            if consumed or lost_tail is not None:
+                dirty = True
             return consumed or lost_tail is not None
 
         terminal = {"completed", "failed", "error", "cancelled", "aborted", "timeout"}
         deadline = time.time() + args.watch_timeout
         pending = [watcher for watcher in watchers if watcher["kind"] == "agent"]
-        while any(not watcher["done"] for watcher in watchers):
+        # --watch-control: a JSONL file the coordinator appends to while the
+        # run is alive. ``{"op":"watch","id":...,"scope":...}`` registers a
+        # late-appearing session (review/correction contexts are dispatched
+        # only after research completes, so their ids cannot be known at run
+        # start); ``{"op":"finalize"}`` declares delivery closeout. Until
+        # finalize arrives the run keeps waiting for new sessions and keeps
+        # draining the coordination transcript — it never exits merely
+        # because every current watcher finished.
+        control_path = Path(args.watch_control) if args.watch_control else None
+        control_state: dict[str, Any] = {"identity": None, "offset": 0, "generation": 0}
+        finalized = False
+        finalize_epoch: float | None = None
+        if (
+            resume_state is not None
+            and control_path is not None
+            and (resume_state.get("control") or {}).get("path") == str(control_path)
+        ):
+            saved_control = resume_state["control"]
+            control_state.update(saved_control.get("state") or {})
+            _coerce_state_identity(control_state)
+            finalized = bool(saved_control.get("finalized"))
+            finalize_epoch = saved_control.get("finalize_epoch")
+        watched_ids: dict[str, str] = {native_id: scope for native_id, scope in specs}
+
+        def reject_control_line(detail: str) -> None:
+            append_collection_gap(
+                output_dir,
+                {
+                    "type": "control_line_rejected",
+                    "detail": detail,
+                    "generation": control_state["generation"],
+                    "session_id": None,
+                    "at": datetime.now(UTC).isoformat(),
+                },
+            )
+
+        def poll_control() -> None:
+            nonlocal dirty, finalized, finalize_epoch
+            lines, control_state_new, lost_tail = _poll_complete_lines(
+                control_path, control_state
+            )
+            control_state.update(control_state_new)
+            if lines or lost_tail is not None:
+                dirty = True
+            if lost_tail is not None:
+                # a rotated/truncated control file can silently swallow watch
+                # commands; the loss must surface, never pass quietly
+                append_collection_gap(
+                    output_dir,
+                    {
+                        "type": "control_rotated",
+                        "detail": (
+                            f"{control_path.name}: control file "
+                            f"{lost_tail['reason']}; commands from byte "
+                            f"{lost_tail['lost_bytes_from']} may be lost"
+                        ),
+                        "generation": control_state["generation"],
+                        "session_id": None,
+                        "at": datetime.now(UTC).isoformat(),
+                    },
+                )
+            for line in lines:
+                try:
+                    command = json.loads(line)
+                except json.JSONDecodeError:
+                    append_collection_gap(
+                        output_dir,
+                        {
+                            "type": "corrupt_line",
+                            "detail": (
+                                f"{control_path.name}: control line failed to parse"
+                            ),
+                            "generation": control_state["generation"],
+                            "session_id": None,
+                            "at": datetime.now(UTC).isoformat(),
+                        },
+                    )
+                    continue
+                op = command.get("op") if isinstance(command, dict) else None
+                if op == "finalize":
+                    if not finalized:
+                        finalized = True
+                        finalize_epoch = time.time()
+                        dirty = True
+                    continue
+                if op != "watch":
+                    reject_control_line(f"unknown control op: {op!r}")
+                    continue
+                native_id = command.get("id")
+                scope = command.get("scope")
+                if not isinstance(native_id, str) or not native_id or not (
+                    _valid_watch_scope(scope)
+                ):
+                    reject_control_line(
+                        f"watch op needs an id and a lowercase scope: {line[:120]!r}"
+                    )
+                    continue
+                if native_id in watched_ids:
+                    if watched_ids[native_id] != scope:
+                        reject_control_line(
+                            f"{native_id} already watched as "
+                            f"{watched_ids[native_id]!r}, not {scope!r}"
+                        )
+                    continue
+                if args.delivery_sweep and scope == "coordination":
+                    reject_control_line(
+                        "--delivery-sweep binds exactly one coordination "
+                        "watcher, declared at run start"
+                    )
+                    continue
+                if finalized:
+                    reject_control_line(
+                        f"watch {native_id!r} requested after finalize"
+                    )
+                    continue
+                watchers.append(_make_zcode_watcher(native_id, scope, rollout_root))
+                watched_ids[native_id] = scope
+                dirty = True
+                print(
+                    f"watcher added from control file: {native_id} ({scope})",
+                    file=sys.stderr,
+                )
+
+        def save_state() -> None:
+            """Persist every watcher cursor and the control-file cursor so
+            an externally killed collector can resume from the last durable
+            byte instead of losing the whole task window."""
+            payload = {
+                "watchers": [
+                    {
+                        "native_id": watcher["native_id"],
+                        "scope": watcher["scope"],
+                        "kind": watcher["kind"],
+                        "metadata_path": (
+                            str(watcher["metadata_path"])
+                            if watcher.get("metadata_path") else None
+                        ),
+                        "session_id": watcher["session_id"],
+                        "transcript": (
+                            str(watcher["transcript"])
+                            if watcher.get("transcript") else None
+                        ),
+                        "state": watcher["state"],
+                        "done": watcher["done"],
+                        "started_epoch": watcher["started_epoch"],
+                        "ended_epoch": watcher["ended_epoch"],
+                    }
+                    for watcher in watchers
+                ],
+                "control": (
+                    {
+                        "path": str(control_path),
+                        "state": control_state,
+                        "finalized": finalized,
+                        "finalize_epoch": finalize_epoch,
+                    }
+                    if control_path is not None
+                    else None
+                ),
+                "request_at": request_at,
+                "saved_at": datetime.now(UTC).isoformat(),
+            }
+            _replace_json(output_dir / "watch-state.json", payload)
+
+        # durable from the first second: a kill before the first drain must
+        # still leave a resumable state behind
+        save_state()
+        while any(not watcher["done"] for watcher in watchers) or (
+            control_path is not None and not finalized
+        ):
+            if control_path is not None:
+                poll_control()
             if time.time() > deadline:
                 for watcher in watchers:
                     if not watcher["done"]:
@@ -2321,6 +2598,20 @@ def _cmd_run(args: argparse.Namespace) -> int:
                             },
                         )
                         watcher["done"] = True
+                if control_path is not None and not finalized:
+                    append_collection_gap(
+                        output_dir,
+                        {
+                            "type": "watch_deadline_exceeded",
+                            "detail": (
+                                "watch control finalize never received before "
+                                "--watch-timeout; delivery closeout unproven"
+                            ),
+                            "generation": 0,
+                            "session_id": None,
+                            "at": datetime.now(UTC).isoformat(),
+                        },
+                    )
                 break
             for watcher in watchers:
                 if watcher["done"]:
@@ -2349,12 +2640,18 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 drain_once(watcher)
                 if watcher["kind"] != "agent":
                     # the coordination window ends at the provided delivery
-                    # time, or together with the last agent when unspecified
+                    # time, or together with the last agent when unspecified;
+                    # under --watch-control it stays open until finalize
+                    if control_path is not None and not finalized:
+                        continue
                     end = delivered_at_provided
-                    if end is None and all(
-                        item["done"] for item in pending
-                    ):
-                        end = time.time()
+                    if end is None:
+                        if control_path is not None:
+                            end = finalize_epoch
+                        elif all(
+                            item["done"] for item in pending
+                        ):
+                            end = time.time()
                     if end is not None and time.time() >= end:
                         if drain_once(watcher):
                             watcher["quiet"] = 0
@@ -2397,14 +2694,31 @@ def _cmd_run(args: argparse.Namespace) -> int:
                                     "at": datetime.now(UTC).isoformat(),
                                 },
                             )
-            time.sleep(1 if any(not item["done"] for item in watchers) else 0)
+            # while waiting for late sessions or the finalize signal the
+            # loop must poll at a calm cadence, never busy-spin
+            if dirty:
+                save_state()
+                dirty = False
+            time.sleep(
+                1
+                if (
+                    any(not item["done"] for item in watchers)
+                    or (control_path is not None and not finalized)
+                )
+                else 0
+            )
 
+        save_state()
         for watcher in watchers:
             transcript = watcher.get("transcript")
             if transcript is not None:
                 _record_unconsumed_tail(
                     output_dir, transcript, watcher["state"], watcher["session_id"]
                 )
+        if control_path is not None:
+            # a trailing partial control command never became executable and
+            # may have been a lost watch registration
+            _record_unconsumed_tail(output_dir, control_path, control_state, None)
 
         intervals: list[dict[str, Any]] = []
         interval_gaps: list[str] = []
@@ -2484,7 +2798,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "clock": "wall",
                 }
             )
-        expected_scopes = sorted({scope for _, scope in specs})
+        # scopes cover every watcher that ever joined, including runtime
+        # registrations from the control file, so one evidence directory
+        # declares the whole task
+        expected_scopes = sorted({watcher["scope"] for watcher in watchers})
         isolation_input: dict[str, Any] = {
             "status": "not_verified",
             "method": "attach mode proves metering only",
@@ -2507,8 +2824,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     f"{output_dir}; recording not_verified",
                     file=sys.stderr,
                 )
+        # a resumed run rewrites its exit artifacts in place; a fresh run
+        # keeps create-only semantics
+        write_meta = _replace_json if resume_state is not None else _write_json
         if args.delivery_sweep:
-            _write_json(
+            write_meta(
                 output_dir / "sweep-state.json",
                 {
                     "session_id": coordination_watcher["session_id"],
@@ -2516,7 +2836,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                     "state": coordination_watcher["state"],
                 },
             )
-        _write_json(
+        write_meta(
             output_dir / "check-input.json",
             {
                 "case_id": case["case_id"],
@@ -2825,13 +3145,12 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     if state_path.exists() and transcript_path is None:
         try:
             stored = _load_json(state_path).get("state") or {}
-            state.update(
-                {
-                    key: stored[key]
-                    for key in ("identity", "offset", "generation")
-                    if key in stored
-                }
-            )
+            for key in ("offset", "generation"):
+                if key in stored:
+                    state[key] = stored[key]
+            if stored.get("identity") is not None:
+                state["identity"] = stored["identity"]
+                _coerce_state_identity(state)
         except (OSError, json.JSONDecodeError):
             pass
     lines, state, lost_tail = _poll_complete_lines(transcript, state)
@@ -2916,7 +3235,10 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
         return 1
     flush_segment(evidence_dir / "usage-events.jsonl")
     if transcript_path is None:
-        _write_json(
+        # advance the continuation cursor in place; a re-run sweep is
+        # already refused by the delivery observation stamp, never by the
+        # cursor itself
+        _replace_json(
             state_path, {"session_id": args.session, "scope": scope, "state": state}
         )
     _write_json(
@@ -3107,6 +3429,84 @@ def _cmd_check(args: argparse.Namespace) -> int:
     return 0 if payload["passed"] else 1
 
 
+def _cmd_status(args: argparse.Namespace) -> int:
+    """Read-only liveness and progress view over one observation directory.
+
+    Reports saved watcher cursors, collected event counts, recorded gaps and
+    — for agent watchers — the native metadata status plus transcript
+    staleness. Never starts a host and never writes anything: it exists so a
+    coordinator can distinguish "long tool call" from "agent killed but
+    status still says running" with one command during multi-hour samples.
+    """
+    evidence_dir = Path(args.evidence)
+    print(f"observation directory: {evidence_dir}")
+    for name in ("case-record.json", "check-input.json", "watch-state.json",
+                 "sweep-state.json", "delivery-observation.json",
+                 "collection-gaps.jsonl", "usage-events.jsonl"):
+        marker = "y" if (evidence_dir / name).exists() else "-"
+        print(f"  [{marker}] {name}")
+
+    events_path = evidence_dir / "usage-events.jsonl"
+    if events_path.exists():
+        events, _ = load_events(events_path)
+        by_scope: dict[str, int] = {}
+        last_captured = ""
+        for event in events:
+            by_scope[event.get("scope", "?")] = by_scope.get(event.get("scope", "?"), 0) + 1
+            captured = str(event.get("captured_at") or "")
+            if captured > last_captured:
+                last_captured = captured
+        counts = ", ".join(f"{scope}={count}" for scope, count in sorted(by_scope.items()))
+        print(f"events: {len(events)} ({counts}); last captured_at: {last_captured or 'n/a'}")
+
+    gaps = load_collection_gaps(evidence_dir)
+    if gaps:
+        print(f"gaps: {len(gaps)} ({sorted({str(gap.get('type')) for gap in gaps})})")
+    else:
+        print("gaps: 0")
+
+    state_path = evidence_dir / "watch-state.json"
+    if not state_path.exists():
+        return 0
+    try:
+        saved = _load_json(state_path)
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"watch-state unreadable: {error}")
+        return 0
+    print(f"watch-state saved_at: {saved.get('saved_at')}")
+    control = saved.get("control")
+    if control is not None:
+        print(
+            f"control: finalized={bool(control.get('finalized'))} "
+            f"offset={((control.get('state') or {}).get('offset'))}"
+        )
+    now = time.time()
+    for item in saved.get("watchers") or []:
+        kind = item.get("kind")
+        line = (
+            f"watcher {item.get('scope')}: kind={kind} done={bool(item.get('done'))} "
+            f"offset={(item.get('state') or {}).get('offset')} "
+            f"generation={(item.get('state') or {}).get('generation')}"
+        )
+        transcript = item.get("transcript")
+        if kind == "agent":
+            metadata_status = None
+            with contextlib.suppress(OSError, json.JSONDecodeError, KeyError,
+                                     TypeError):
+                metadata_status = (_load_json(Path(item["metadata_path"]))
+                                   .get("status"))
+            line += f" metadata_status={metadata_status!r}"
+        if transcript:
+            path = Path(transcript)
+            try:
+                age = now - path.stat().st_mtime
+                line += f" transcript_idle_s={age:.0f}"
+            except OSError:
+                line += " transcript=missing"
+        print("  " + line)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="HETU stage-01 host acceptance entry")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -3209,6 +3609,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run.add_argument(
+        "--watch-control",
+        dest="watch_control",
+        help=(
+            "zcode: JSONL control file polled at runtime; append "
+            '{"op":"watch","id":"<native-id>","scope":"<scope>"} to attach a '
+            "late-appearing session (review/correction contexts) and "
+            '{"op":"finalize"} to declare delivery closeout — until finalize '
+            "the run keeps waiting for new sessions and keeps draining the "
+            "coordination transcript even after every current watcher finished"
+        ),
+    )
+    run.add_argument(
         "--watch-timeout",
         dest="watch_timeout",
         type=int,
@@ -3223,6 +3635,26 @@ def build_parser() -> argparse.ArgumentParser:
             "reference from check-input (its content is verified by `check`)"
         ),
     )
+    run.add_argument(
+        "--resume",
+        action="store_true",
+        help=(
+            "resume an interrupted collection in the same observation "
+            "directory from watch-state.json: watchers, cursors, the control-"
+            "file cursor and request_at are restored; records lost while the "
+            "collector was dead surface as rotation/truncation gaps "
+            "(fail-closed). Omit --watch-agent when resuming"
+        ),
+    )
+
+    status = sub.add_parser(
+        "status",
+        help=(
+            "read-only progress/liveness view over one observation directory "
+            "(never starts a host)"
+        ),
+    )
+    status.add_argument("--evidence", required=True, help="observation directory")
 
     sweep = sub.add_parser(
         "sweep",
@@ -3263,6 +3695,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_sweep(args)
     if args.command == "check":
         return _cmd_check(args)
+    if args.command == "status":
+        return _cmd_status(args)
     parser.error(f"unknown command {args.command}")
     return 2
 
