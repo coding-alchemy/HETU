@@ -78,7 +78,7 @@ description: Analyze one China A-share stock with public or explicitly authorize
 - 当 Agent 已按来源合同明确选择 `cninfo-announcement-index`、`sina-financial-statements` 或 `tencent-quote-snapshot` 时，可读取工具目录并调用可选的 `source_fetch.py`；脚本失败只形成局部缺口，不改变 Agent 的来源选择、采用或后续判断责任。
 - 工具、来源、授权或恢复出现问题时读取[恢复规则](references/recovery.md)。
 - 进入 W10 综合报告或提前核对交付边界时读取[报告指引](references/report-guidance.md)。
-- 发现宿主能力、选择文件位置或调用可选助手时读取[宿主工具边界](references/host-tools.md)。
+- 发现宿主能力、选择文件位置、调用可选助手或开始读取年报等长材料时读取[宿主工具边界](references/host-tools.md)。
 
 研究工作区在 W1 唯一核验后使用
 `.hetu/research/<证券简称>-<证券代码>-<请求深度>-<任务时间>/` 固定目录，包含 `checkpoint.md`、

@@ -160,6 +160,24 @@ MANIFEST_SCRIPT_KEYS = frozenset(
     }
 )
 MANIFEST_INPUT_KEYS = frozenset({"path", "sha256"})
+# Phase-5 stage-03 conditional run fields: absent means "not recorded"
+# (old runs stay valid and are never back-filled).
+MANIFEST_RUN_CONDITIONAL_KEYS = frozenset(
+    {"task_id", "parent_task_id", "reuse_previous_task_data"}
+)
+# Phase-5 stage-03 conditional artifact key: a nested object recording that
+# this entry's material was copied from a source task. All five subkeys are
+# required whenever the key appears; values never contain secrets and
+# source_artifact is a relative locator inside the source task.
+MANIFEST_PROVENANCE_KEYS = frozenset(
+    {
+        "source_task_id",
+        "source_artifact",
+        "original_source",
+        "original_acquired_at",
+        "copied_at",
+    }
+)
 DATA_MODES = frozenset({"public", "authorized"})
 REQUEST_DEPTHS = frozenset({"quick", "standard", "deep"})
 SOURCE_ADAPTER_ENVELOPE_KEYS = frozenset(
@@ -397,6 +415,17 @@ def _validate_output_location(
 
 def _nonempty_string(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _structural_relative_locator(raw: object) -> bool:
+    """Structural-only form of ``_safe_relative``'s path rules for values
+    that locate something inside ANOTHER task's tree (provenance
+    source_artifact): absolute paths and ``..`` escapes are invalid. The
+    referenced task and file are never accessed and need not exist."""
+    if not isinstance(raw, str) or not raw:
+        return False
+    candidate = Path(raw)
+    return not candidate.is_absolute() and ".." not in candidate.parts
 
 
 def _valid_sha256(value: object) -> bool:
@@ -957,13 +986,30 @@ def _check_manifest(
         _schema_issue(issues, "manifest.json", "manifest run must be an object")
     else:
         run_missing = set(MANIFEST_RUN_KEYS) - set(run_block)
-        run_extra = set(run_block) - set(MANIFEST_RUN_KEYS)
+        run_extra = (
+            set(run_block) - set(MANIFEST_RUN_KEYS) - MANIFEST_RUN_CONDITIONAL_KEYS
+        )
         if run_missing or run_extra:
             _schema_issue(
                 issues,
                 "manifest.json#run",
                 "manifest run block violates the closed schema "
                 f"(missing={sorted(run_missing)}, extra={sorted(run_extra)})",
+            )
+        for key in ("task_id", "parent_task_id"):
+            if key in run_block and not _nonempty_string(run_block.get(key)):
+                _schema_issue(
+                    issues,
+                    f"manifest.json#run.{key}",
+                    f"run.{key} must be a non-empty string when recorded",
+                )
+        if "reuse_previous_task_data" in run_block and not isinstance(
+            run_block.get("reuse_previous_task_data"), bool
+        ):
+            _schema_issue(
+                issues,
+                "manifest.json#run.reuse_previous_task_data",
+                "run.reuse_previous_task_data must be a boolean when recorded",
             )
         for key in (
             "run_id",
@@ -1053,6 +1099,8 @@ def _check_manifest(
             allowed.add("script")
         if entry_status == "failed":
             allowed.add("failure")
+        if "provenance" in entry:
+            allowed.add("provenance")
         missing_keys = MANIFEST_ENTRY_BASE_KEYS - set(entry)
         extra_keys = set(entry) - allowed
         if missing_keys or extra_keys:
@@ -1062,6 +1110,54 @@ def _check_manifest(
                 "entry key set violates the closed manifest schema "
                 f"(missing={sorted(missing_keys)}, extra={sorted(extra_keys)})",
             )
+        if "provenance" in entry:
+            provenance = entry.get("provenance")
+            entry_label = str(entry.get("path", entry_path))
+            if not isinstance(provenance, dict) or set(provenance) != MANIFEST_PROVENANCE_KEYS:
+                _schema_issue(
+                    issues,
+                    entry_label,
+                    "provenance must be an object with exactly "
+                    f"{sorted(MANIFEST_PROVENANCE_KEYS)}",
+                )
+            else:
+                for key in sorted(MANIFEST_PROVENANCE_KEYS):
+                    if not _nonempty_string(provenance.get(key)):
+                        _schema_issue(
+                            issues,
+                            entry_label,
+                            f"provenance.{key} must be a non-empty string",
+                        )
+                if not _structural_relative_locator(
+                    provenance.get("source_artifact")
+                ):
+                    _schema_issue(
+                        issues,
+                        entry_label,
+                        "provenance.source_artifact must be a relative "
+                        "locator inside the source task: absolute paths and "
+                        "'..' escapes are invalid",
+                    )
+                for key in ("original_acquired_at", "copied_at"):
+                    if not _valid_timestamp(provenance.get(key)):
+                        _schema_issue(
+                            issues,
+                            entry_label,
+                            f"provenance.{key} must be an ISO 8601 timestamp "
+                            "with timezone",
+                        )
+            if (
+                isinstance(run_block, dict)
+                and run_block.get("reuse_previous_task_data") is False
+            ):
+                issues.append(
+                    _issue(
+                        "manifest.reuse_contradiction",
+                        entry_label,
+                        "entry copies material from a source task while "
+                        "run.reuse_previous_task_data is false",
+                    )
+                )
         if not isinstance(entry_type, str) or entry_type not in MANIFEST_TYPES:
             _schema_issue(
                 issues,

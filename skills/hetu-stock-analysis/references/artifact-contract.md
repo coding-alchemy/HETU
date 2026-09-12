@@ -114,6 +114,26 @@ Agent 撰写内容使用 UTF-8 Markdown；规则化层级数据使用 UTF-8 JSON
 - `"script": { … }`：仅 `type=script` 条目必须出现且子键全部必填（`purpose`、`safe_call`、`dependencies`、`environment`、`input`、`output`、`exit_status`、`executed_at`；`dependencies` 可以是非空字符串或非空字符串数组；`status=failed` 的脚本同样完整登记，`exit_status` 记实际非零值）；非 script 条目**不得包含**该键（不写 null）。
 - `"failure": "<失败分类与原因>"`：仅 `status=failed` 条目必须出现；非 failed 条目**不得包含**该键（不写 null）。
 
+任务关系与跨任务复用（阶段 03 起的条件信息；旧记录缺这些字段只表示当时未记录，
+不批量补写，也不以缺失废弃旧验收）：
+
+- `run` 条件字段：`task_id`（同一请求的稳定标识）、`parent_task_id`（存在跨任务继承时记录）、
+  `reuse_previous_task_data`（布尔，实际复用开关）。出现即校验类型与格式；不出现不判失败。
+- 条件键 `"provenance": { … }`：条目材料复制自来源任务时记录，五子键齐全且均为非空字符串
+  （`source_task_id`、`source_artifact`、`original_source`、`original_acquired_at`、`copied_at`；
+  两个时间字段为带时区 ISO 8601）；值不含秘密，`source_artifact` 为来源任务内可核对的相对定位，
+  不得为绝对路径或含 `..` 的逃逸路径——仅结构校验，不访问来源任务目录，不要求来源文件仍在本地。
+  `inputs` 仍只引用本 manifest 的本地副本，被复制文件本体登记为本次产物。
+- 显式矛盾即失败：任何条目带 `provenance` 而 `run.reuse_previous_task_data=false`。
+- 复制范围与使用（阶段 03 起）：只复制本次实际采用的文件及其必要输入，复用解析或计算结果时
+  一并复制必要的合法原始输入与依赖，不整套复制来源任务的无关历史；副本读取、核验与报告引用
+  均使用本地副本，不把依赖旧目录的链接当作独立副本。`original_source` 与
+  `original_acquired_at` 保留原值，复制的旧文件不得登记为本次新下载。许可不允许复制时只
+  保留允许的定位与限制说明，不登记为本地产物。
+- 机械边界：检查器只校验结构、引用闭合与上述矛盾；同用途多版本同时采用不由机械判失败
+  （由 Agent 与独立评审判定），多个支持原文同时采用不判重复。字符串字段存在不能独立证明
+  关系真实，真实尝试以 01 的时序、访问及 owner 记录核对。
+
 `inputs` 数组记录该产物的全部本地 artifact 输入：raw 首次采集和直接访问外部端点的采集脚本可以为空数组 `[]`；外部请求的端点、参数或用途写入脚本元数据，不伪造本地输入路径。`normalized`、`derived` 与有本地输入的 `script` 至少一条，每条同时给出 `path` 与 `sha256`；确定性计算不得遗漏实际输入。`script.input` 声明的本地路径必须出现在 `inputs` 数组中；`script.output` 必须明确指向本 manifest 已登记的 raw、normalized 或 derived 产物，不能使用“输出另列”等占位文字。派生文件名中的 hash8 仅为可读提示，manifest 完整输入哈希为权威身份。
 
 身份镜像与脚本登记的机械口径（不满足即机械检查失败）：
