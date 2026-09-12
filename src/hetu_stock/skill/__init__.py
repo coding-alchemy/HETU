@@ -1,3 +1,16 @@
+from hetu_stock.skill.extensions import (
+    ExtensionError,
+    context_for_host,
+    disable_extension,
+    enable_extension,
+    extensions_root,
+    inspect_extension,
+    install_extension,
+    list_extensions,
+    uninstall_extension,
+    update_extension,
+    validate_extension,
+)
 from hetu_stock.skill.installer import (
     HostTarget,
     build_skill_manifest,
@@ -18,9 +31,20 @@ from hetu_stock.skill.installer import (
 from hetu_stock.skill.package import SkillValidationError, validate_skill_package
 
 __all__ = [
+    "ExtensionError",
     "HostTarget",
     "SkillValidationError",
     "build_skill_manifest",
+    "context_for_host",
+    "disable_extension",
+    "enable_extension",
+    "extensions_root",
+    "inspect_extension",
+    "install_extension",
+    "list_extensions",
+    "uninstall_extension",
+    "update_extension",
+    "validate_extension",
     "default_user_skill_root",
     "display_path",
     "inspect_installation",

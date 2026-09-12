@@ -1,0 +1,28 @@
+{
+  "stage_id": 5,
+  "conclusions": ["合成结论：示例材料，无研究意义。"],
+  "evidence": [
+    {
+      "evidence_id": "ev-s5-note",
+      "source_id": "src-note",
+      "provider": "example-provider",
+      "dataset": "filings",
+      "locator": "stage_results/s5.json#ev-s5-note",
+      "permission": "public"
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "claim-s5-note",
+      "type": "judgment",
+      "text": "示例主张：合成内容。",
+      "confidence": "low",
+      "evidence_ids": ["ev-s5-note"],
+      "counterevidence_ids": []
+    }
+  ],
+  "thesis_updates": [],
+  "issues": [],
+  "monitoring_rules": [],
+  "custom_vendor_field": {"keep": "me"}
+}

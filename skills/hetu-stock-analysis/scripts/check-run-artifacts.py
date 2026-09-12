@@ -163,8 +163,15 @@ MANIFEST_INPUT_KEYS = frozenset({"path", "sha256"})
 # Phase-5 stage-03 conditional run fields: absent means "not recorded"
 # (old runs stay valid and are never back-filled).
 MANIFEST_RUN_CONDITIONAL_KEYS = frozenset(
-    {"task_id", "parent_task_id", "reuse_previous_task_data"}
+    {"task_id", "parent_task_id", "reuse_previous_task_data", "extensions"}
 )
+# Phase-5 stage-06 conditional run field: entries recording third-party work
+# packages actually loaded this run.  Identities come only from this explicit
+# record — the checker never scans global plugin directories to mint them.
+MANIFEST_RUN_EXTENSION_KEYS = frozenset(
+    {"id", "version", "source", "summary", "enabled_scope"}
+)
+EXTENSION_ID_PATTERN = re.compile(r"^x\.[a-z0-9-]+\.[a-z0-9-]+$")
 # Phase-5 stage-03 conditional artifact key: a nested object recording that
 # this entry's material was copied from a source task. All five subkeys are
 # required whenever the key appears; values never contain secrets and
@@ -1083,6 +1090,49 @@ def _check_manifest(
                     "manifest.json#run.runtime_skill.sha256",
                     "runtime Skill sha256 must be 64 lowercase hexadecimal characters",
                 )
+    recorded_extensions: set[str] = set()
+    if isinstance(run_block, dict):
+        extensions_block = run_block.get("extensions")
+        if extensions_block is not None:
+            if not isinstance(extensions_block, list) or not extensions_block:
+                _schema_issue(
+                    issues,
+                    "manifest.json#run.extensions",
+                    "run.extensions must be a non-empty list when recorded",
+                )
+            else:
+                for index, extension in enumerate(extensions_block):
+                    extension_path = f"manifest.json#run.extensions[{index}]"
+                    if not isinstance(extension, dict):
+                        _schema_issue(
+                            issues, extension_path, "extension entry must be an object"
+                        )
+                        continue
+                    missing = MANIFEST_RUN_EXTENSION_KEYS - set(extension)
+                    extra = set(extension) - MANIFEST_RUN_EXTENSION_KEYS
+                    if missing or extra:
+                        _schema_issue(
+                            issues,
+                            extension_path,
+                            "extension entry violates the closed schema "
+                            f"(missing={sorted(missing)}, extra={sorted(extra)})",
+                        )
+                        continue
+                    for key in MANIFEST_RUN_EXTENSION_KEYS:
+                        if not _nonempty_string(extension.get(key)):
+                            _schema_issue(
+                                issues,
+                                f"{extension_path}.{key}",
+                                f"run.extensions {key} must be a non-empty string",
+                            )
+                    if not EXTENSION_ID_PATTERN.fullmatch(str(extension.get("id", ""))):
+                        _schema_issue(
+                            issues,
+                            f"{extension_path}.id",
+                            "run.extensions id must look like x.<namespace>.<name>",
+                        )
+                    elif _nonempty_string(extension.get("id")):
+                        recorded_extensions.add(extension["id"])
     entries = manifest.get("artifacts")
     if not isinstance(entries, list) or not entries:
         _schema_issue(issues, "manifest.json", "artifacts must be a non-empty list")
@@ -1165,13 +1215,15 @@ def _check_manifest(
                 f"entry type must be one of {MANIFEST_TYPES}, got {entry_type!r}",
             )
         work_package = entry.get("work_package")
-        if not isinstance(work_package, str) or work_package not in {
-            name.split("-")[0] for name in WORK_PACKAGES
-        }:
+        if not isinstance(work_package, str) or (
+            work_package not in {name.split("-")[0] for name in WORK_PACKAGES}
+            and work_package not in recorded_extensions
+        ):
             _schema_issue(
                 issues,
                 str(entry.get("path", entry_path)),
-                "entry work_package must be one of W0-W10",
+                "entry work_package must be one of W0-W10 or an id recorded "
+                "in run.extensions",
             )
         for key in ("media_format",):
             if key in entry and not _nonempty_string(entry.get(key)):

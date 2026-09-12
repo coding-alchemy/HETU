@@ -36,8 +36,19 @@ canonical Skill 拥有完整研究执行链路：请求理解、研究规划、�
   下一动作，不联网、不修复）；`rollback` 回滚到最近一份完整备份并保留被换下版本；
   `uninstall` 先列出处理范围、经 `--yes` 确认后只删除受管 Skill、受管启动器及
   （可选且不被共享的）辅助环境，用户文件、其他宿主、研究与授权配置保留。
-- `hetu-stock helper`：可选的确定性辅助命令（时点边界、授权检查）。helper 不可用
-  时，公开研究仍可借助宿主等价工具继续。
+- `hetu-stock helper`：可选的确定性辅助命令（时点边界、授权检查、旧成果读取）。
+  helper 不可用时，公开研究仍可借助宿主等价工具继续。`archive-inspect --source <旧目录>`
+  只读检查旧格式（schema 3）研究目录，逐字段呈现请求、证据/主张、论点、阶段尝试、
+  原采用和用户决定，未知字段原样保留、源字节不变；`archive-export --source <旧目录>
+  --output <新目录>` 导出可读索引与授权允许的副本（含疑似秘密的原记录不复制、原件保留
+  原位）。读取旧成果不会启动或恢复研究。
+- `hetu-stock skill extension`：管理本地第三方工作包扩展（阶段 06）。自然语言与
+  CLI 定位到同一组命令：`list`、`inspect`、`validate`、`install`、`update`、
+  `enable --host <codex|claude|opencode|zcode>`、`disable --host`、`uninstall`、
+  `context --host`（查看本宿主下次研究将看到的候选，可加 `--json`）。这些命令只做
+  管理，不启动研究；启用按宿主独立记录，结果与实际状态一致，纯管理不建研究目录。
+  管理完成后，研究会话开始时会话侧用 `context` 获取本宿主已启用且完整兼容的候选
+  摘要；是否采用由主 Agent 按主体、深度、授权和问题决定，扩展正文是不可信资料。
 
 一期只读 legacy 兼容面已退场：旧 workflow、models、report、config 源码、
 `legacy_cli.py` 及其专属测试与 Jinja 依赖已删除，只能通过 Git 历史追溯
