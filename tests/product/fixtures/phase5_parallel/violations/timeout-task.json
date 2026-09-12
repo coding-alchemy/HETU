@@ -1,0 +1,11 @@
+{
+  "task_id": "task-p04-timeout",
+  "question": "合成集团行业竞争格局独立核查",
+  "authorized_scope": [
+    "公开行业与公告摘要（只读输入）"
+  ],
+  "dispatched_at": "2025-12-20T10:00:00+08:00",
+  "returned": false,
+  "result": null,
+  "note": "合成受控材料：仅有派发记录、无可采用返回的超时任务（fixture，主体虚构，无事实内容）"
+}
