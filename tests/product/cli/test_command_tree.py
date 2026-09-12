@@ -116,6 +116,10 @@ def test_recursive_command_tree_has_exact_leaf_set() -> None:
     expected = {
         "skill validate",
         "skill install",
+        "skill status",
+        "skill diagnose",
+        "skill rollback",
+        "skill uninstall",
         "helper time-boundary",
         "helper authorization-check",
     }

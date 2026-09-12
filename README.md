@@ -38,7 +38,8 @@ canonical Skill（`skills/hetu-stock-analysis/`）拥有完整的研究执行链
 
 `hetu-stock` 命令行只暴露两个顶层组：
 
-- `hetu-stock skill`：管理 canonical Skill 包（`validate`、`install`）。
+- `hetu-stock skill`：管理 canonical Skill 包（`validate`、`install`、
+  `status`、`diagnose`、`rollback`、`uninstall`）。
 - `hetu-stock helper`：可选的确定性辅助命令（时点边界、授权检查）。helper 不可用
   时，公开研究仍可用宿主等价工具继续。
 
@@ -77,11 +78,13 @@ cd HETU
 
 ```bash
 ./scripts/install.sh --host codex
-# 也可改为 --host claude 或 --host opencode
+# 也可改为 --host claude、--host opencode 或 --host zcode
 ```
 
-脚本支持 macOS/Linux，在用户目录创建隔离 Python 环境，并安装 canonical Skill。
-已有 Skill 需要更新时显式增加 `--force`。安装布局、PATH 和 TLS 排障见
+脚本支持 macOS/Linux，在用户目录创建按版本隔离的 Python 环境，并安装 canonical
+Skill。已有 Skill 需要更新时显式增加 `--force`；更新采用原子目录交换，失败或中断
+后旧版 Skill 与旧环境保持可用，可用 `hetu-stock skill diagnose` 查看状态、
+`skill rollback` 回滚、`skill uninstall` 卸载。安装布局、PATH 和 TLS 排障见
 [Agent Skill 安装与使用](docs/agent-skill-usage.md)。
 
 如果机器上有多套 Python，可以显式选择，例如：

@@ -10,8 +10,10 @@ cd HETU
 ./scripts/install.sh --host codex
 ```
 
-将 `codex` 改为 `claude` 或 `opencode` 即可安装到其他宿主。已有 Skill 需要更新时
-使用 `./scripts/install.sh --host <host> --force`。
+将 `codex` 改为 `claude`、`opencode` 或 `zcode` 即可安装到其他宿主。已有 Skill 需要
+更新时使用 `./scripts/install.sh --host <host> --force`；更新采用原子目录交换，旧版
+保留为备份，新环境准备或切换失败时旧环境与旧 Skill 保持可用。由旧版安装器创建的
+`hetu-stock/venv` 布局会被安全识别并保留为上一可用组合，可直接 `--force` 升级。
 
 V1 一期实现已完成 Agent 主导研究闭环，Codex 上一次真实人工主链证明 Agent 产品路径基本可用。Codex、OpenCode 与
 Claude Code 的正式宿主认证仍统一为 `UNVERIFIED`；安装兼容性本身不等同于支持，一次人工
@@ -29,7 +31,11 @@ canonical Skill 拥有完整研究执行链路：请求理解、研究规划、�
 
 `hetu-stock` 命令行只暴露两个顶层组：
 
-- `hetu-stock skill`：管理 canonical Skill 包（`validate`、`install`）。
+- `hetu-stock skill`：管理 canonical Skill 包。`validate`、`install` 负责校验与
+  安装；`status`、`diagnose` 为只读诊断（完整性、备份、受管启动器、辅助环境与
+  下一动作，不联网、不修复）；`rollback` 回滚到最近一份完整备份并保留被换下版本；
+  `uninstall` 先列出处理范围、经 `--yes` 确认后只删除受管 Skill、受管启动器及
+  （可选且不被共享的）辅助环境，用户文件、其他宿主、研究与授权配置保留。
 - `hetu-stock helper`：可选的确定性辅助命令（时点边界、授权检查）。helper 不可用
   时，公开研究仍可借助宿主等价工具继续。
 
@@ -68,12 +74,16 @@ authorized 模式下，当某个授权来源失败时，只阻塞与该来源相
 
 | 内容 | 默认路径 |
 |------|----------|
-| Python 辅助工具隔离环境 | `${XDG_DATA_HOME:-$HOME/.local/share}/hetu-stock/venv` |
-| CLI 启动器 | `$HOME/.local/bin/hetu-stock` |
+| Python 辅助工具隔离环境（按版本独立） | `${XDG_DATA_HOME:-$HOME/.local/share}/hetu-stock/envs/env-<时间戳>-<pid>` |
+| 当前组合记录 | `${XDG_DATA_HOME:-$HOME/.local/share}/hetu-stock/installation.json` |
+| CLI 启动器 | `$HOME/.local/bin/hetu-stock`（指向当前版本环境的符号链接） |
+| Skill 暂存／备份／事务记录 | 目标 skills 根目录外的受管区 `<skills 上级>/.hetu-skill-maintenance/<目标摘要>/`，宿主 Skill 发现不会读取该目录 |
 | canonical Skill 源 | 当前仓库的 `skills/hetu-stock-analysis` |
 
-脚本通过绝对启动器完成自检，因此 `~/.local/bin` 不在 PATH 时安装仍然有效。若宿主
-无法从 PATH 找到 `hetu-stock`，Skill 会改用 `$HOME/.local/bin/hetu-stock`。
+每次维护在最终保留路径新建独立版本环境，完成依赖安装与 CLI 自检后才切换启动器；
+成功后只保留当前与上一可用组合，供回滚使用。脚本通过绝对启动器完成自检，因此
+`~/.local/bin` 不在 PATH 时安装仍然有效。若宿主无法从 PATH 找到 `hetu-stock`，
+Skill 会改用 `$HOME/.local/bin/hetu-stock`。
 
 ## Skill 更新与自定义安装
 
@@ -99,8 +109,30 @@ hetu-stock skill install --host claude --force
 | Codex | `$CODEX_HOME/skills` 或 `~/.codex/skills` |
 | Claude | `~/.claude/skills` |
 | OpenCode | `$XDG_CONFIG_HOME/opencode/skills` 或 `~/.config/opencode/skills` |
+| ZCode | `~/.zcode/skills`（依据阶段 01 实际发现证据） |
 
 每个宿主安装后的目录名均为 `hetu-stock-analysis`，包含 `SKILL.md`、引用文档和报告撰写指引。
+
+### 诊断、回滚与卸载
+
+```bash
+# 只读查看安装状态（完整性、备份、启动器、辅助环境）
+hetu-stock skill status --host claude
+hetu-stock skill diagnose --host claude
+
+# 回滚到最近一份完整备份（被换下版本保留为备份）
+hetu-stock skill rollback --host claude
+# 或指定 diagnose 列出的备份目录
+hetu-stock skill rollback --host claude --backup <维护区备份目录>
+
+# 卸载：先列出处理范围，确认后加 --yes；--remove-env 仅在无其他宿主使用时删除环境
+hetu-stock skill uninstall --host claude
+hetu-stock skill uninstall --host claude --yes
+```
+
+这些维护命令只操作受管目录与受管启动器，不删除宿主的其他配置、研究资料、旧报告、
+授权配置或非受管文件。Skill 发布与启动器切换各自原子；跨目录的整套维护不是单个
+原子操作，任一步失败会恢复已切换的部分，旧版在此之前不会被删除。
 
 ## 常见安装问题
 
@@ -123,9 +155,10 @@ $HOME/.local/bin/hetu-stock --help
 也可以自行将 `$HOME/.local/bin` 加入 PATH。安装脚本不会自动修改 `.profile`、
 `.bashrc`、`.zprofile` 或 `.zshrc`。
 
-当前安装器不提供自动卸载命令。需要卸载时只可移除上述受管 venv、启动器和所选宿主的
-`hetu-stock-analysis` Skill 目录；安装器不会删除非受管文件，也不会删除整个宿主配置
-目录。Skill 覆盖仍为非原子语义，备份和失败回滚属于 V1 安装治理增强。
+卸载使用 `hetu-stock skill uninstall --host <host> --yes`（见上文），安装器不会删除
+非受管文件，也不会删除整个宿主配置目录。覆盖安装的原子目录交换已实测
+macOS/APFS（真实交换、并发串行化、中断后恢复及不支持交换的负例）；Linux/ext4
+与其他文件系统的实测仍在阶段 07 验收补齐，未实测前不把对应平台记为已支持。
 
 ## 开发安装
 

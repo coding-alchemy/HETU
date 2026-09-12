@@ -161,6 +161,9 @@ def test_default_user_roots(monkeypatch, tmp_path: Path) -> None:
     assert default_user_skill_root(HostTarget.CODEX) == tmp_path / "codex-home" / "skills"
     assert default_user_skill_root(HostTarget.CLAUDE) == tmp_path / ".claude" / "skills"
     assert default_user_skill_root(HostTarget.OPENCODE) == tmp_path / "xdg" / "opencode" / "skills"
+    # ZCode default has native stage-01 discovery evidence; the other hosts'
+    # defaults above stay unchanged.
+    assert default_user_skill_root(HostTarget.ZCODE) == tmp_path / ".zcode" / "skills"
 
 
 def test_install_copies_canonical_package(tmp_path: Path) -> None:
