@@ -1,0 +1,155 @@
+{
+  "schema_version": "1.0",
+  "recorded_at": "2026-09-13",
+  "verdicts": [
+    "supported",
+    "unsupported",
+    "unverified"
+  ],
+  "interfaces": [
+    "compaction",
+    "cancel",
+    "resume",
+    "delegation",
+    "usage",
+    "mid_run_control"
+  ],
+  "interface_labels": {
+    "compaction": "压缩",
+    "cancel": "取消",
+    "resume": "恢复",
+    "delegation": "委派",
+    "usage": "用量",
+    "mid_run_control": "中途自然语言控制"
+  },
+  "hosts": {
+    "codex": {
+      "compaction": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "无已记录证据，不推断。"
+      },
+      "cancel": {
+        "verdict": "unsupported",
+        "evidence": ".hetu/validation/phase-5/20260912-stage07-host-acceptance/b4-host-probes/codex-cancel-test.jsonl",
+        "note": "exec 无原生取消子命令或协议；SIGINT 进程级中止（exit=1）后 sessions 会话文件保留。进程信号不构成宿主取消接口。"
+      },
+      "resume": {
+        "verdict": "supported",
+        "evidence": ".hetu/validation/phase-5/20260912-stage07-host-acceptance/b4-host-probes/codex-run2-resume.jsonl",
+        "note": "exec resume 以同 thread_id 续跑并凭会话历史正确作答（计量回合同步给出）；限制：resume 子命令不接受 --sandbox，沙箱策略无法在恢复时重新声明。"
+      },
+      "delegation": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "无已记录证据，不推断。"
+      },
+      "usage": {
+        "verdict": "supported",
+        "evidence": ".hetu/validation/phase-5/20260912-stage07-host-acceptance/b4-host-probes/codex-run1.jsonl",
+        "note": "--json 事件流 turn.completed 带 usage（input/cached_input/cache_write/output/reasoning_output），回合级。"
+      },
+      "mid_run_control": {
+        "verdict": "unsupported",
+        "evidence": ".hetu/validation/phase-5/20260912-stage07-host-acceptance/b4-host-probes/codex-run1.jsonl",
+        "note": "一次性 exec 打印模式无中途自然语言控制通道；不因能运行打印模式认证为支持控制。"
+      }
+    },
+    "claude": {
+      "compaction": {
+        "verdict": "unverified",
+        "evidence": ".hetu/validation/phase-5/20260908-stage01-observation/probe/probe-claude-live.json",
+        "note": "stderr 记录提到 auto-compact 会话行为，但压缩接口本身未单独验证，记未验证。"
+      },
+      "cancel": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "无已记录证据，不推断。"
+      },
+      "resume": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "帮助文本含 --resume，但接口未实际验证，记未验证。"
+      },
+      "delegation": {
+        "verdict": "unverified",
+        "evidence": ".hetu/validation/phase-5/20260908-stage01-observation/probe/probe-claude.json",
+        "note": "探针记录仅确认 headless `claude -p` 可派发一次请求，子 Agent 委派未验证。"
+      },
+      "usage": {
+        "verdict": "supported",
+        "evidence": ".hetu/validation/phase-5/20260908-stage01-observation/probe/probe-claude-live.json",
+        "note": "真实标注调用后会话记录给出 input_excl_cache/output/cache_read/turns。"
+      },
+      "mid_run_control": {
+        "verdict": "unsupported",
+        "evidence": ".hetu/validation/phase-5/20260908-stage01-observation/probe/probe-claude.json",
+        "note": "`claude -p` 打印模式一次性无交互输出，探针记录 interactive control unverified；不因能运行打印模式认证为支持控制。"
+      }
+    },
+    "opencode": {
+      "compaction": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "无已记录证据，不推断。"
+      },
+      "cancel": {
+        "verdict": "unsupported",
+        "evidence": ".hetu/validation/phase-5/20260912-stage07-host-acceptance/b4-host-probes/oc-run2-session.jsonl",
+        "note": "run 为一次性进程，无原生取消协议；timeout/SIGTERM 进程级截断即取消。--attach server API 未验证，不据此改判。"
+      },
+      "resume": {
+        "verdict": "supported",
+        "evidence": ".hetu/validation/phase-5/20260912-stage07-host-acceptance/b4-host-probes/oc-run2-session.jsonl",
+        "note": "-s 会话继续在数据层生效（opencode.db 消息续写、凭会话历史正确作答）；CLI 缺陷：-s 模式 stdout 事件流无输出且进程完成后不退出，恢复过程对 run --format json 观察者不可见（record.md §3.2）。"
+      },
+      "delegation": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "无已记录证据，不推断。"
+      },
+      "usage": {
+        "verdict": "supported",
+        "evidence": ".hetu/validation/phase-5/20260912-stage07-host-acceptance/b4-host-probes/oc-run1.jsonl",
+        "note": "--format json 事件流 step_finish 带 tokens（input/output/reasoning/cache.read/cache.write）与 cost，步级；-s 续跑模式下事件流不可观察。"
+      },
+      "mid_run_control": {
+        "verdict": "unsupported",
+        "evidence": ".hetu/validation/phase-5/20260912-stage07-host-acceptance/b4-host-probes/oc-run1.jsonl",
+        "note": "一次性 run 模式无中途自然语言控制通道；不因能运行打印模式认证为支持控制。"
+      }
+    },
+    "zcode": {
+      "compaction": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "无已记录证据，不推断。"
+      },
+      "cancel": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "阶段 03 C03 为合成合同场景（orchestration/recovery 语义），非宿主接口实证，记未验证。"
+      },
+      "resume": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "无已记录证据，不推断。"
+      },
+      "delegation": {
+        "verdict": "supported",
+        "evidence": ".hetu/validation/phase-5/20260908-stage01-observation/probe/probe-zcode.json",
+        "note": "探针记录：研究上下文由交互协调者派发（B01–B05 基线证据）；脚本化子代理派发不可用，但原生协调者委派已观察。"
+      },
+      "usage": {
+        "verdict": "supported",
+        "evidence": ".hetu/validation/phase-5/20260908-stage01-observation/probe/probe-zcode.json",
+        "note": "agent metadata 用量模式已解析并抽样（input/output/total/cacheRead/cacheWrite）。"
+      },
+      "mid_run_control": {
+        "verdict": "unverified",
+        "evidence": "",
+        "note": "无已记录证据，不推断。"
+      }
+    }
+  }
+}

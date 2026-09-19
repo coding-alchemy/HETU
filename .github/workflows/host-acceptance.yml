@@ -1,0 +1,110 @@
+name: host-acceptance
+
+# 真实宿主验收只接显式手动触发，不接 push/PR 的默认自动执行。
+# 本作业不包含任何真实股票分析样本：case 清单由触发参数输入，仅已批准 case。
+# 观察输入只有两种受约束模式：claude --probe 或 zcode --watch-agent 规格；
+# codex/opencode 及未给观察输入时 run 以 exit 1 明确失败——尚缺组合保持
+# 明确未认证，四宿主目标不缩减。
+on:
+  workflow_dispatch:
+    inputs:
+      host:
+        description: 目标宿主（仅已批准宿主）
+        required: true
+        type: choice
+        options:
+          - codex
+          - claude
+          - opencode
+          - zcode
+      case_file:
+        description: 已批准 case.json 的仓库内相对路径（仅已批准 case）
+        required: true
+        type: string
+      authorization_ref:
+        description: 授权引用名（不含凭据本体）
+        required: true
+        type: string
+      probe:
+        description: 仅 claude：以受控非研究探针模式观察原生链路
+        required: false
+        type: boolean
+        default: false
+      watch_specs:
+        description: 仅 zcode：attach 观察规格列表（空格或换行分隔的 <native-id>=<scope>）
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  accept:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Create isolated environment
+        run: python -m venv .venv
+      - name: Install current checkout and development dependencies
+        run: .venv/bin/python -m pip install -e '.[dev]'
+      - name: Verify authorization and capability prerequisites
+        env:
+          HETU_HOST_TOKEN: ${{ secrets.HETU_HOST_TOKEN }}
+          AUTHORIZATION_REF: ${{ inputs.authorization_ref }}
+        run: |
+          test -n "$HETU_HOST_TOKEN" || {
+            echo "未执行：缺宿主授权（secrets.HETU_HOST_TOKEN 未配置）" >&2
+            exit 1
+          }
+          test -n "$AUTHORIZATION_REF" || {
+            echo "未执行：缺授权引用" >&2
+            exit 1
+          }
+      - name: Probe current host capability
+        env:
+          HOST: ${{ inputs.host }}
+        run: |
+          .venv/bin/python scripts/host_acceptance.py probe \
+            --host "$HOST" \
+            --output .hetu/validation/phase-5/host-acceptance-ci/probe
+      - name: Run single approved case
+        env:
+          HOST: ${{ inputs.host }}
+          CASE_FILE: ${{ inputs.case_file }}
+          AUTHORIZATION_REF: ${{ inputs.authorization_ref }}
+          HETU_HOST_TOKEN: ${{ secrets.HETU_HOST_TOKEN }}
+          PROBE: ${{ inputs.probe }}
+          WATCH_SPECS: ${{ inputs.watch_specs }}
+        run: |
+          test -f "$CASE_FILE" || {
+            echo "未执行：case 文件不存在（仅已批准 case）" >&2
+            exit 1
+          }
+          run_args=(
+            run --host "$HOST" --case "$CASE_FILE"
+            --authorization-ref "$AUTHORIZATION_REF"
+            --output .hetu/validation/phase-5/host-acceptance-ci/run
+          )
+          if [[ "$PROBE" == "true" ]]; then
+            if [[ "$HOST" != "claude" ]]; then
+              echo "未执行：--probe 仅适用于 claude 宿主" >&2
+              exit 1
+            fi
+            run_args+=(--probe)
+          fi
+          if [[ -n "$WATCH_SPECS" ]]; then
+            if [[ "$HOST" != "zcode" ]]; then
+              echo "未执行：--watch-agent 规格仅适用于 zcode 宿主" >&2
+              exit 1
+            fi
+            for spec in $WATCH_SPECS; do
+              run_args+=(--watch-agent "$spec")
+            done
+          fi
+          .venv/bin/python scripts/host_acceptance.py "${run_args[@]}"
+      - name: Check the selected evidence
+        run: |
+          .venv/bin/python scripts/host_acceptance.py check \
+            --host-evidence .hetu/validation/phase-5/host-acceptance-ci/run \
+            --output .hetu/validation/phase-5/host-acceptance-ci/check-result.json

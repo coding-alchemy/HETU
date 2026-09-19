@@ -605,3 +605,50 @@ def test_tool_failure_takes_legal_alternative_or_gap_and_helpers_never_replace_a
     assert "失败尝试不能支撑成功执行声明" in evidence
     assert "再尝试至少一种合法替代来源或方法" in recovery
     assert "非关键数据仍无法取得时记录局部缺口、传播影响" in recovery
+
+
+def test_in_task_shared_sources_check_applicability_and_assign_single_first_fetch() -> None:
+    raw = _flow(_dispatch_section())
+    section = raw
+    shared = re.search(r"同一任务内，[\s\S]*?仍按原取证规则重新获取。", raw).group(0)
+
+    reuse = [
+        shared.index("按登记路径直接读取"),
+        shared.index("核对主体、期间、单位与用途适用后复用"),
+        shared.index("已有适用的解析结果一并复用"),
+        shared.index("在自身产物登记中记录引用关系"),
+        shared.index("不重复下载或重复解析同一来源"),
+    ]
+    assert reuse == sorted(reuse)
+    first_fetch = [
+        shared.index("主Agent在派发时指定唯一负责任务完成首次取数"),
+        shared.index("其余域在该来源登记后按路径引用"),
+        shared.index("不并行重复取得同一公共输入"),
+    ]
+    assert first_fetch == sorted(first_fetch)
+    assert "来源登记与采用仍按原合同由返回、审查和合入角色完成" in shared
+    assert "与旧任务资料复用（`reuse_previous_task_data`开关及" in shared
+    assert "从零模式下同样适用" in shared
+    exceptions = [
+        shared.index("需要新版本、新时点、来源内容疑似变化或独立交叉验证的独立取证时"),
+        shared.index("仍按原取证规则重新获取"),
+    ]
+    assert exceptions == sorted(exceptions)
+    assert "公共输入只读" in section
+
+
+def test_confluence_merges_from_returns_without_redoing_completed_parts() -> None:
+    raw = _section(_read(ORCHESTRATION), ADJUDICATION_HEADING)
+    section = _flow(raw)
+    merge = _flow(re.search(r"主任务基于子任务返回[\s\S]*?节省汇合时间。", raw).group(0))
+
+    ordered = [
+        merge.index("成果、来源定位、计算结果和未解决项"),
+        merge.index("已完成且证据充分的部分不重新研究、不重新计算"),
+        merge.index("只对实际冲突、缺口和受影响结论补查或局部修正"),
+        merge.index("统一表达、跨域一致性检查、来源追溯和独立核验保留"),
+    ]
+    assert ordered == sorted(ordered)
+    assert "不以省略质量检查或直接采纳未经审查的子任务输出来节省汇合时间" in merge
+    assert raw.index("主任务基于子任务返回") < raw.index("合入时同步核对")
+    assert "不重做无影响的研究" in section

@@ -15,9 +15,14 @@ cd HETU
 保留为备份，新环境准备或切换失败时旧环境与旧 Skill 保持可用。由旧版安装器创建的
 `hetu-stock/venv` 布局会被安全识别并保留为上一可用组合，可直接 `--force` 升级。
 
-V1 一期实现已完成 Agent 主导研究闭环，Codex 上一次真实人工主链证明 Agent 产品路径基本可用。Codex、OpenCode 与
-Claude Code 的正式宿主认证仍统一为 `UNVERIFIED`；安装兼容性本身不等同于支持，一次人工
-主链也不等同于正式支持，只有完成版本化全场景验收并形成完整证据后才能更新支持状态。
+V1 一期实现已完成 Agent 主导研究闭环，Codex 上一次真实人工主链证明 Agent 产品路径基本可用。
+2026-09-13 阶段 07.2 实机批次后，四宿主（Codex、OpenCode、Claude Code、ZCode）功能层已验收
+（全新安装与发现、正/反/边界触发矩阵、扩展管理四动作、原生接口探针；claude 隔离以
+PreToolUse hook 实测有效），完整研究认证除 zcode×public×standard 组合质量门槛外仍为
+`UNVERIFIED`；安装兼容性本身不等同于支持，功能层认证也不等同于完整研究支持，只有完成
+组合级验收并形成完整证据后才能更新支持状态。截至 2026-09-17，三条性能验收线均未正式
+通过，五期未最终验收（现状与缺口见
+`.hetu/validation/phase-5/20260917-stage07-evidence-summary/`）。
 
 安装后在宿主中直接说：`用公开数据标准分析 600519`。当前正常入口是宿主中的自然语言
 Agent 请求：可直接给出明确公司名称、6 位 A 股代码，或带大写 `.SH`、`.SZ`、`.BJ`
@@ -241,6 +246,7 @@ python scripts/host_acceptance.py check --evidence <已有观察目录> --output
 - `probe` 只核对原生能力（版本、观测目录、metadata usage 样例、可选的带标注实况小探针），不分析股票；`host` 取 `codex|claude|opencode|zcode`。能力不成立时退出非零并列出缺口。ZCode 另有 `--isolation` 模式：对协调层按受控诱饵程序派发的两个子代理（受限例＋放任反例）做转录扫描，生成只含布尔、计数与判定依据的最小隔离证据（受限例 hold、放任例须检出、初始加载/历史注入/资料访问三项控制全部 verified 才判 pass）；`--staging-dir` 可核验轮转前快照。
 - `run` 只校验并登记单个显式 case（证券、中性请求、时点、模式、深度、复用开关、获准材料），拒绝任意 shell 内容与评审答案；真实派发由协调上下文按 case 执行，脚本不决定研究下一步。ZCode attach 模式以 `--watch-agent <原生id>=<scope>`（可重复，scope 必须显式）同时观察多个会话：子代理按 metadata 解析、`sess_*` 直观察协调者会话、`file:<路径>=<scope>` 观察"日志轮转前快照"。采集按完整行推进游标、退前排空、轮转/截断/坏行/非 completed 终态均写入 `collection-gaps.jsonl` 并按代数分段；工具事件只保留 id/name/分类（wrapper 派发单列），正文、参数与凭据不落盘。`--request-at`/`--delivered-at` 记录真实用户请求与协调交付时点。
 - `check` 离线复核观察目录中的用量与计时：按来源会话与消息 id 去重、累计快照按段压缩（起始快照按基线相减）、缓存口径未知不归一、完整性逐指标判定（输入/输出任一为 null 即不完整）、截断行与 collection gap 即失败、非 probe 运行必须声明至少 research＋review 必需范围；隔离证据须实际存在、可解析、对应本任务并满足两案例与三项控制要求。passed=false 即证据不完整；交付端点未独立观察（coordinator-reported/last-scope-completed）、实际发生而未声明的 scope、隔离证据未覆盖的参与上下文均判失败，探针通过与完整基线资格（baseline_qualification）分开输出。
+- `check --host-evidence <观察目录>`（2026-09-12，阶段 07.1a 新增）：对显式选定、已完成真实采证的观察目录运行同一套 check，额外要求目录内存在 `host-support-record.json` 宿主支持记录（白名单字段 `host`／`authorization`／`required_tools`／`recorded_at`，只记录宿主、授权与必要工具事实，不存凭据本体）。观察目录缺失、记录缺失或字段不合法时非零退出并打印“未执行／不支持”，缺记录等失败同样写入新的检查结果（默认 `<观察目录>/host-support-check.json`，create-only），绝不把跳过当作通过。该记录由 `run --authorization-ref <授权引用名，不含凭据>` 在授权与能力验证通过后、执行 case 前写入观察目录，字段只含本次已验证的 `host`／`authorization`／`required_tools` 事实，无授权引用或无已验证能力事实时不写（下游如实判“不支持”）。工程门禁 `scripts/check.sh` 仅在设置 `HETU_HOST_EVIDENCE` 环境变量时追加该入口，默认门禁完全离线，不启动任何宿主或模型。该入口的通过仍不构成宿主正式支持认证；真实验收另有仅手动触发的 `.github/workflows/host-acceptance.yml`（只接已批准 case 与宿主配置，凭据只经 GitHub Secrets 引用）。
 - `run --delivery-sweep`（2026-09-09 新增）：交付回合发生在 `run` 退出之后，run 自身永远观察不到。该模式要求恰好一个 `<id>=coordination` 观察规格且不给 `--delivered-at`；收尾时不记交付缺口，改记 `delivery_source=pending-sweep` 并保存协调会话游标（`sweep-state.json`）。协调者在交付后（观察目录内写入交付标记文件，默认 `delivery-message.md`）的下一回合运行 `sweep --evidence <目录> --session <协调会话>`：sweep 消费 rollout 尾部全部完整记录并一次性盖章 `delivery-observation.json`，端点取最后记录的原生 `completedAt`；标记 mtime 只用于核验"交付先于 sweep"（晚于端点即失败），不用于切分记录——一个回合跨多个 API 调用，按标记切分会把交付回合自己的尾部丢掉。因此 sweep 只能保守地多计（拖晚 sweep 只会增大端点与总量，不会漏计交付回合），交付后应尽早在下一回合执行 sweep；重跑 sweep 拒绝，端点不会漂移。`check` 遇 pending-sweep 时必须能解析该观察（缺文件、标记缺失或晚于端点、会话不符均失败），通过后以观察端点闭合请求→交付区间。live 模式按 sweep-state 游标续读（游标经 JSON 往返的 identity 强制回元组、推进后原地原子回写，均为 2026-09-10 修复——此前 live sweep 带存储游标必然误报 rotated 或无法回写）；`--transcript` 快照模式从字节 0 消费并靠身份去重，快照前已发生的轮转丢失不可检测，快照须紧贴交付。
 - `run --watch-control <文件>`（2026-09-10 新增）：运行中按同源游标语义轮询 JSONL 控制文件。`{"op":"watch","id":"<原生id>","scope":"<scope>"}` 动态注册晚现会话（核对/修正上下文在研究完成后才派发，id 无法在 run 启动时预知）；`{"op":"finalize"}` 声明交付收尾——在此之前 run 即使全部当前 watcher 已结束也不退出，持续等待新会话并增量采集协调转录，finalize 后按原静默规则排空退出。expected_scopes 覆盖全部曾加入的 watcher，单一证据目录声明整个任务。fail-closed：坏行、非法/冲突/finalize 后的注册、delivery-sweep 下追加第二个 coordination、无 finalize 超时、控制文件自身轮转/截断或退出时残留半行，均写入 `collection-gaps.jsonl` 并使 `check` 失败。
 - `run --resume` 与 `status`（2026-09-10 基础设施修复新增）：run 每个变更周期把全部 watcher 游标、控制游标与 request_at 持久化到 `watch-state.json`（首循环即持久化）；采集器被外部终止后，`run --resume`（同目录、省略 `--watch-agent`、其余旗标同原启动）从保存状态续跑，死窗期间发生的轮转/截断按既有语义记缺口——损失被界定为死窗内未消费字节而非整个任务窗。`status --evidence <目录>` 为只读视图（工件、逐 scope 事件数、缺口、watcher 游标、agent 元数据状态与转录空闲时长），用于区分正常长调用与代理停摆。同批修复：file: watcher 与隔离扫描的 session_id 统一为原生会话 id（去 `model-io-` 前缀），live agent watcher＋隔离验证组合自此可通过 check。

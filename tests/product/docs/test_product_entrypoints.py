@@ -255,6 +255,24 @@ def test_usage_guide_does_not_claim_cli_validates_research_semantics() -> None:
     assert "请求规范化、状态迁移校验、证据元数据检查、门禁评估与报告校验" not in usage
 
 
+def test_readme_documents_explicit_host_evidence_entry() -> None:
+    readme = _read(README)
+    # 显式选定证据的检查入口只在设置 HETU_HOST_EVIDENCE 时追加，且任何通过
+    # 都不构成宿主组合的正式支持认证
+    assert "HETU_HOST_EVIDENCE" in readme
+    assert "--host-evidence" in readme
+    assert "不构成任何宿主／模型组合的正式支持认证" in readme
+
+
+def test_usage_guide_documents_explicit_host_evidence_entry() -> None:
+    usage = _read(USAGE)
+    assert "--host-evidence" in usage
+    assert "host-support-record.json" in usage
+    assert "未执行" in usage
+    assert "不支持" in usage
+    assert "不构成宿主正式支持认证" in usage
+
+
 def test_changelog_records_current_unreleased_v02_and_v01_baseline() -> None:
     text = _read(CHANGELOG)
     assert text.count("## V0.2（未正式发布）") == 1

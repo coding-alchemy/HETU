@@ -48,16 +48,41 @@ Second review round (stage-01 fix2, 2026-09-08):
   identity and carries the required verdicts and controls; truncated lines
   and collection gaps fail the check; a non-probe run must declare at least
   the mandatory research and review scopes.
+
+Stage 07.1a (unified acceptance entry, 2026-09-12):
+
+- ``check --host-evidence <dir>`` re-runs the same static check against an
+  explicitly selected observation directory, but additionally requires a
+  ``host-support-record.json`` (whitelisted host/authorization/required_tools
+  facts, never credentials). A missing directory, missing record or invalid
+  record exits non-zero with an 未执行／unsupported conclusion, writes the
+  failure to a new check output and never counts a skip as a pass. The pass
+  result still never claims host certification.
+- ``check`` never invokes ``run``; the default ``scripts/check.sh`` gate runs
+  fully offline and only appends this entry when ``HETU_HOST_EVIDENCE`` names
+  an explicitly selected evidence directory.
+
+Stage 07.1b (native adapter constraint, 2026-09-12):
+
+The native adapter in this module (probe/run dispatch, process observation,
+and the ``--watch-control`` relay) only sends the explicitly approved request,
+observes the host's own records, and relays user/operator operations. It never
+loop-drives the W0–W10 work packages, never routes or selects models, and never
+injects research next steps; research sequencing stays with the coordinating
+agent. The control relay accepts only the recorded ``watch``/``finalize`` ops
+and rejects everything else as a collection gap.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import math
 import os
 import re
+import sqlite3
 import sys
 import time
 from datetime import UTC, datetime
@@ -109,6 +134,13 @@ ALLOWED_CHECK_INPUT_FIELDS = {
     "timing_intervals",
     "isolation",
 }
+# 阶段 07.1a：`check --host-evidence` 额外要求的宿主支持记录。只记录宿主、
+# 授权与必要工具事实，不存凭据本体。
+ALLOWED_HOST_SUPPORT_FIELDS = {"host", "authorization", "required_tools", "recorded_at"}
+ALLOWED_AUTHORIZATION_FIELDS = {"status", "granted_by", "granted_at"}
+HOST_SUPPORT_RECORD_FILENAME = "host-support-record.json"
+HOST_SUPPORT_CHECK_OUTPUT = "host-support-check.json"
+KNOWN_HOSTS = ("codex", "claude", "opencode", "zcode")
 ALLOWED_CASE_FIELDS = {
     "case_id",
     "security",
@@ -1556,7 +1588,8 @@ def _segment_label(state: dict[str, Any], base: str = "live") -> str:
 
 
 def _consume_claude_line(
-    output_dir: Path, raw: str, transcript: Path, state: dict[str, Any]
+    output_dir: Path, raw: str, transcript: Path, state: dict[str, Any],
+    scope: str = "research",
 ) -> None:
     from datetime import datetime
 
@@ -1578,24 +1611,33 @@ def _consume_claude_line(
     usage = message.get("usage")
     if not usage:
         return
-    append_event(
-        output_dir / "usage-events.jsonl",
-        {
-            "source": "claude",
-            "session_id": transcript.stem,
-            "segment_id": _segment_label(state),
-            "message_id": message.get("id"),
-            "scope": "research",
-            "kind": "message_final",
-            "input_tokens": usage.get("input_tokens"),
-            "output_tokens": usage.get("output_tokens"),
-            "cached_input_read": usage.get("cache_read_input_tokens"),
-            "cached_input_write": usage.get("cache_creation_input_tokens"),
-            "input_includes_cache": False,
-            "model": message.get("model"),
-            "captured_at": datetime.now(UTC).isoformat(),
-        },
-    )
+    # tool calls ride along on the message content blocks; record them with
+    # the event so summarize_usage counts actual tool_use ids — never the
+    # number of transcript lines or messages (duplicated content blocks of
+    # one message carry the same usage and must stay single-counted).
+    tool_calls = [
+        {"id": block.get("id"), "name": block.get("name")}
+        for block in message.get("content") or []
+        if isinstance(block, dict) and block.get("type") == "tool_use"
+    ]
+    event: dict[str, Any] = {
+        "source": "claude",
+        "session_id": transcript.stem,
+        "segment_id": _segment_label(state),
+        "message_id": message.get("id"),
+        "scope": scope,
+        "kind": "message_final",
+        "input_tokens": usage.get("input_tokens"),
+        "output_tokens": usage.get("output_tokens"),
+        "cached_input_read": usage.get("cache_read_input_tokens"),
+        "cached_input_write": usage.get("cache_creation_input_tokens"),
+        "input_includes_cache": False,
+        "model": message.get("model"),
+        "captured_at": datetime.now(UTC).isoformat(),
+    }
+    if tool_calls:
+        event["tool_calls"] = tool_calls
+    append_event(output_dir / "usage-events.jsonl", event)
     flush_segment(output_dir / "usage-events.jsonl")
 
 
@@ -1667,6 +1709,101 @@ def _observe_claude_process(
         time.sleep(0.2)
     if transcript is not None:
         _record_unconsumed_tail(output_dir, transcript, state, transcript.stem)
+
+
+def _cmd_account_claude(args: argparse.Namespace) -> int:
+    """Ingest one finished local Claude transcript offline (never starts a host).
+
+    Deviation path (plan §3.5): a session launched outside the observed host
+    db (e.g. a researcher-dispatched ``claude`` CLI verification context) has
+    no live watcher. This command is the single supported accounting entry
+    for its transcript: every complete line goes through the same
+    ``_consume_claude_line`` mapping as live collection, so ``check``'s
+    ``summarize_usage`` dedups by native message id (duplicated content
+    blocks of one message stay single-counted, conflicting usage values
+    surface as gaps) and counts actual tool_use ids. Transcript lines are
+    never hand-counted. Re-ingesting the same transcript (same sha256) into
+    the same evidence directory is refused; a different transcript appends
+    under a new segment."""
+    evidence_dir = Path(args.evidence)
+    if not evidence_dir.is_dir():
+        print(f"未执行：观察目录不存在：{evidence_dir}", file=sys.stderr)
+        return 2
+    transcript = Path(args.transcript)
+    if not transcript.is_file():
+        print(f"claude transcript not found: {transcript}", file=sys.stderr)
+        return 2
+    digest = hashlib.sha256(transcript.read_bytes()).hexdigest()
+    scope = args.scope
+    if not re.fullmatch(r"[a-z_][a-z0-9_-]*", scope):
+        print(f"scope must be a lowercase scope name: {scope!r}", file=sys.stderr)
+        return 2
+    session_id = args.session or transcript.stem
+    marker_path = evidence_dir / "claude-ingest.json"
+    if marker_path.exists():
+        marker = _load_json(marker_path)
+        for item in marker.get("ingests") or []:
+            if item.get("sha256") == digest:
+                print(
+                    f"transcript already ingested ({digest[:12]}…); "
+                    "refusing to double-append",
+                    file=sys.stderr,
+                )
+                return 2
+    else:
+        marker = {"ingests": []}
+    events_path = evidence_dir / "usage-events.jsonl"
+    existing, _ = load_events(events_path) if events_path.exists() else ([], {})
+    before = len(existing)
+    state: dict[str, Any] = {"identity": None, "offset": 0, "generation": 0}
+    while True:
+        lines, state, lost_tail = _poll_complete_lines(transcript, state)
+        if lost_tail is not None:
+            append_collection_gap(
+                evidence_dir,
+                {
+                    "type": "transcript_" + lost_tail["reason"],
+                    "detail": (
+                        f"{transcript.name}: bytes from "
+                        f"{lost_tail['lost_bytes_from']} in generation "
+                        f"{lost_tail['generation']} were never consumed"
+                    ),
+                    "generation": state["generation"],
+                    "session_id": session_id,
+                    "at": datetime.now(UTC).isoformat(),
+                },
+            )
+        if not lines:
+            break
+        for line in lines:
+            _consume_claude_line(
+                evidence_dir, line, transcript, state, scope=scope
+            )
+    _record_unconsumed_tail(evidence_dir, transcript, state, session_id)
+    consumed, _ = load_events(events_path)
+    new_events = consumed[before:]
+    if not new_events:
+        print(
+            "transcript held no consumable assistant usage lines",
+            file=sys.stderr,
+        )
+        return 1
+    marker["ingests"].append(
+        {
+            "transcript": transcript.name,
+            "session_id": session_id,
+            "scope": scope,
+            "sha256": digest,
+            "events": len(new_events),
+            "ingested_at": datetime.now(UTC).isoformat(),
+        }
+    )
+    _write_json(marker_path, marker)
+    print(
+        f"ingested {len(new_events)} claude usage event(s) from "
+        f"{transcript.name} into {evidence_dir}"
+    )
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1818,6 +1955,155 @@ def _zcode_line_event(
 
 def _iso_to_epoch(value: str) -> float:
     return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+
+
+# ---------------------------------------------------------------------------
+# zcode durable metering export (client db.sqlite channel, 2026-09-15)
+
+# The rollout ``model-io-*.jsonl`` files rotate quickly (~3 files) under
+# parallel load, which made live metering lossy. The ZCode client also
+# persists the same usage payload durably in ``~/.zcode/cli/db/db.sqlite``:
+# ``model_usage`` (per model request, incl. the raw usage JSON with identical
+# values) and ``tool_usage`` (per tool call, same ``call_*`` id space as the
+# rollout toolCalls). This exporter converts those rows into the same
+# whitelisted usage-event schema as the rollout watcher, with
+# ``source="zcode-db"`` and ``segment_id="db"``: one evidence directory must
+# use exactly one metering channel, so the durable channel never merges into
+# (and never double-counts against) rollout-captured ranges.
+ZCODE_DB_REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
+    "model_usage": (
+        "logical_request_id", "session_id", "turn_id", "model_id",
+        "input_tokens", "output_tokens",
+        "cache_read_input_tokens", "cache_creation_input_tokens",
+        "tool_call_count", "started_at", "completed_at",
+    ),
+    "tool_usage": (
+        "session_id", "turn_id", "tool_call_id", "tool_name", "started_at",
+    ),
+    "message": ("id", "session_id", "time_created", "time_updated", "data"),
+    "part": ("id", "message_id", "session_id", "data"),
+}
+
+
+def _zcode_db_check_schema(conn: sqlite3.Connection) -> list[str]:
+    """Return missing tables/columns; the client schema is internal and
+    undocumented, so any drift fails closed as unsupported instead of
+    guessing at renamed fields."""
+    missing: list[str] = []
+    for table, columns in ZCODE_DB_REQUIRED_COLUMNS.items():
+        found = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table,),
+        ).fetchone()
+        if not found:
+            missing.append(f"table {table}")
+            continue
+        present = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for column in columns:
+            if column not in present:
+                missing.append(f"{table}.{column}")
+    return missing
+
+
+def _ms_to_iso(value: Any) -> str | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        return datetime.fromtimestamp(value / 1000, UTC).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
+def _zcode_db_events(
+    conn: sqlite3.Connection, *, session_id: str, scope: str,
+    request_at_ms: int, window_end_ms: int | None = None,
+) -> list[dict[str, Any]] | None:
+    """Map one session's durable metering rows to whitelisted events.
+
+    Returns ``None`` when the window holds no rows for the session: a
+    declared session without metering is a gap, never silently absent.
+    ``window_end_ms`` excludes later activity (e.g. post-delivery scoring
+    sessions) from the run's metering window."""
+    upper = " AND started_at < ?" if window_end_ms is not None else ""
+    params: tuple[Any, ...] = (
+        (session_id, request_at_ms, window_end_ms)
+        if window_end_ms is not None
+        else (session_id, request_at_ms)
+    )
+    rows = conn.execute(
+        "SELECT logical_request_id, turn_id, model_id, input_tokens, "
+        "output_tokens, cache_read_input_tokens, cache_creation_input_tokens, "
+        "tool_call_count, started_at, completed_at FROM model_usage "
+        "WHERE session_id = ? AND started_at >= ?" + upper +
+        " ORDER BY started_at",
+        params,
+    ).fetchall()
+    if not rows:
+        return None
+    tool_rows = conn.execute(
+        "SELECT tool_call_id, tool_name, turn_id, started_at FROM tool_usage "
+        "WHERE session_id = ? AND started_at >= ?" + upper +
+        " ORDER BY started_at",
+        params,
+    ).fetchall()
+    by_turn: dict[str, list[tuple[str, str]]] = {}
+    for tool_call_id, tool_name, turn_id, _started in tool_rows:
+        by_turn.setdefault(str(turn_id), []).append(
+            (str(tool_call_id), str(tool_name))
+        )
+    consumed: dict[str, int] = {}
+    events: list[dict[str, Any]] = []
+    now = datetime.now(UTC).isoformat()
+    for (
+        request,
+        turn_id,
+        model,
+        input_tokens,
+        output_tokens,
+        cache_read,
+        cache_write,
+        tool_count,
+        started_at,
+        completed_at,
+    ) in rows:
+        available = by_turn.get(str(turn_id), [])
+        start = consumed.get(str(turn_id), 0)
+        count = tool_count if isinstance(tool_count, int) and tool_count > 0 else 0
+        chosen = available[start:start + count]
+        consumed[str(turn_id)] = start + len(chosen)
+        tool_calls = [
+            {
+                "id": tool_call_id,
+                "name": tool_name,
+                **({"wrapper": True} if tool_name == "Agent" else {}),
+            }
+            for tool_call_id, tool_name in chosen
+        ]
+        event: dict[str, Any] = {
+            "source": "zcode-db",
+            "session_id": session_id,
+            "segment_id": "db",
+            "message_id": str(request),
+            "scope": scope,
+            "kind": "incremental",
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "cached_input_read": cache_read,
+            "cached_input_write": cache_write,
+            "input_includes_cache": True,
+            "model": model,
+            "captured_at": now,
+        }
+        started_iso = _ms_to_iso(started_at)
+        completed_iso = _ms_to_iso(completed_at)
+        if started_iso:
+            event["started_at"] = started_iso
+        if completed_iso:
+            event["completed_at"] = completed_iso
+        if tool_calls:
+            event["tool_calls"] = tool_calls
+        events.append(event)
+    return events
 
 
 def _zcode_agent_records(agent_id: str) -> tuple[Path | None, Path | None]:
@@ -2161,7 +2447,89 @@ def _isolation_control(
     }
 
 
+def _verified_run_capability_facts(
+    host: str, args: argparse.Namespace
+) -> list[str]:
+    """本次 run 真实验证过的原生能力事实（空表 = 能力未验证）。
+
+    只记录此刻已核实的事实，绝不凭空缺充：zcode attach 依赖 rollout 观察
+    目录可读与（对 file: 规格）轮转前快照真实存在；claude 探针模式依赖
+    claude CLI 可解析。其余宿主没有已接入的观察模式，恒为空。
+    """
+    facts: list[str] = []
+    if host == "zcode":
+        rollout_root = Path.home() / ".zcode" / "cli" / "rollout"
+        if rollout_root.is_dir():
+            facts.append("zcode-rollout-observation")
+        for spec in args.watch_agent or []:
+            native_id = spec.split("=", 1)[0]
+            if native_id.startswith("file:") and Path(native_id[5:]).is_file():
+                facts.append("zcode-transcript-snapshot")
+    elif host == "claude" and args.probe:
+        import shutil
+
+        if shutil.which("claude"):
+            facts.append("claude-cli-headless")
+    return facts
+
+
+def _parse_expect_terminal(values: list[str] | None) -> dict[str, str]:
+    """解析 ``--expect-terminal`` 的 ``<native-id>=<status>`` 声明表。
+
+    宿主对用户取消（停止在途子任务）落盘的 agent 终态是 ``stopped``；当
+    被取消正是链路 case 的预期结果时，验收者用该参数显式声明，观察器仍
+    等待并消费完整 transcript，但不再把该终态记为采集缺口。未声明的非
+    completed 终态照旧 fail-closed。"""
+    expected: dict[str, str] = {}
+    for item in values or []:
+        native_id, sep, status = item.partition("=")
+        native_id = native_id.strip()
+        status = status.strip().lower()
+        if not sep or not native_id or not status:
+            raise ValueError(
+                f"--expect-terminal needs <native-id>=<status>: {item!r}"
+            )
+        expected[native_id] = status
+    return expected
+
+
+def _terminal_status_gap(
+    *,
+    native_id: str,
+    scope: str,
+    session_id: str | None,
+    generation: int,
+    status: str,
+    expected_terminal: dict[str, str],
+) -> dict[str, Any] | None:
+    """非 completed 终态的采集记录；显式声明的预期终态不产生缺口。
+
+    返回 ``None`` 表示该终态不构成采集缺口（completed，或与声明表一致的
+    预期取消）；否则返回完整 gap 记录，交由调用方落盘。"""
+    if status == "completed":
+        return None
+    if expected_terminal.get(native_id) == status:
+        return None
+    return {
+        "type": "agent_terminal_status",
+        "detail": (
+            f"{native_id} ({scope}) "
+            f"ended with status {status!r}"
+        ),
+        "generation": generation,
+        "session_id": session_id,
+        "at": datetime.now(UTC).isoformat(),
+    }
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
+    try:
+        expected_terminal = _parse_expect_terminal(
+            getattr(args, "expect_terminal", None)
+        )
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     output_dir = Path(args.output)
     # only run-produced artifacts are protected; a coordinator may pre-place
     # other inputs (e.g. isolation evidence) into the observation directory
@@ -2171,6 +2539,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         "check-input.json",
         "run-state.json",
         "collection-gaps.jsonl",
+        HOST_SUPPORT_RECORD_FILENAME,
     )
     existing = [name for name in run_artifacts if (output_dir / name).exists()]
     if existing and not args.resume:
@@ -2209,6 +2578,30 @@ def _cmd_run(args: argparse.Namespace) -> int:
         _write_json(output_dir / "case-record.json", case)
 
     from datetime import datetime
+
+    # 阶段 07.1a：授权与能力验证通过后、执行 case 之前写出宿主支持记录，
+    # 使 `check --host-evidence` 对该观察目录的成功路径可达。记录在 case
+    # 执行之前落盘：执行失败或中断时记录仍在（先验证、后执行的顺序不可
+    # 反）。无授权引用或无已验证能力事实时不写（fail-closed，绝不伪造）；
+    # resume 沿用既有记录，create-only 不覆盖。
+    if resume_state is None:
+        support_facts = _verified_run_capability_facts(args.host, args)
+        if args.authorization_ref and support_facts:
+            _write_json(
+                output_dir / HOST_SUPPORT_RECORD_FILENAME,
+                {
+                    "host": args.host,
+                    "authorization": "granted",
+                    "required_tools": support_facts,
+                    "recorded_at": datetime.now(UTC).isoformat(),
+                },
+            )
+        elif args.authorization_ref:
+            print(
+                "host support record NOT written: no verified capability "
+                f"fact for host {args.host!r}; the combination stays 不支持",
+                file=sys.stderr,
+            )
 
     if args.host == "claude" and args.probe:
         # Controlled native probe: dispatches a non-research request through
@@ -2406,7 +2799,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 dirty = True
             return consumed or lost_tail is not None
 
-        terminal = {"completed", "failed", "error", "cancelled", "aborted", "timeout"}
+        terminal = {"completed", "failed", "error", "cancelled", "aborted",
+                    "timeout", "stopped"}
         deadline = time.time() + args.watch_timeout
         pending = [watcher for watcher in watchers if watcher["kind"] == "agent"]
         # --watch-control: a JSONL file the coordinator appends to while the
@@ -2681,19 +3075,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
                             with contextlib.suppress(ValueError, TypeError):
                                 watcher["ended_epoch"] = _iso_to_epoch(fresh["completedAt"])
                         if status != "completed":
-                            append_collection_gap(
-                                output_dir,
-                                {
-                                    "type": "agent_terminal_status",
-                                    "detail": (
-                                        f"{watcher['native_id']} ({watcher['scope']}) "
-                                        f"ended with status {status!r}"
-                                    ),
-                                    "generation": watcher["state"].get("generation", 0),
-                                    "session_id": watcher["session_id"],
-                                    "at": datetime.now(UTC).isoformat(),
-                                },
+                            gap = _terminal_status_gap(
+                                native_id=watcher["native_id"],
+                                scope=watcher["scope"],
+                                session_id=watcher["session_id"],
+                                generation=watcher["state"].get("generation", 0),
+                                status=status,
+                                expected_terminal=expected_terminal,
                             )
+                            if gap is not None:
+                                append_collection_gap(output_dir, gap)
             # while waiting for late sessions or the finalize signal the
             # loop must poll at a calm cadence, never busy-spin
             if dirty:
@@ -3260,14 +3651,79 @@ def _cmd_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
+def _validate_host_support_record(record: Any) -> list[str]:
+    """校验宿主支持记录；返回失败原因列表（空表 = 记录合法）。
+
+    记录只承载宿主、授权与必要工具事实：host 必须是已知宿主，authorization
+    必须为 granted（字符串授权引用或非空 dict 均可），required_tools 必须
+    是非空字符串列表。任何一项缺失或不合法都视为“不支持该组合”。
+    """
+    if not isinstance(record, dict):
+        return ["host-support-record.json 必须是一个 JSON 对象"]
+    failures: list[str] = []
+    try:
+        _reject_unknown_fields(record, ALLOWED_HOST_SUPPORT_FIELDS, "host-support-record")
+    except ValueError as error:
+        failures.append(str(error))
+    if record.get("host") not in KNOWN_HOSTS:
+        failures.append(f"host-support-record: host {record.get('host')!r} 未知")
+    authorization = record.get("authorization")
+    if isinstance(authorization, dict):
+        try:
+            _reject_unknown_fields(authorization, ALLOWED_AUTHORIZATION_FIELDS, "authorization")
+        except ValueError as error:
+            failures.append(str(error))
+        if authorization.get("status") != "granted":
+            failures.append("authorization.status 不是 granted")
+    elif not isinstance(authorization, str) or not authorization.strip():
+        failures.append("authorization 缺失或为空")
+    tools = record.get("required_tools")
+    if (
+        not isinstance(tools, list)
+        or not tools
+        or not all(isinstance(tool, str) and tool.strip() for tool in tools)
+    ):
+        failures.append("required_tools 缺失、为空或含非字符串项")
+    return failures
+
+
+def _load_host_support(evidence_dir: Path) -> tuple[dict[str, Any] | None, list[str]]:
+    """读取并校验宿主支持记录；缺记录或记录不合法均返回失败原因。"""
+    record_path = evidence_dir / HOST_SUPPORT_RECORD_FILENAME
+    if not record_path.exists():
+        return None, [f"{HOST_SUPPORT_RECORD_FILENAME} 缺失：缺宿主、授权或必要工具记录"]
+    try:
+        record = _load_json(record_path)
+    except (OSError, json.JSONDecodeError) as error:
+        return None, [f"{HOST_SUPPORT_RECORD_FILENAME} 不可解析：{error}"]
+    failures = _validate_host_support_record(record)
+    if failures:
+        return None, failures
+    return record, []
+
+
 def _cmd_check(args: argparse.Namespace) -> int:
-    evidence_dir = Path(args.evidence)
-    output_path = Path(args.output)
+    host_evidence = getattr(args, "host_evidence", None)
+    if bool(args.evidence) == bool(host_evidence):
+        print("check needs exactly one of --evidence or --host-evidence", file=sys.stderr)
+        return 2
+    evidence_dir = Path(args.evidence or host_evidence)
+    if args.output:
+        output_path = Path(args.output)
+    elif host_evidence:
+        output_path = evidence_dir / HOST_SUPPORT_CHECK_OUTPUT
+    else:
+        print("check with --evidence needs --output", file=sys.stderr)
+        return 2
+    if host_evidence and not evidence_dir.is_dir():
+        print(f"未执行：观察目录不存在：{evidence_dir}", file=sys.stderr)
+        return 2
     meta_path = evidence_dir / "check-input.json"
     events_path = evidence_dir / "usage-events.jsonl"
     for required in (meta_path, events_path):
         if not required.exists():
-            print(f"missing required evidence file: {required}", file=sys.stderr)
+            prefix = "未执行：" if host_evidence else ""
+            print(f"{prefix}missing required evidence file: {required}", file=sys.stderr)
             return 2
     if output_path.exists():
         print(
@@ -3279,6 +3735,33 @@ def _cmd_check(args: argparse.Namespace) -> int:
     if str(output_path.resolve()) in resolved_inputs:
         print("check output must not target evidence inputs", file=sys.stderr)
         return 2
+
+    host_support: dict[str, Any] | None = None
+    if host_evidence:
+        record, support_failures = _load_host_support(evidence_dir)
+        if support_failures:
+            for failure in support_failures:
+                print(f"不支持：{failure}", file=sys.stderr)
+            # 失败同样保存到新输出，不能静默跳过，也不能把 skip 算通过
+            payload = {
+                "evidence_dir": str(evidence_dir),
+                "task_identity": None,
+                "host_support": None,
+                "passed": False,
+                "baseline_qualification": "not_established",
+                "failures": support_failures,
+                "conclusion": (
+                    "未执行／不支持：缺宿主、授权或必要工具记录；"
+                    "该组合未获真实验收"
+                ),
+            }
+            try:
+                _write_json(output_path, payload)
+            except FileExistsError as error:
+                print(str(error), file=sys.stderr)
+                return 2
+            return 1
+        host_support = record
 
     meta = _load_json(meta_path)
     if not isinstance(meta, dict):
@@ -3415,6 +3898,7 @@ def _cmd_check(args: argparse.Namespace) -> int:
         "usage": result,
         "timing": timing,
         "isolation": isolation,
+        "host_support": host_support,
         "passed": not failures,
         "baseline_qualification": baseline_qualification,
         "failures": failures,
@@ -3427,6 +3911,384 @@ def _cmd_check(args: argparse.Namespace) -> int:
     if diagnostics["truncated_lines"]:
         print(f"truncated evidence lines: {diagnostics['truncated_lines']}", file=sys.stderr)
     return 0 if payload["passed"] else 1
+
+
+DELIVERY_PRESENTATION_MARKERS: tuple[str, ...] = ("最终报告", "report.md")
+DELIVERY_DRAFT_MARKERS: tuple[str, ...] = ("待核验", "待独立核对", "初稿")
+DELIVERY_DRAFT_WINDOW_CHARS = 300
+# research run directory ids look like
+# 宝钢股份-600019.SH-standard-20260915T210919+0800 or
+# 贵州茅台-600519-standard-20260914T194031+0800
+DELIVERY_RUN_ID_RE = re.compile(
+    r"[^\s`，。；'\"（）()]+-\d{6}(?:\.(?:SH|SZ|BJ))?"
+    r"-(?:quick|standard|deep)-\d{8}T\d{6}\+0800"
+)
+DELIVERY_METHOD = (
+    "user-visible assistant final-report presentation (durable db)"
+)
+DELIVERY_TIME_CALIBER = (
+    "message completion (max of matched text part end and "
+    "client-recorded message time.completed)"
+)
+
+
+def _delivery_run_ids(marker_text: str) -> list[str]:
+    return sorted(set(DELIVERY_RUN_ID_RE.findall(marker_text)))
+
+
+def _is_draft_presentation(text: str) -> bool:
+    anchor = text.find("report.md")
+    if anchor < 0:
+        return False
+    window = text[max(0, anchor - DELIVERY_DRAFT_WINDOW_CHARS):
+                  anchor + DELIVERY_DRAFT_WINDOW_CHARS]
+    return any(marker in window for marker in DELIVERY_DRAFT_MARKERS)
+
+
+def _message_user_visible(message_data: Any) -> bool | None:
+    """True only for an assistant message the client itself marks visible.
+
+    ``None`` means visibility is not provable from the record (missing
+    semantics) — fail-closed, never assumed visible."""
+    if not isinstance(message_data, dict):
+        return None
+    if message_data.get("role") != "assistant":
+        return False
+    semantics = message_data.get("semantics")
+    if not isinstance(semantics, dict):
+        return None
+    return semantics.get("uiVisibility") == "visible"
+
+
+def _presentation_completion_ms(
+    part_data: dict[str, Any], message_data: dict[str, Any],
+) -> int | None:
+    """Completion moment of a presentation, or None when not provable.
+
+    Evidence-backed completion only, from moments the client itself
+    records: the matched text part's own ``time.end`` (that part's
+    streaming end) or the message's own ``time.completed`` (message data
+    time block). The message row's ``time_updated`` column merely
+    advancing past creation is NOT completion evidence — it also advances
+    while streamed content lands — and creation time alone is the start
+    of generation; neither stands in for delivery."""
+    candidates: list[int] = []
+    time_block = part_data.get("time")
+    if isinstance(time_block, dict) and isinstance(time_block.get("end"), int):
+        candidates.append(int(time_block["end"]))
+    message_time = message_data.get("time")
+    if (isinstance(message_time, dict)
+            and isinstance(message_time.get("completed"), int)):
+        candidates.append(int(message_time["completed"]))
+    return max(candidates) if candidates else None
+
+
+def _zcode_db_find_delivery_presentation(
+    conn: sqlite3.Connection, *, session_id: str,
+    request_at_ms: int, window_end_ms: int, run_ids: list[str],
+):
+    """Locate the user-visible final-report presentation in one session.
+
+    The delivery endpoint is the first **assistant message the client marks
+    user-visible** whose text presents the final report and explicitly marks
+    it final (Skill 最终交付 rule). Excluded: user requests and internal
+    task notifications (role/visibility disqualified — a notification is not
+    a presentation to the user), pre-verification drafts (draft markers near
+    the report claim, before or after it) and, when the marker names this
+    run's research directory, presentations of other runs in the same
+    coordination session. Returns ``(match, excluded)`` where ``match`` is
+    ``{message_id, part_id, text, completion_ms}`` or ``None``."""
+    rows = conn.execute(
+        "SELECT p.data, p.id, m.id, m.data FROM part p "
+        "JOIN message m ON p.message_id = m.id "
+        "WHERE p.session_id = ? AND m.time_created >= ? "
+        "AND m.time_created < ? ORDER BY m.time_created, p.id",
+        (session_id, request_at_ms, window_end_ms),
+    ).fetchall()
+    match: dict[str, Any] | None = None
+    excluded = {"draft": 0, "other_run": 0, "not_user_visible": 0}
+    for part_data_raw, part_id, message_id, message_data_raw in rows:
+        try:
+            data = json.loads(part_data_raw)
+            message_data = json.loads(message_data_raw)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict) or data.get("type") != "text":
+            continue
+        text = data.get("text")
+        if not isinstance(text, str):
+            continue
+        if not all(marker in text for marker in DELIVERY_PRESENTATION_MARKERS):
+            continue
+        if _message_user_visible(message_data) is not True:
+            excluded["not_user_visible"] += 1
+            continue
+        if _is_draft_presentation(text):
+            excluded["draft"] += 1
+            continue
+        if run_ids and not any(run_id in text for run_id in run_ids):
+            excluded["other_run"] += 1
+            continue
+        completion = _presentation_completion_ms(data, message_data)
+        if match is None:
+            match = {
+                "message_id": str(message_id),
+                "part_id": str(part_id),
+                "text": text,
+                "completion_ms": completion,
+            }
+    return match, excluded
+
+
+def _cmd_db_delivery(args: argparse.Namespace) -> int:
+    """Observe the delivery endpoint from the durable client db.
+
+    The endpoint is the user-visible final-report presentation event in the
+    coordination session — never the last completed turn (that misselects
+    post-delivery scoring dispatches and wait polls) and never the marker
+    mtime (the marker is an artifact, and it has been observed both minutes
+    before and seconds after the user-visible presentation). Presentations
+    that are explicitly pre-verification drafts do not qualify. Any other
+    outcome fails closed and writes nothing; the method basis is recorded in
+    a sibling file ``check`` does not consume."""
+    evidence_dir = Path(args.evidence)
+    if not evidence_dir.is_dir():
+        print(f"未执行：观察目录不存在：{evidence_dir}", file=sys.stderr)
+        return 2
+    marker_name = args.marker
+    meta_path = evidence_dir / "check-input.json"
+    if marker_name is None and meta_path.exists():
+        try:
+            meta = _load_json(meta_path)
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"check-input.json 不可解析：{error}", file=sys.stderr)
+            return 2
+        marker_name = meta.get("delivery_marker") if isinstance(meta, dict) else None
+    if marker_name is None:
+        fallback = evidence_dir / "delivery-message.md"
+        if fallback.is_file():
+            marker_name = "delivery-message.md"
+        else:
+            print(
+                "db-delivery needs --marker, check-input.json, or an "
+                "existing delivery-message.md",
+                file=sys.stderr,
+            )
+            return 2
+    marker = evidence_dir / str(marker_name)
+    if not marker.is_file():
+        print(f"delivery marker missing: {marker}", file=sys.stderr)
+        return 2
+    try:
+        request_at_ms = int(_iso_to_epoch(str(args.request_at)) * 1000)
+        window_end_ms = int(_iso_to_epoch(str(args.window_end)) * 1000)
+    except (ValueError, TypeError, OverflowError) as error:
+        print(f"window 不可解析：{error}", file=sys.stderr)
+        return 2
+    if window_end_ms <= request_at_ms:
+        print("window-end must be after request-at", file=sys.stderr)
+        return 2
+    db_path = Path(args.db)
+    if not db_path.is_file():
+        print(f"未执行：数据库不存在：{db_path}", file=sys.stderr)
+        return 2
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error as error:
+        print(f"unsupported: 数据库不可读：{error}", file=sys.stderr)
+        return 1
+    with contextlib.closing(conn):
+        missing = _zcode_db_check_schema(conn)
+        if missing:
+            print(
+                "unsupported: zcode client db schema drift: " + ", ".join(missing),
+                file=sys.stderr,
+            )
+            return 1
+        run_ids = sorted(
+            set(getattr(args, "run_id", []) or [])
+            | set(_delivery_run_ids(marker.read_text(encoding="utf-8")))
+        )
+        if not run_ids:
+            print(
+                "delivery presentations cannot be scoped to this run "
+                "(no run id in --run-id or marker); refusing to guess "
+                "which presentation is this run's delivery",
+                file=sys.stderr,
+            )
+            return 1
+        match, excluded = _zcode_db_find_delivery_presentation(
+            conn, session_id=str(args.session),
+            request_at_ms=request_at_ms, window_end_ms=window_end_ms,
+            run_ids=run_ids,
+        )
+        if match is None:
+            print(
+                "no user-visible assistant final-report presentation in the "
+                f"window ({excluded['draft']} pre-verification draft(s), "
+                f"{excluded['other_run']} other-run presentation(s), "
+                f"{excluded['not_user_visible']} marker-matching text(s) "
+                "not user-visible — user requests and hidden task "
+                "notifications are not presentations); the delivery "
+                "endpoint is not observably durable",
+                file=sys.stderr,
+            )
+            return 1
+        message_id = match["message_id"]
+        endpoint_ms = match["completion_ms"]
+        if endpoint_ms is None:
+            print(
+                "the matched presentation's completion time is not "
+                "provable (no text part time.end and no client-recorded "
+                "message time.completed; a time_updated that only "
+                "advances past creation reflects streamed content "
+                "landing, not completion); refusing to substitute "
+                "a generation start time",
+                file=sys.stderr,
+            )
+            return 1
+        if endpoint_ms < request_at_ms:
+            print("delivery endpoint precedes the request start", file=sys.stderr)
+            return 1
+        marker_mtime = marker.stat().st_mtime
+        _write_json(
+            evidence_dir / "delivery-observation.json",
+            {
+                "source": DELIVERY_SOURCE_OBSERVED,
+                "session_id": args.session,
+                "marker": str(marker_name),
+                "marker_mtime_epoch": marker_mtime,
+                "delivered_at_epoch": endpoint_ms / 1000,
+                "delivered_at_iso": _ms_to_iso(endpoint_ms),
+                "delivery_request_id": message_id,
+            },
+        )
+        _write_json(
+            evidence_dir / "delivery-observation-basis.json",
+            {
+                "method": DELIVERY_METHOD,
+                "time_caliber": DELIVERY_TIME_CALIBER,
+                "db": str(db_path),
+                "delivery_request_id": message_id,
+                "delivery_message_id": message_id,
+                "delivery_part_id": match["part_id"],
+                "run_ids": run_ids,
+                "excluded_presentations": excluded,
+                "exported_at": datetime.now(UTC).isoformat(),
+                "window": {
+                    "request_at": args.request_at,
+                    "window_end": args.window_end,
+                },
+            },
+        )
+    print(f"delivery observed at {_ms_to_iso(endpoint_ms)} (durable db channel)")
+    return 0
+
+
+def _cmd_db_export(args: argparse.Namespace) -> int:
+    """Export durable zcode metering (client db.sqlite) into one evidence dir.
+
+    Read-only against the client database; never starts a host. Every
+    declared (scope, session) pair must produce at least one row inside the
+    request window, and the client schema must carry every required column —
+    otherwise nothing is written and the command fails as unsupported/gap."""
+    evidence_dir = Path(args.evidence)
+    if not evidence_dir.is_dir():
+        print(f"未执行：观察目录不存在：{evidence_dir}", file=sys.stderr)
+        return 2
+    request_at = args.request_at
+    if request_at is None:
+        meta_path = evidence_dir / "check-input.json"
+        if not meta_path.exists():
+            print("db-export needs --request-at or check-input.json", file=sys.stderr)
+            return 2
+        try:
+            meta = _load_json(meta_path)
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"check-input.json 不可解析：{error}", file=sys.stderr)
+            return 2
+        request_at = meta.get("request_at") if isinstance(meta, dict) else None
+        if not request_at:
+            print("check-input.json has no request_at; pass --request-at", file=sys.stderr)
+            return 2
+    try:
+        request_at_ms = int(_iso_to_epoch(str(request_at)) * 1000)
+    except (ValueError, TypeError, OverflowError) as error:
+        print(f"request-at 不可解析：{error}", file=sys.stderr)
+        return 2
+    window_end_ms: int | None = None
+    if args.window_end:
+        try:
+            window_end_ms = int(_iso_to_epoch(str(args.window_end)) * 1000)
+        except (ValueError, TypeError, OverflowError) as error:
+            print(f"window-end 不可解析：{error}", file=sys.stderr)
+            return 2
+        if window_end_ms <= request_at_ms:
+            print("window-end must be after request-at", file=sys.stderr)
+            return 2
+    db_path = Path(args.db)
+    if not db_path.is_file():
+        print(f"未执行：数据库不存在：{db_path}", file=sys.stderr)
+        return 2
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    except sqlite3.Error as error:
+        print(f"unsupported: 数据库不可读：{error}", file=sys.stderr)
+        return 1
+    try:
+        with contextlib.closing(conn):
+            missing = _zcode_db_check_schema(conn)
+            if missing:
+                print(
+                    "unsupported: zcode client db schema drift: "
+                    + ", ".join(missing),
+                    file=sys.stderr,
+                )
+                return 1
+            events_path = evidence_dir / "usage-events.jsonl"
+            written = 0
+            provenance: dict[str, Any] = {
+                "db": str(db_path),
+                "exported_at": datetime.now(UTC).isoformat(),
+                "request_at": str(request_at),
+                "window_end": str(args.window_end) if args.window_end else None,
+                "channel": "zcode-db",
+                "sessions": {},
+            }
+            if len(args.scope) != len(args.session):
+                print(
+                    "--scope and --session must be given in equal numbers",
+                    file=sys.stderr,
+                )
+                return 2
+            for scope, session in zip(args.scope, args.session, strict=True):
+                events = _zcode_db_events(
+                    conn,
+                    session_id=session,
+                    scope=scope,
+                    request_at_ms=request_at_ms,
+                    window_end_ms=window_end_ms,
+                )
+                if events is None:
+                    print(
+                        f"no model_usage rows for session {session} "
+                        f"(scope={scope}) in the request window; "
+                        "declared metering is absent — refusing to export",
+                        file=sys.stderr,
+                    )
+                    return 1
+                for event in events:
+                    append_event(events_path, event)
+                written += len(events)
+                provenance["sessions"].setdefault(scope, {})[session] = {
+                    "rows": len(events)
+                }
+            _write_json(evidence_dir / "db-export.json", provenance)
+    except sqlite3.Error as error:
+        print(f"unsupported: 数据库查询失败：{error}", file=sys.stderr)
+        return 1
+    print(f"db-export wrote {written} event(s) to {events_path}")
+    return 0
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
@@ -3646,6 +4508,28 @@ def build_parser() -> argparse.ArgumentParser:
             "(fail-closed). Omit --watch-agent when resuming"
         ),
     )
+    run.add_argument(
+        "--expect-terminal",
+        dest="expect_terminal",
+        action="append",
+        help=(
+            "zcode attach: declare <native-id>=<status> as an agent's expected "
+            "terminal state (e.g. a probe agent cancelled via the host stop "
+            "tool ends 'stopped'); the watcher still drains the transcript to "
+            "the end but no terminal-status collection gap is recorded "
+            "(repeatable; undeclared non-completed ends stay fail-closed)"
+        ),
+    )
+    run.add_argument(
+        "--authorization-ref",
+        dest="authorization_ref",
+        help=(
+            "operator-verified authorization reference name (never the "
+            "credential itself); together with verified capability facts it "
+            "enables writing host-support-record.json for `check "
+            "--host-evidence`"
+        ),
+    )
 
     status = sub.add_parser(
         "status",
@@ -3678,9 +4562,115 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    account_claude = sub.add_parser(
+        "account-claude",
+        help=(
+            "ingest one finished local Claude transcript into an observation "
+            "directory (offline deviation accounting; never starts a host)"
+        ),
+    )
+    account_claude.add_argument(
+        "--evidence", required=True, help="observation directory"
+    )
+    account_claude.add_argument(
+        "--transcript", required=True, help="finished Claude session .jsonl"
+    )
+    account_claude.add_argument(
+        "--session",
+        help=(
+            "native session id to record; defaults to the transcript stem "
+            "(the Claude session id)"
+        ),
+    )
+    account_claude.add_argument(
+        "--scope",
+        default="review",
+        help=(
+            "usage scope for every ingested event (lowercase; default "
+            "'review' for deviation verification contexts)"
+        ),
+    )
+
     check = sub.add_parser("check", help="offline evidence check (never starts a host)")
-    check.add_argument("--evidence", required=True, help="existing observation directory")
-    check.add_argument("--output", required=True, help="check result JSON path (must not exist)")
+    check.add_argument("--evidence", help="existing observation directory (static offline check)")
+    check.add_argument(
+        "--host-evidence",
+        dest="host_evidence",
+        help=(
+            "explicitly selected observation directory for host acceptance; "
+            "requires host-support-record.json and defaults --output to "
+            f"<dir>/{HOST_SUPPORT_CHECK_OUTPUT}"
+        ),
+    )
+    check.add_argument("--output", help="check result JSON path (must not exist)")
+
+    db_export = sub.add_parser(
+        "db-export",
+        help=(
+            "export durable zcode metering (client db.sqlite) into one "
+            "observation directory (read-only; never starts a host)"
+        ),
+    )
+    db_export.add_argument("--evidence", required=True, help="observation directory")
+    db_export.add_argument(
+        "--db", required=True, help="zcode client db.sqlite path"
+    )
+    db_export.add_argument(
+        "--session",
+        action="append",
+        required=True,
+        help="native session id (sess_*); repeatable, paired with --scope",
+    )
+    db_export.add_argument(
+        "--scope",
+        action="append",
+        required=True,
+        help="scope for the paired --session; repeatable",
+    )
+    db_export.add_argument(
+        "--request-at",
+        dest="request_at",
+        help=(
+            "window start (ISO); defaults to check-input.json request_at "
+            "in the observation directory"
+        ),
+    )
+    db_export.add_argument(
+        "--window-end",
+        dest="window_end",
+        help=(
+            "window end (ISO); rows started at or after this instant are "
+            "excluded (e.g. post-delivery scoring sessions)"
+        ),
+    )
+
+    db_delivery = sub.add_parser(
+        "db-delivery",
+        help=(
+            "observe the delivery endpoint from the durable client db "
+            "(content-hash match; read-only; never starts a host)"
+        ),
+    )
+    db_delivery.add_argument("--evidence", required=True, help="observation directory")
+    db_delivery.add_argument("--db", required=True, help="zcode client db.sqlite path")
+    db_delivery.add_argument(
+        "--session", required=True, help="coordination session id (sess_*)"
+    )
+    db_delivery.add_argument("--request-at", dest="request_at", required=True)
+    db_delivery.add_argument("--window-end", dest="window_end", required=True)
+    db_delivery.add_argument(
+        "--run-id", dest="run_id", action="append", default=[],
+        help=(
+            "research run directory id this delivery belongs to "
+            "(repeatable); required when the marker names no run id — "
+            "presentations of other runs in the same coordination "
+            "session must not be mistaken for this run's delivery"
+        ),
+    )
+    db_delivery.add_argument(
+        "--marker",
+        help="delivery marker file name; defaults to check-input.json value",
+    )
     return parser
 
 
@@ -3693,10 +4683,16 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_run(args)
     if args.command == "sweep":
         return _cmd_sweep(args)
+    if args.command == "account-claude":
+        return _cmd_account_claude(args)
     if args.command == "check":
         return _cmd_check(args)
     if args.command == "status":
         return _cmd_status(args)
+    if args.command == "db-export":
+        return _cmd_db_export(args)
+    if args.command == "db-delivery":
+        return _cmd_db_delivery(args)
     parser.error(f"unknown command {args.command}")
     return 2
 

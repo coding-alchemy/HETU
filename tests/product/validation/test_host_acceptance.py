@@ -8,15 +8,23 @@ S1–S6/R2–R3 come from the stage-01 review findings (2026-09-08).
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
 
 SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "host_acceptance.py"
+REPO_ROOT = SCRIPT_PATH.parents[1]
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "fixtures" / "host_acceptance"
-B04_EXPECTED_OUTPUT_TOKENS = 33_319
-B04_EXPECTED_TOOL_CALLS = 46
-B04_EXPECTED_CACHE_READ = 1_279_616
+# 07.6：最小合成夹具（synthetic-verifier-usage.jsonl）替代真实 B04 历史回放。
+# 预期值人工可复算：4 行、2 个 message_id（各重复 2 行→去重计 1 次），
+# output=200+300=500；tool unique=tool_synth_01/02=2；cache_read=500+700=1200；
+# input（exclusive，不含缓存）=1000+2000=3000；cache_write=0。
+SYN_EXPECTED_OUTPUT_TOKENS = 500
+SYN_EXPECTED_TOOL_CALLS = 2
+SYN_EXPECTED_CACHE_READ = 1_200
 
 
 def load_module() -> dict:
@@ -569,20 +577,21 @@ def test_s6_mixed_clock_bases_stay_uncomputed():
 
 
 # ---------------------------------------------------------------------------
-# B04 replay against the audit-recorded totals
+# 07.6: closeout-verifier replay against a minimal synthetic fixture
+# （真实 B04 历史回放已提炼为合成夹具；预期值人工可复算，不再绑定本机会话）
 
 
-def test_replay_b04_verifier_copy_matches_audited_totals():
+def test_replay_synthetic_verifier_copy_matches_hand_computed_totals():
     summarize = load_module()["summarize_usage"]
     to_events = load_module()["events_from_closeout_verifier_usage"]
-    source = FIXTURE_DIR / "b04-verifier-usage-events.jsonl"
-    events = to_events(source, case="B04")
-    assert len(events) == 83
+    source = FIXTURE_DIR / "synthetic-verifier-usage.jsonl"
+    events = to_events(source, case="SYN")
+    assert len(events) == 4
     result = summarize(events, expected_scopes={"review"})
-    assert result["output_tokens"] == B04_EXPECTED_OUTPUT_TOKENS
-    assert result["tool_calls"]["unique_ids"] == B04_EXPECTED_TOOL_CALLS
+    assert result["output_tokens"] == SYN_EXPECTED_OUTPUT_TOKENS
+    assert result["tool_calls"]["unique_ids"] == SYN_EXPECTED_TOOL_CALLS
     assert result["input_includes_cache"] is False
-    assert result["cached_input_read_tokens"] == B04_EXPECTED_CACHE_READ
+    assert result["cached_input_read_tokens"] == SYN_EXPECTED_CACHE_READ
     assert result["cached_input_write_tokens"] == 0
     assert result["input_tokens_basis"] == "exclusive"
 
@@ -756,6 +765,124 @@ def test_sc_corrupt_complete_line_is_recorded_as_collection_gap(tmp_path):
     module["_observe_claude_process"](out, _FakeProcess([1]), sessions)
     gaps = module["load_collection_gaps"](out)
     assert any(gap["type"] == "corrupt_line" for gap in gaps)
+
+
+def _claude_tool_line(message_id, tool_ids, usage, model="glm-5.3"):
+    return json.dumps({
+        "message": {
+            "id": message_id,
+            "model": model,
+            "usage": usage,
+            "content": [
+                {"type": "tool_use", "id": tid, "name": "Bash", "input": {}}
+                for tid in tool_ids
+            ],
+        },
+    })
+
+
+def test_sc_message_split_across_lines_with_same_usage_counts_once(tmp_path):
+    """One message duplicated into several transcript lines (content-block
+    copies) must stay single-counted, and tool calls count by actual
+    tool_use id — independent of the message/line count (SP1 deviation
+    review, 2026-09-17)."""
+    module = load_module()
+    out = tmp_path / "out"
+    out.mkdir()
+    usage = {
+        "input_tokens": 1000,
+        "output_tokens": 200,
+        "cache_read_input_tokens": 800,
+        "cache_creation_input_tokens": 0,
+    }
+    state: dict = {"identity": None, "offset": 0, "generation": 0}
+    transcript = Path("sess-x.jsonl")
+    # message m1 split across 3 lines, each carrying the same usage and the
+    # same two tool_use blocks; m2 is a single-line follow-up, no tools
+    for raw in (
+        _claude_tool_line("m1", ["tool_a", "tool_b"], usage),
+        _claude_tool_line("m1", ["tool_a", "tool_b"], usage),
+        _claude_tool_line("m1", ["tool_a", "tool_b"], usage),
+        _claude_tool_line("m2", [], {
+            "input_tokens": 10, "output_tokens": 2,
+            "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0,
+        }),
+    ):
+        module["_consume_claude_line"](
+            out, raw, transcript, state, scope="review")
+    events, _ = module["load_events"](out / "usage-events.jsonl")
+    assert len(events) == 4  # one event per line; dedup happens at summary
+    result = module["summarize_usage"](events, expected_scopes={"review"})
+    assert result["scopes"]["review"]["events"] == 2
+    assert result["input_tokens"] == 1000 + 10
+    assert result["output_tokens"] == 200 + 2
+    assert result["cached_input_read_tokens"] == 800
+    # tools count by tool_use id: m1's two blocks appear on three lines each
+    assert result["tool_calls"]["unique_ids"] == 2
+    assert result["tool_calls"]["task_unique_ids"] == 2
+    assert not result["gaps"]
+
+
+def test_sc_conflicting_usage_for_same_message_id_is_a_gap(tmp_path):
+    module = load_module()
+    out = tmp_path / "out"
+    out.mkdir()
+    state: dict = {"identity": None, "offset": 0, "generation": 0}
+    transcript = Path("sess-y.jsonl")
+    module["_consume_claude_line"](
+        out, _claude_transcript_line("m1"), transcript, state, scope="review")
+    conflicting = json.dumps({
+        "message": {
+            "id": "m1",
+            "model": "glm-5.3",
+            "usage": {"input_tokens": 999, "output_tokens": 1},
+        },
+    })
+    module["_consume_claude_line"](
+        out, conflicting, transcript, state, scope="review")
+    events, _ = module["load_events"](out / "usage-events.jsonl")
+    result = module["summarize_usage"](events, expected_scopes={"review"})
+    assert any(
+        gap["type"] == "usage_conflict" for gap in result["gaps"]
+    )
+    # the conflicting identity is excluded from totals, never silently kept
+    assert result["input_tokens"] is None
+
+
+def test_sc_account_claude_ingests_finished_transcript_once(tmp_path):
+    module = load_module()
+    transcript = tmp_path / "sess-z.jsonl"
+    transcript.write_text(
+        _claude_tool_line(
+            "m1", ["tool_a"],
+            {"input_tokens": 5, "output_tokens": 1,
+             "cache_read_input_tokens": 3, "cache_creation_input_tokens": 0},
+        ) + "\n"
+        + _claude_transcript_line("m2") + "\n",
+        encoding="utf-8",
+    )
+    # an unfinished trailing line is an explicit collection gap, not a loss
+    transcript.write_text(transcript.read_text(encoding="utf-8") + '{"trun', encoding="utf-8")
+    out = tmp_path / "out"
+    out.mkdir()
+
+    class Args:
+        evidence = str(out)
+        session = None
+        scope = "review"
+
+    Args.transcript = str(transcript)
+    assert module["_cmd_account_claude"](Args()) == 0
+    events, _ = module["load_events"](out / "usage-events.jsonl")
+    result = module["summarize_usage"](events, expected_scopes={"review"})
+    assert result["scopes"]["review"]["events"] == 2
+    assert result["tool_calls"]["unique_ids"] == 1
+    gaps = module["load_collection_gaps"](out)
+    assert any(gap["type"] == "unconsumed_tail" for gap in gaps)
+    marker = json.loads((out / "claude-ingest.json").read_text(encoding="utf-8"))
+    assert marker["ingests"][0]["scope"] == "review"
+    # re-ingesting the same transcript is refused (no double-append)
+    assert module["_cmd_account_claude"](Args()) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1465,6 +1592,664 @@ def test_rf_leaked_scope_observed_but_undeclared_fails(tmp_path):
     code, payload = _run_check(tmp_path, events, meta, evidence_name="ev-leak")
     assert code == 1
     assert any("correction" in failure for failure in payload["failures"])
+
+
+# ---------------------------------------------------------------------------
+# DB-E: zcode durable metering export (db.sqlite model_usage/tool_usage)
+
+MODEL_USAGE_DDL = """
+CREATE TABLE model_usage(
+    logical_request_id TEXT, session_id TEXT, turn_id TEXT, model_id TEXT,
+    input_tokens INTEGER, output_tokens INTEGER,
+    cache_read_input_tokens INTEGER, cache_creation_input_tokens INTEGER,
+    tool_call_count INTEGER, started_at INTEGER, completed_at INTEGER)
+"""
+TOOL_USAGE_DDL = """
+CREATE TABLE tool_usage(
+    session_id TEXT, turn_id TEXT, tool_call_id TEXT, tool_name TEXT,
+    started_at INTEGER)
+"""
+MESSAGE_DDL = """
+CREATE TABLE message(
+    id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER,
+    time_updated INTEGER, data TEXT)
+"""
+PART_DDL = """
+CREATE TABLE part(
+    id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
+    time_created INTEGER, time_updated INTEGER, data TEXT)
+"""
+
+
+def _make_zcode_db(tmp_path, *, rows, tool_rows=(), drop_tool_table=False,
+                   message_rows=(), part_rows=()):
+    db = tmp_path / "db.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute(MODEL_USAGE_DDL)
+    if not drop_tool_table:
+        conn.execute(TOOL_USAGE_DDL)
+        conn.executemany("INSERT INTO tool_usage VALUES (?,?,?,?,?)", tool_rows)
+    conn.executemany(
+        "INSERT INTO model_usage VALUES (?,?,?,?,?,?,?,?,?,?,?)", rows
+    )
+    conn.execute(MESSAGE_DDL)
+    conn.execute(PART_DDL)
+    conn.executemany(
+        "INSERT INTO message VALUES (?,?,?,?,?)", message_rows
+    )
+    conn.executemany(
+        "INSERT INTO part VALUES (?,?,?,?,?,?)", part_rows
+    )
+    conn.commit()
+    conn.close()
+    return db
+
+
+def _db_row(session="sess_x", turn="turn_1", request="req_1", model="GLM-Test",
+            inp=100, out=7, cache_read=40, cache_write=0, tool_count=0,
+            started=1_789_359_700_000, completed=1_789_359_701_000):
+    return (request, session, turn, model, inp, out, cache_read, cache_write,
+            tool_count, started, completed)
+
+
+def test_db_export_maps_rows_to_whitelisted_events(tmp_path):
+    module = load_module()
+    request_at_ms = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    rows = [
+        _db_row(request="req_old", started=request_at_ms - 60_000),
+        _db_row(request="req_1", tool_count=1,
+                started=request_at_ms + 1_000),
+        _db_row(request="req_2", turn="turn_2", tool_count=2, inp=200, out=14,
+                started=request_at_ms + 2_000),
+    ]
+    tool_rows = [
+        ("sess_x", "turn_1", "call_a1", "Skill", request_at_ms + 1_900),
+        ("sess_x", "turn_2", "call_b1", "Read", request_at_ms + 2_900),
+        ("sess_x", "turn_2", "call_b2", "Agent", request_at_ms + 2_950),
+    ]
+    db = _make_zcode_db(tmp_path, rows=rows, tool_rows=tool_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    code = module["main"]([
+        "db-export", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ])
+    assert code == 0
+    events = [
+        json.loads(line)
+        for line in (evidence / "usage-events.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert [event["message_id"] for event in events] == ["req_1", "req_2"]
+    first = events[0]
+    assert first["source"] == "zcode-db"
+    assert first["session_id"] == "sess_x"
+    assert first["segment_id"] == "db"
+    assert first["scope"] == "research"
+    assert first["kind"] == "incremental"
+    assert first["input_tokens"] == 100
+    assert first["output_tokens"] == 7
+    assert first["cached_input_read"] == 40
+    assert first["cached_input_write"] == 0
+    assert first["input_includes_cache"] is True
+    assert first["model"] == "GLM-Test"
+    assert first["tool_calls"] == [{"id": "call_a1", "name": "Skill"}]
+    second = events[1]
+    assert second["tool_calls"] == [
+        {"id": "call_b1", "name": "Read"},
+        {"id": "call_b2", "name": "Agent", "wrapper": True},
+    ]
+    assert first["started_at"].endswith("+00:00")
+    # provenance for auditability
+    provenance = json.loads(
+        (evidence / "db-export.json").read_text(encoding="utf-8")
+    )
+    assert provenance["sessions"]["research"]["sess_x"]["rows"] == 2
+    assert provenance["db"] == str(db)
+
+
+def test_db_export_schema_drift_fails_closed(tmp_path, capsys):
+    module = load_module()
+    db = _make_zcode_db(tmp_path, rows=[_db_row()], drop_tool_table=True)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    code = module["main"]([
+        "db-export", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ])
+    assert code == 1
+    assert "unsupported" in capsys.readouterr().err
+    assert not (evidence / "usage-events.jsonl").exists()
+
+
+def test_db_export_missing_column_fails_closed(tmp_path, capsys):
+    module = load_module()
+    db = tmp_path / "db.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE model_usage(logical_request_id TEXT, session_id TEXT)"
+    )
+    conn.commit()
+    conn.close()
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    code = module["main"]([
+        "db-export", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ])
+    assert code == 1
+    assert "unsupported" in capsys.readouterr().err
+    assert not (evidence / "usage-events.jsonl").exists()
+
+
+def test_db_export_zero_rows_is_a_gap_not_silence(tmp_path, capsys):
+    module = load_module()
+    db = _make_zcode_db(tmp_path, rows=[_db_row(session="other")])
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    code = module["main"]([
+        "db-export", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ])
+    assert code == 1
+    assert "no model_usage rows" in capsys.readouterr().err
+    assert not (evidence / "usage-events.jsonl").exists()
+
+
+def test_db_export_window_end_excludes_late_rows(tmp_path, capsys):
+    module = load_module()
+    request_at_ms = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    rows = [
+        _db_row(request="req_in", started=request_at_ms + 1_000),
+        _db_row(request="req_late", started=request_at_ms + 3_600_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    code = module["main"]([
+        "db-export", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+        "--window-end", "2026-09-14T00:30:00Z",
+    ])
+    assert code == 0
+    events = [
+        json.loads(line)
+        for line in (evidence / "usage-events.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+    ]
+    assert [event["message_id"] for event in events] == ["req_in"]
+
+
+def test_db_export_events_pass_usage_summarizer(tmp_path):
+    module = load_module()
+    request_at_ms = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    db = _make_zcode_db(
+        tmp_path,
+        rows=[_db_row(started=request_at_ms + 1_000)],
+        tool_rows=[("sess_x", "turn_1", "call_a1", "Skill",
+                    request_at_ms + 1_900)],
+    )
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    assert module["main"]([
+        "db-export", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ]) == 0
+    events, diagnostics = module["load_events"](
+        evidence / "usage-events.jsonl"
+    )
+    result = module["summarize_usage"](
+        events, expected_scopes={"research"}
+    )
+    assert diagnostics["truncated_lines"] == 0
+    assert result["complete"] is True
+    assert result["input_tokens"] == 100
+    assert result["output_tokens"] == 7
+
+
+# ---------------------------------------------------------------------------
+# DB-D: durable delivery observation (sweep-equivalent via client db)
+
+
+def _msg_row(mid, session="sess_x", created_ms=0, updated_ms=None,
+             role="assistant", visibility="visible", completed_ms=None):
+    data = {
+        "role": role,
+        "finish": "stop",
+        "semantics": {"origin": "agent_runtime",
+                      "kind": "assistant_response" if role == "assistant"
+                      else "background_notification",
+                      "uiVisibility": visibility},
+    }
+    if completed_ms is not None:
+        data["time"] = {"created": created_ms, "completed": completed_ms}
+    return (mid, session, created_ms,
+            updated_ms if updated_ms is not None else created_ms,
+            json.dumps(data, ensure_ascii=False))
+
+
+def _text_part(pid, mid, session, text, created_ms=0, end_ms=None):
+    payload = {"type": "text", "text": text}
+    if end_ms is not None:
+        payload["time"] = {"start": created_ms, "end": end_ms}
+    return (pid, mid, session, created_ms,
+            max(created_ms, end_ms if end_ms is not None else created_ms),
+            json.dumps(payload, ensure_ascii=False))
+
+
+def _run_db_delivery(module, db, evidence, *extra,
+                     window_end="2026-09-14T01:00:00Z"):
+    return module["main"]([
+        "db-delivery", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x",
+        "--request-at", "2026-09-14T00:00:00Z",
+        "--window-end", window_end, *extra,
+    ])
+
+
+RUN_ID_THIS = "宝钢股份-600019.SH-standard-20260914T170930+0800"
+RUN_ID_OTHER = "长光华芯-688048.SH-standard-20260914T122620+0800"
+
+
+def test_db_delivery_selects_presentation_not_scoring_dispatch(tmp_path):
+    """端点必须是用户可见最终报告呈现，不能误选锁后评分派发回合。
+
+    场景（P1 复现）：窗口内最后完成回合是评分派发（finish=tool-calls、
+    Agent 调用），真正的交付是最终报告呈现文本；运行回顾中远处出现的
+    "初稿"字样不得误判为草稿。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    rows = [
+        _db_row(request="req_work", started=t0 + 1_000, completed=t0 + 5_000),
+        # 评分派发回合在窗口最后完成——旧方法会误选它
+        _db_row(request="req_score", started=t0 + 50_000,
+                completed=t0 + 60_000),
+    ]
+    tool_rows = [
+        ("sess_x", "turn_1", "call_agent", "Agent", t0 + 55_000),
+    ]
+    message_rows = [
+        _msg_row("msg_draft", created_ms=t0 + 10_000),
+        _msg_row("msg_final", created_ms=t0 + 30_000,
+                 updated_ms=t0 + 35_100, completed_ms=t0 + 35_100),
+    ]
+    part_rows = [
+        _text_part("p_draft", "msg_draft", "sess_x",
+                   "报告路径 report.md（此即最终报告，十二章完整）；W10 置\"待核验\"，"
+                   "报告以\"待独立核对\"状态交付，定稿（初稿）时间…", t0 + 10_000),
+        _text_part("p_final", "msg_final", "sess_x",
+                   "验收完成。最终报告（即本次运行的正式最终报告）："
+                   f"[report.md](/research/{RUN_ID_THIS}/report.md)\n\n"
+                   + "（运行回顾：" + "过程与核对明细逐段展开。" * 40
+                   + "初稿经核验修正后定稿，过程见记录。）",
+                   t0 + 30_000, end_ms=t0 + 35_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=rows, tool_rows=tool_rows,
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 运行 run_id / 研究目录：`{RUN_ID_THIS}`\n",
+        encoding="utf-8",
+    )
+    assert _run_db_delivery(module, db, evidence) == 0
+    observation = json.loads(
+        (evidence / "delivery-observation.json").read_text(encoding="utf-8")
+    )
+    assert observation["source"] == "independently-observed"
+    assert observation["session_id"] == "sess_x"
+    assert observation["delivery_request_id"] == "msg_final"
+    assert observation["delivered_at_epoch"] == (t0 + 35_100) / 1000
+    basis = json.loads(
+        (evidence / "delivery-observation-basis.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert basis["method"] == (
+        "user-visible assistant final-report presentation (durable db)"
+    )
+    assert basis["delivery_message_id"] == "msg_final"
+    assert basis["excluded_presentations"]["draft"] == 1
+
+
+def test_db_delivery_excludes_other_run_presentations_in_batch(tmp_path):
+    """批内协调会话中他样本的最终呈现（S6 窗口含 S5 交付）不得充当
+    本运行的交付端点；marker 无运行 id 时用 --run-id 限定。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    message_rows = [
+        _msg_row("msg_other_final", created_ms=t0 + 10_000),
+        _msg_row("msg_this_final", created_ms=t0 + 50_000,
+                 updated_ms=t0 + 55_400, completed_ms=t0 + 55_400),
+    ]
+    part_rows = [
+        _text_part("p_other", "msg_other_final", "sess_x",
+                   "研究定稿。最终报告："
+                   f"/research/{RUN_ID_OTHER}/report.md（已修正定稿）",
+                   t0 + 10_000),
+        _text_part("p_this", "msg_this_final", "sess_x",
+                   "研究定稿。最终报告："
+                   f"/research/{RUN_ID_THIS}/report.md（已修正定稿）",
+                   t0 + 50_000, end_ms=t0 + 55_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=[_db_row(request="req_1")],
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    # marker 不含运行 id（S6 实况），运行身份由 --run-id 提供
+    (evidence / "delivery-message.md").write_text(
+        "# 交付确认（协调者）：研究上下文已定稿交付，详见研究目录。\n",
+        encoding="utf-8")
+    assert _run_db_delivery(module, db, evidence,
+                            "--run-id", RUN_ID_THIS) == 0
+    observation = json.loads(
+        (evidence / "delivery-observation.json").read_text(encoding="utf-8")
+    )
+    assert observation["delivery_request_id"] == "msg_this_final"
+    assert observation["delivered_at_epoch"] == (t0 + 55_400) / 1000
+    basis = json.loads(
+        (evidence / "delivery-observation-basis.json").read_text(
+            encoding="utf-8")
+    )
+    assert basis["excluded_presentations"]["other_run"] == 1
+
+
+def test_db_delivery_without_run_identity_fails_closed(tmp_path, capsys):
+    """marker 与 --run-id 均无运行 id 时拒绝猜测（fail-closed）。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    message_rows = [_msg_row("msg_final", created_ms=t0 + 30_000)]
+    part_rows = [
+        _text_part("p_final", "msg_final", "sess_x",
+                   "最终报告：/research/some-run/report.md（已定稿）",
+                   t0 + 30_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=[_db_row(request="req_1")],
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text("# 交付\n", encoding="utf-8")
+    code = _run_db_delivery(module, db, evidence)
+    assert code == 1
+    assert "cannot be scoped" in capsys.readouterr().err
+    assert not (evidence / "delivery-observation.json").exists()
+
+
+def test_db_delivery_user_request_with_markers_is_not_a_presentation(
+        tmp_path, capsys):
+    """问题 1 复现：普通用户请求包含"最终报告"与 report.md 时不得被选为
+    交付呈现；只有该候选时 fail-closed。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    message_rows = [
+        _msg_row("msg_user_req", created_ms=t0 + 10_000, role="user",
+                 visibility="visible"),
+    ]
+    part_rows = [
+        _text_part("p_user_req", "msg_user_req", "sess_x",
+                   "请把最终报告发我：/research/" + RUN_ID_THIS
+                   + "/report.md",
+                   t0 + 10_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=[_db_row(request="req_1")],
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    code = _run_db_delivery(module, db, evidence)
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "no user-visible assistant final-report presentation" in err
+    assert not (evidence / "delivery-observation.json").exists()
+
+
+def test_db_delivery_hidden_task_notification_is_not_a_presentation(
+        tmp_path, capsys):
+    """问题 1 复现（S6 实况）：role=user 且 uiVisibility=hidden 的
+    task-notification 子任务通知不是对用户的正式呈现；只有该候选时
+    fail-closed 并保留缺口。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    notification = (
+        "<task-notification>\n<task-id>agent_x</task-id>\n"
+        "<status>completed</status>\n<result># 研究 — 已定稿交付\n\n"
+        "| 报告路径 | 同目录 report.md（此即最终报告，已修正定稿）|\n"
+        f"| 研究目录 | /research/{RUN_ID_THIS}/ |\n</result>\n"
+        "</task-notification>"
+    )
+    message_rows = [
+        _msg_row("msg_notify", created_ms=t0 + 10_000, role="user",
+                 visibility="hidden"),
+    ]
+    part_rows = [
+        _text_part("p_notify", "msg_notify", "sess_x", notification,
+                   t0 + 10_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=[_db_row(request="req_1")],
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    code = _run_db_delivery(module, db, evidence)
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "no user-visible assistant final-report presentation" in err
+    assert "not user-visible" in err
+    assert not (evidence / "delivery-observation.json").exists()
+
+
+def test_db_delivery_uses_completion_time_not_creation(tmp_path):
+    """问题 2 复现（P1 实况）：消息创建于 16:05:21.199、文本结束
+    16:07:19.250、消息完成 16:07:19.296——端点须取有证据支持的完成
+    时刻（取文本结束与消息完成的较大者），不得用创建时间冒充。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    created = t0 + 30_000
+    text_end = t0 + 158_250
+    updated = t0 + 158_296
+    message_rows = [
+        _msg_row("msg_final", created_ms=created, updated_ms=updated,
+                 completed_ms=updated),
+    ]
+    part_rows = [
+        _text_part("p_final", "msg_final", "sess_x",
+                   "验收完成。最终报告（即本次运行的正式最终报告）："
+                   f"[report.md](/research/{RUN_ID_THIS}/report.md)",
+                   created, end_ms=text_end),
+    ]
+    db = _make_zcode_db(tmp_path, rows=[_db_row(request="req_1")],
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    assert _run_db_delivery(module, db, evidence) == 0
+    observation = json.loads(
+        (evidence / "delivery-observation.json").read_text(encoding="utf-8")
+    )
+    assert observation["delivered_at_epoch"] == updated / 1000
+    basis = json.loads(
+        (evidence / "delivery-observation-basis.json").read_text(
+            encoding="utf-8")
+    )
+    assert basis["time_caliber"] == (
+        "message completion (max of matched text part end and "
+        "client-recorded message time.completed)"
+    )
+
+
+def test_db_delivery_presentation_without_any_time_fails_closed(
+        tmp_path, capsys):
+    """时间字段缺失（文本无 time 块且 time_created==time_update 无推进）
+    时不能证明完成时刻，fail-closed 保留缺口。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    message_rows = [_msg_row("msg_final", created_ms=t0 + 30_000)]
+    part_rows = [
+        _text_part("p_final", "msg_final", "sess_x",
+                   "最终报告：/research/" + RUN_ID_THIS + "/report.md",
+                   t0 + 30_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=[_db_row(request="req_1")],
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    code = _run_db_delivery(module, db, evidence)
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "completion time is not provable" in err
+    assert not (evidence / "delivery-observation.json").exists()
+
+
+def test_db_delivery_streaming_update_without_completion_fails_closed(
+        tmp_path, capsys):
+    """仅流式推进的 time_updated 不是完成证据：消息为用户可见 assistant、
+    正文含本次最终报告定位，但文本无 time.end、消息 data 无 time.completed
+    时，完成时刻不可证，fail-closed 保留缺口（不得以更新时刻冒充完成
+    时刻）。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    message_rows = [
+        _msg_row("msg_stream", created_ms=t0 + 30_000,
+                 updated_ms=t0 + 45_000),
+    ]
+    part_rows = [
+        _text_part("p_stream", "msg_stream", "sess_x",
+                   "最终报告：/research/" + RUN_ID_THIS
+                   + "/report.md（已定稿）",
+                   t0 + 30_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=[_db_row(request="req_1")],
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    code = _run_db_delivery(module, db, evidence)
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "completion time is not provable" in err
+    assert not (evidence / "delivery-observation.json").exists()
+
+
+def test_db_delivery_draft_markers_before_claim_are_excluded(
+        tmp_path, capsys):
+    """问题 3 复现：交付声明**前方**的草稿标记（"这是初稿，待独立核对；
+    最终报告路径……"）同样判草稿；只有该候选时 fail-closed。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    message_rows = [_msg_row("msg_draft_before", created_ms=t0 + 10_000)]
+    part_rows = [
+        _text_part("p_draft_before", "msg_draft_before", "sess_x",
+                   "这是初稿，待独立核对；最终报告路径 "
+                   f"/research/{RUN_ID_THIS}/report.md（此即最终报告）",
+                   t0 + 10_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=[_db_row(request="req_1")],
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    code = _run_db_delivery(module, db, evidence)
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "draft" in err
+    assert not (evidence / "delivery-observation.json").exists()
+
+
+def test_db_delivery_endpoint_stays_at_presentation_when_calls_continue(
+        tmp_path):
+    """交付呈现之后仍有锁定/评分调用时，端点保持在呈现事件（S6 复现：
+    定稿呈现后还有 marker/锁定/评分派发与 sleep 轮询回合）。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    rows = [
+        _db_row(request="req_score", started=t0 + 40_000,
+                completed=t0 + 90_000),
+        _db_row(request="req_sleep", started=t0 + 90_000,
+                completed=t0 + 120_000),
+    ]
+    tool_rows = [
+        ("sess_x", "turn_1", "call_lock", "Bash", t0 + 45_000),
+        ("sess_x", "turn_1", "call_score", "Agent", t0 + 50_000),
+        ("sess_x", "turn_1", "call_poll", "Bash", t0 + 95_000),
+    ]
+    message_rows = [_msg_row("msg_final", created_ms=t0 + 30_000,
+                             updated_ms=t0 + 34_100,
+                             completed_ms=t0 + 34_100)]
+    part_rows = [
+        _text_part("p_final", "msg_final", "sess_x",
+                   "研究定稿。报告路径 同目录 report.md（此即最终报告，"
+                   f"已按独立核验意见修正定稿）；目录 `{RUN_ID_THIS}`",
+                   t0 + 30_000, end_ms=t0 + 34_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=rows, tool_rows=tool_rows,
+                        message_rows=message_rows, part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    assert _run_db_delivery(module, db, evidence) == 0
+    observation = json.loads(
+        (evidence / "delivery-observation.json").read_text(encoding="utf-8")
+    )
+    assert observation["delivery_request_id"] == "msg_final"
+    assert observation["delivered_at_epoch"] == (t0 + 34_100) / 1000
+
+
+def test_db_delivery_only_draft_presentation_fails_closed(tmp_path, capsys):
+    """只有核验前初稿呈现（claim 附近带待核验/初稿标记）时 fail-closed。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    rows = [_db_row(request="req_1", started=t0 + 1_000, completed=t0 + 5_000)]
+    message_rows = [_msg_row("msg_draft", created_ms=t0 + 10_000)]
+    part_rows = [
+        _text_part("p_draft", "msg_draft", "sess_x",
+                   "研究完成 — 最终交付。报告路径 report.md（此即最终报告）；"
+                   "定稿（初稿）时间…W10 置\"待核验\"", t0 + 10_000),
+    ]
+    db = _make_zcode_db(tmp_path, rows=rows, message_rows=message_rows,
+                        part_rows=part_rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    (evidence / "delivery-message.md").write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    code = _run_db_delivery(module, db, evidence)
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "final-report presentation" in err
+    assert "draft" in err
+    assert not (evidence / "delivery-observation.json").exists()
+
+
+def test_db_delivery_no_presentation_in_window_fails_closed(tmp_path, capsys):
+    """窗口内没有任何最终报告呈现文本时 fail-closed。"""
+    module = load_module()
+    t0 = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+    db = _make_zcode_db(tmp_path, rows=[_db_row(started=t0 - 60_000)])
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    marker = evidence / "delivery-message.md"
+    marker.write_text(
+        f"# 交付\n\n- 研究目录：`{RUN_ID_THIS}`\n", encoding="utf-8")
+    os.utime(marker, (t0 / 1000 + 1, t0 / 1000 + 1))
+    code = _run_db_delivery(module, db, evidence)
+    assert code == 1
+    assert "final-report presentation" in capsys.readouterr().err
+    assert not (evidence / "delivery-observation.json").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -2428,6 +3213,443 @@ def test_wh_file_and_agent_watchers_share_native_session_ids(
     assert covered[0] == ids["research"]
 
 
+# ---------------------------------------------------------------------------
+# 07.1a: 统一验收入口 —— check 永不调用 run；--host-evidence 在目录缺失、
+# 记录缺失或缺宿主/授权/必要工具记录时非零退出并打印“未执行／不支持”，
+# skip 绝不算通过；check.sh 默认完全离线。
+
+
+def test_071a_check_never_invokes_run(tmp_path):
+    module = load_module()
+
+    def _boom(*args: object, **kwargs: object) -> None:
+        raise AssertionError("check path must never call run")
+
+    # runpy 每次返回独立命名空间，直接替换即可，无需恢复
+    module["_cmd_run"] = _boom
+    evidence = tmp_path / "ev"
+    _write_evidence(evidence, [_good_research_event()], _base_meta())
+    _isolation_evidence(evidence)
+    code = module["main"](
+        ["check", "--evidence", str(evidence), "--output", str(tmp_path / "r1.json")]
+    )
+    assert code == 0
+    _write_host_support(evidence, _host_support_record())
+    code = module["main"](
+        ["check", "--host-evidence", str(evidence),
+         "--output", str(tmp_path / "r2.json")]
+    )
+    assert code == 0
+
+
+def _host_support_record(**overrides: object) -> dict:
+    record = {
+        "host": "zcode",
+        "authorization": {
+            "status": "granted",
+            "granted_by": "local-acceptance",
+            "granted_at": "2026-09-12T00:00:00+08:00",
+        },
+        "required_tools": ["Read", "Bash"],
+        "recorded_at": "2026-09-12T00:00:00+08:00",
+    }
+    record.update(overrides)
+    return record
+
+
+def _write_host_support(directory: Path, record: dict) -> Path:
+    path = directory / "host-support-record.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    return path
+
+
+def test_071a_host_evidence_missing_directory_is_unexecuted(tmp_path, capsys):
+    module = load_module()
+    code = module["main"](["check", "--host-evidence", str(tmp_path / "absent")])
+    assert code != 0
+    assert "未执行" in capsys.readouterr().err
+
+
+def test_071a_host_evidence_without_support_record_is_unsupported(tmp_path, capsys):
+    module = load_module()
+    evidence = tmp_path / "ev"
+    _write_evidence(evidence, [_good_research_event()], _base_meta())
+    _isolation_evidence(evidence)
+    result_path = tmp_path / "result.json"
+    code = module["main"](
+        ["check", "--host-evidence", str(evidence), "--output", str(result_path)]
+    )
+    assert code != 0
+    assert "不支持" in capsys.readouterr().err
+    # 缺记录同样写入新的检查结果，不把 skip 算通过
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["passed"] is False
+    assert any("host-support-record" in failure for failure in payload["failures"])
+    assert "未执行" in payload["conclusion"] or "不支持" in payload["conclusion"]
+
+
+@pytest.mark.parametrize(
+    ("remove", "override"),
+    [
+        ("host", None),
+        ("authorization", None),
+        ("required_tools", None),
+        ("host", "not-a-host"),
+        ("authorization", {"status": "denied"}),
+        ("authorization", ""),
+        ("required_tools", []),
+        ("required_tools", ["Read", 7]),
+        (None, {"api_key": "sk-should-not-be-here"}),
+    ],
+    ids=(
+        "missing-host",
+        "missing-authorization",
+        "missing-required-tools",
+        "unknown-host",
+        "authorization-denied",
+        "authorization-empty",
+        "required-tools-empty",
+        "required-tools-non-string",
+        "non-whitelisted-field",
+    ),
+)
+def test_071a_host_evidence_invalid_support_record_is_unsupported(
+    tmp_path, capsys, remove, override
+):
+    module = load_module()
+    evidence = tmp_path / "ev"
+    _write_evidence(evidence, [_good_research_event()], _base_meta())
+    _isolation_evidence(evidence)
+    record = _host_support_record()
+    if remove:
+        record.pop(remove)
+    if override is not None:
+        record.update(override if isinstance(override, dict) else {remove: override})
+    _write_host_support(evidence, record)
+    code = module["main"](
+        ["check", "--host-evidence", str(evidence),
+         "--output", str(tmp_path / "result.json")]
+    )
+    assert code != 0
+    assert "不支持" in capsys.readouterr().err
+
+
+def test_071a_host_evidence_with_support_record_passes_the_same_check(tmp_path):
+    module = load_module()
+    evidence = tmp_path / "ev"
+    _write_evidence(evidence, [_good_research_event()], _base_meta())
+    _isolation_evidence(evidence)
+    _write_host_support(evidence, _host_support_record())
+    result_path = tmp_path / "result.json"
+    code = module["main"](
+        ["check", "--host-evidence", str(evidence), "--output", str(result_path)]
+    )
+    assert code == 0
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["passed"] is True
+    assert payload["baseline_qualification"] == "not_applicable_probe"
+    assert payload["host_support"]["host"] == "zcode"
+    assert payload["host_support"]["required_tools"] == ["Read", "Bash"]
+    # 显式证据检查通过也不提升为宿主认证
+    assert "not a baseline qualification" in payload["conclusion"]
+
+
+def test_071a_host_evidence_default_output_is_create_only(tmp_path):
+    module = load_module()
+    evidence = tmp_path / "ev"
+    _write_evidence(evidence, [_good_research_event()], _base_meta())
+    _isolation_evidence(evidence)
+    _write_host_support(evidence, _host_support_record())
+    code = module["main"](["check", "--host-evidence", str(evidence)])
+    assert code == 0
+    default_output = evidence / "host-support-check.json"
+    assert default_output.exists()
+    # create-only：重跑必须失败而不是覆盖既有结果
+    code = module["main"](["check", "--host-evidence", str(evidence)])
+    assert code != 0
+
+
+def test_071a_check_requires_exactly_one_evidence_selector(tmp_path, capsys):
+    module = load_module()
+    assert module["main"](["check"]) == 2
+    evidence = tmp_path / "ev"
+    _write_evidence(evidence, [_good_research_event()], _base_meta())
+    _isolation_evidence(evidence)
+    code = module["main"]([
+        "check", "--evidence", str(evidence), "--host-evidence", str(evidence),
+        "--output", str(tmp_path / "result.json"),
+    ])
+    assert code == 2
+    assert capsys.readouterr().err
+
+
+def _write_logging_stub(tmp_path: Path, log: Path) -> Path:
+    import sys
+
+    stub = tmp_path / "stub-python"
+    stub.write_text(
+        "#!/usr/bin/env bash\n"
+        f'printf \'%s\\n\' "$@" >> "{log}"\n'
+        f'case "$*" in *host_acceptance.py*) exec "{sys.executable}" "$@" ;; '
+        "*) exit 0 ;; esac\n",
+        encoding="utf-8",
+    )
+    stub.chmod(0o755)
+    return stub
+
+
+def _run_check_sh(env_extra: dict) -> subprocess.CompletedProcess:
+    import os
+
+    env = dict(os.environ)
+    env.pop("HETU_HOST_EVIDENCE", None)
+    env.update(env_extra)
+    return subprocess.run(
+        ["bash", str(REPO_ROOT / "scripts" / "check.sh")],
+        cwd=REPO_ROOT, env=env, capture_output=True, text=True, check=False,
+    )
+
+
+# ---------------------------------------------------------------------------
+# 07.1a 修复：run 在授权与能力验证通过后写出 host-support-record.json，
+# 使 check --host-evidence 对 run 输出目录的成功路径可达；无授权引用或
+# 无已验证能力事实时不写记录（fail-closed），resume 不覆盖既有记录。
+
+
+def test_071a_run_writes_host_support_record_after_verified_facts(
+    tmp_path, monkeypatch
+):
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"
+    (home / ".zcode" / "cli" / "rollout").mkdir(parents=True)
+    transcript = tmp_path / "model-io-sess_r.jsonl"
+    _wh_records(transcript, 2)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    case = _write_probe_case(tmp_path, probe_mode=True)
+    out = tmp_path / "obs"
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(case), "--output", str(out),
+        "--watch-agent", f"file:{transcript}=research",
+        "--request-at", _iso(base), "--delivered-at", _iso(base + 30),
+        "--authorization-ref", "grant-ref-with-fake-secret:sk-test-123",
+    ])
+    assert code == 0
+    record_path = out / "host-support-record.json"
+    assert record_path.exists()
+    # 记录在 case 执行前写出：即使执行失败/中断也应已存在，此处用其先序性
+    # 与 case-record 同批 create-only 落盘来证明
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["host"] == "zcode"
+    assert record["authorization"] == "granted"
+    # required_tools 只来自本次已验证的事实，不凭空缺充
+    assert record["required_tools"] == [
+        "zcode-rollout-observation", "zcode-transcript-snapshot",
+    ]
+    assert set(record) == {"host", "authorization", "required_tools", "recorded_at"}
+    # 授权引用名与任何凭据内容都不得入库
+    assert "sk-test-123" not in json.dumps(record)
+
+
+def test_071a_run_record_closes_host_evidence_check_end_to_end(
+    tmp_path, monkeypatch
+):
+    import os
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"
+    home.mkdir()
+    _fake_agent(home, "a1", "sess_r", [
+        _rollout_record("rq-r1", base + 10, base + 20),
+    ], base=base)
+    _fake_rollout(home, "sess_coord", [
+        _rollout_record("rq-c1", base + 10, base + 30),
+    ])
+    control = tmp_path / "control.jsonl"
+    control.write_text('{"op": "finalize"}\n', encoding="utf-8")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    case = _wg_case(tmp_path, "HS-E2E", probe=True)
+    out = tmp_path / "obs"
+    out.mkdir()
+    _isolation_evidence(
+        out, task_identity="zcode-task:HS-E2E", covered_sessions=["sess_r"]
+    )
+    (out / "isolation-evidence.json").replace(out / "evidence.json")
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(case), "--output", str(out),
+        "--watch-agent", "agent_a1=research",
+        "--watch-agent", "sess_coord=coordination",
+        "--delivery-sweep", "--watch-timeout", "30",
+        "--watch-control", str(control),
+        "--request-at", _iso(base),
+        "--isolation-evidence", "evidence.json",
+        "--authorization-ref", "local-grant-ref",
+    ])
+    assert code == 0
+    record = json.loads(
+        (out / "host-support-record.json").read_text(encoding="utf-8"))
+    assert record["authorization"] == "granted"
+
+    coordination = home / ".zcode" / "cli" / "rollout" / "model-io-sess_coord.jsonl"
+    now = time_module.time()
+    with open(coordination, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(_rollout_record("rq-delivery", now, now + 5)) + "\n")
+    marker = out / "delivery-message.md"
+    marker.write_text("delivery", encoding="utf-8")
+    os.utime(marker, (now, now))
+    assert module["main"]([
+        "sweep", "--evidence", str(out), "--session", "sess_coord",
+    ]) == 0
+
+    result_path = tmp_path / "result.json"
+    code = module["main"]([
+        "check", "--host-evidence", str(out), "--output", str(result_path),
+    ])
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert code == 0, payload["failures"]
+    assert payload["passed"] is True
+    assert payload["baseline_qualification"] == "not_applicable_probe"
+    assert payload["host_support"]["host"] == "zcode"
+
+
+def test_071a_run_without_authorization_ref_writes_no_record(tmp_path):
+    module, code, out = _run_zcode_stage(tmp_path, probe_mode=True)
+    assert code == 0
+    # 未验证授权：不伪造记录，check --host-evidence 仍 fail-closed
+    assert not (out / "host-support-record.json").exists()
+    result_path = tmp_path / "result.json"
+    check_code = module["main"]([
+        "check", "--host-evidence", str(out), "--output", str(result_path),
+    ])
+    assert check_code != 0
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["passed"] is False
+    assert any("host-support-record" in f for f in payload["failures"])
+
+
+def test_071a_run_with_ref_but_no_capability_fact_writes_no_record(
+    tmp_path, monkeypatch, capsys
+):
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"  # 空 home：rollout 缺失，无任何已验证事实
+    home.mkdir()
+    missing_snapshot = tmp_path / "absent.jsonl"
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    case = _write_probe_case(tmp_path, probe_mode=True)
+    out = tmp_path / "obs"
+    module = load_module()
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(case), "--output", str(out),
+        "--watch-agent", f"file:{missing_snapshot}=research",
+        "--request-at", _iso(base), "--delivered-at", _iso(base + 30),
+        "--authorization-ref", "local-grant-ref",
+    ])
+    assert code == 0
+    assert not (out / "host-support-record.json").exists()
+    assert "NOT written" in capsys.readouterr().err
+
+
+def test_071a_run_refuses_preexisting_support_record(tmp_path):
+    module = load_module()
+    out = tmp_path / "obs"
+    out.mkdir()
+    record_path = out / "host-support-record.json"
+    record_path.write_text('{"keep": true}', encoding="utf-8")
+    case = _write_probe_case(tmp_path, probe_mode=True)
+    code = module["main"]([
+        "run", "--host", "zcode", "--case", str(case), "--output", str(out),
+        "--watch-agent", "whatever=research",
+        "--authorization-ref", "local-grant-ref",
+    ])
+    assert code == 2
+    assert json.loads(record_path.read_text(encoding="utf-8")) == {"keep": True}
+
+
+def test_071a_run_resume_keeps_existing_support_record(tmp_path, monkeypatch):
+    import time as time_module
+
+    base = time_module.time() - 60
+    home = tmp_path / "home"
+    (home / ".zcode" / "cli" / "rollout").mkdir(parents=True)
+    transcript = tmp_path / "model-io-sess_r.jsonl"
+    _wh_records(transcript, 2)
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setattr(time_module, "sleep", lambda *_: None)
+    case = _write_probe_case(tmp_path, probe_mode=True)
+    out = tmp_path / "obs"
+    module = load_module()
+    args = [
+        "run", "--host", "zcode", "--case", str(case), "--output", str(out),
+        "--watch-agent", f"file:{transcript}=research",
+        "--request-at", _iso(base), "--delivered-at", _iso(base + 30),
+        "--authorization-ref", "local-grant-ref",
+    ]
+    assert module["main"](args) == 0
+    record_path = out / "host-support-record.json"
+    snapshot = record_path.read_bytes()
+    assert module["main"]([
+        "run", "--host", "zcode", "--case", str(case), "--output", str(out),
+        "--resume", "--watch-timeout", "5",
+    ]) == 0
+    assert record_path.read_bytes() == snapshot
+
+
+def test_071a_check_sh_default_never_invokes_host_acceptance(tmp_path):
+    log = tmp_path / "calls.log"
+    log.touch()
+    stub = _write_logging_stub(tmp_path, log)
+    completed = _run_check_sh({"HETU_PYTHON": str(stub), "HETU_CLI": str(stub)})
+    assert completed.returncode == 0, completed.stderr
+    logged = log.read_text(encoding="utf-8")
+    assert "host_acceptance" not in logged
+    # 未设置环境变量时输出不得暗示真实认证已完成
+    assert "HETU_HOST_EVIDENCE" not in completed.stdout
+    assert "认证" not in completed.stdout
+
+
+def test_071a_check_sh_with_env_runs_explicit_check_and_fails_closed(tmp_path):
+    log = tmp_path / "calls.log"
+    log.touch()
+    stub = _write_logging_stub(tmp_path, log)
+    missing = tmp_path / "absent-evidence"
+    completed = _run_check_sh({
+        "HETU_PYTHON": str(stub),
+        "HETU_CLI": str(stub),
+        "HETU_HOST_EVIDENCE": str(missing),
+    })
+    assert completed.returncode != 0
+    logged = log.read_text(encoding="utf-8")
+    assert "--host-evidence" in logged
+    assert str(missing) in logged
+    assert "未执行" in completed.stderr
+
+
+def test_071a_check_sh_with_env_passes_on_selected_evidence(tmp_path):
+    log = tmp_path / "calls.log"
+    log.touch()
+    stub = _write_logging_stub(tmp_path, log)
+    evidence = tmp_path / "ev"
+    _write_evidence(evidence, [_good_research_event()], _base_meta())
+    _isolation_evidence(evidence)
+    _write_host_support(evidence, _host_support_record())
+    completed = _run_check_sh({
+        "HETU_PYTHON": str(stub),
+        "HETU_CLI": str(stub),
+        "HETU_HOST_EVIDENCE": str(evidence),
+    })
+    assert completed.returncode == 0, completed.stderr
+    assert (evidence / "host-support-check.json").exists()
+
+
 def test_wh_status_reports_state_events_and_gaps(tmp_path, monkeypatch, capsys):
     import os
     import time as time_module
@@ -2462,3 +3684,76 @@ def test_wh_status_reports_state_events_and_gaps(tmp_path, monkeypatch, capsys):
     assert "watch-state saved_at" in out
     assert "watcher research" in out
     assert "gaps: 1" in out
+
+
+# ---------------------------------------------------------------------------
+# 阶段 07 B1：预期取消（宿主终态 stopped）的显式声明与 gap 抑制
+
+
+def test_stage03_expect_terminal_parses_declared_native_ids():
+    module = load_module()
+    parse = module["_parse_expect_terminal"]
+    assert parse(["agent_a=stopped", "agent_b=cancelled"]) == {
+        "agent_a": "stopped",
+        "agent_b": "cancelled",
+    }
+    assert parse(None) == {}
+    assert parse([]) == {}
+
+
+def test_stage03_expect_terminal_rejects_malformed_specs():
+    module = load_module()
+    parse = module["_parse_expect_terminal"]
+    for bad in ("agent_a", "=stopped", "agent_a="):
+        with pytest.raises(ValueError):
+            parse([bad])
+
+
+def test_stage03_declared_stopped_terminal_produces_no_gap():
+    module = load_module()
+    gap = module["_terminal_status_gap"]
+    expected = {"agent_c": "stopped"}
+    assert (
+        gap(
+            native_id="agent_c",
+            scope="research",
+            session_id="sess_x",
+            generation=1,
+            status="stopped",
+            expected_terminal=expected,
+        )
+        is None
+    )
+
+
+def test_stage03_undeclared_non_completed_terminal_still_records_gap():
+    module = load_module()
+    gap = module["_terminal_status_gap"]
+    recorded = gap(
+        native_id="agent_z",
+        scope="research",
+        session_id="sess_y",
+        generation=2,
+        status="stopped",
+        expected_terminal={"agent_c": "stopped"},
+    )
+    assert recorded is not None
+    assert recorded["type"] == "agent_terminal_status"
+    assert recorded["session_id"] == "sess_y"
+    assert "stopped" in recorded["detail"]
+
+
+def test_stage03_completed_terminal_never_records_gap():
+    module = load_module()
+    gap = module["_terminal_status_gap"]
+    assert (
+        gap(
+            native_id="agent_c",
+            scope="research",
+            session_id="sess_x",
+            generation=0,
+            status="completed",
+            expected_terminal={},
+        )
+        is None
+    )
