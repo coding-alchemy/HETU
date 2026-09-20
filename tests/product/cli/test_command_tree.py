@@ -110,14 +110,21 @@ def test_recursive_command_tree_has_exact_leaf_set() -> None:
 
     Uses Typer/Click's registered command objects (via ``get_command`` and
     ``Group.commands``), not help-text substring inference, so a forbidden
-    leaf cannot hide behind prose. The set is the closed post-C3 surface:
-    two ``skill`` leaves and two ``helper`` leaves.
+    leaf cannot hide behind prose. The set is the closed post-C3 surface plus
+    the Phase-5 first-half maintenance and archive commands: six ``skill``
+    leaves and four ``helper`` leaves.
     """
     expected = {
         "skill validate",
         "skill install",
+        "skill status",
+        "skill diagnose",
+        "skill rollback",
+        "skill uninstall",
         "helper time-boundary",
         "helper authorization-check",
+        "helper archive-inspect",
+        "helper archive-export",
     }
     root = get_command(app)
     actual = _collect_leaf_paths(root)

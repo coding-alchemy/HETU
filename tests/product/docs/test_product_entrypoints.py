@@ -53,11 +53,16 @@ def test_current_entrypoints_share_the_same_subject_contract() -> None:
     assert "自由文本会被拒绝" not in current_documents["usage"]
 
 
-def test_current_usage_does_not_describe_v01_uninstall_as_current() -> None:
+def test_current_usage_describes_the_supported_uninstall_boundary() -> None:
     usage = _read(USAGE)
     assert "V0.1 不提供自动卸载" not in usage
-    assert "当前安装器不提供自动卸载命令" in usage
-    assert "安装器不会删除非受管文件" in usage
+    assert "当前安装器不提供自动卸载命令" not in usage
+    # Stage 05 provides uninstall; the doc must point at the managed command
+    # and keep the non-managed-deletion boundary explicit (line wrapping in
+    # the Markdown source is normalized before matching).
+    flattened = " ".join(usage.split())
+    assert "skill uninstall --host <host> --yes" in flattened
+    assert "安装器不会删除 非受管文件" in flattened
 
 
 # Patterns that flag a forbidden *current* normal command. Each is anchored to
