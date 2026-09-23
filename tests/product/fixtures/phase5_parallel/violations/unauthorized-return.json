@@ -1,0 +1,20 @@
+{
+  "task_id": "task-p06-unauth",
+  "question": "合成集团客户集中度独立核查",
+  "authorized_scope": [
+    "公开行情与公告摘要（只读输入）"
+  ],
+  "dispatched_at": "2025-12-20T10:00:00+08:00",
+  "returned": true,
+  "result": {
+    "任务标识": "task-p06-unauth",
+    "查询摘要": "检索合成集团公开公告中的前五大客户摘要（合成）",
+    "事实": "公开公告摘要仅见行业性描述，未见客户名录（合成）",
+    "产物与失败登记": "artifacts/normalized/w2/task-p06-unauth-attempt1.json"
+  },
+  "internal_only_fields_returned": [
+    "synth-crm-account-list（内部客户名录，未授权）",
+    "synth-credit-2025-detail（内部授信明细，未授权）"
+  ],
+  "note": "合成受控材料：返回携带分派授权之外的内部字段（fixture，主体虚构，无事实内容）"
+}

@@ -81,7 +81,7 @@ description: Analyze one China A-share stock with public or explicitly authorize
   恢复问题触发，读取规则本身不构成旧资料访问。
 - 工具、来源、授权或恢复出现问题时读取[恢复规则](references/recovery.md)。
 - 进入 W10 综合报告或提前核对交付边界时读取[报告指引](references/report-guidance.md)。
-- 发现宿主能力、选择文件位置或调用可选助手时读取[宿主工具边界](references/host-tools.md)。
+- 发现宿主能力、选择文件位置、调用可选助手或开始读取年报等长材料时读取[宿主工具边界](references/host-tools.md)。
 
 研究工作区在 W1 唯一核验后使用
 `.hetu/research/<证券简称>-<证券代码>-<请求深度>-<任务时间>/` 固定目录，包含 `checkpoint.md`、
@@ -113,3 +113,7 @@ description: Analyze one China A-share stock with public or explicitly authorize
 报告明确区分请求深度、实际深度、信息完整性、分析有效性和技术完成状态，保留有效引用、反证、
 未知、冲突与缺口；
 W10 两轮自检完成、发布阻断问题为零且必要回访重新定稿后才能交付。
+定稿前独立核对、修正及直接影响复查完成且报告满足交付条件后，立即向用户呈现最终报告或其
+可打开的定位；验收场景的版本锁定与锁后评分在交付呈现之后按既有流程进行，评分结果不是
+用户收到最终报告的前置条件。批量运行的协调层同样逐样本留下用户可见的交付呈现，内部任务
+通知或交付标记文件不能代替。
