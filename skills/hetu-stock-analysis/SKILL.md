@@ -76,6 +76,9 @@ description: Analyze one China A-share stock with public or explicitly authorize
 - W4 形成或修订公司经营模型时读取[公司经营模型规则](references/company-models.md)；W5–W7 选择或复核方法时消费 W4 最新模型画像，需要核对方法与模型边界时按需回读。
 - 需要确定性处理或来源失败分类时读取[工具目录](references/tool-catalog.md)；各深度在工作包选择具体来源时读取[来源合同](references/source-contracts.md)的适用条目。工具目录的六个确定性脚本已 `adopted`，另有阶段 04 机械助手 `source_adapter.py`（只解析显式保存输入，是否调用与是否采用由 Agent 决定）。
 - 当 Agent 已按来源合同明确选择 `cninfo-announcement-index`、`sina-financial-statements` 或 `tencent-quote-snapshot` 时，可读取工具目录并调用可选的 `source_fetch.py`；脚本失败只形成局部缺口，不改变 Agent 的来源选择、采用或后续判断责任。
+- 确定复用开关后、决定旧任务材料使用与对应获取策略前，读取[恢复规则](references/recovery.md)
+  的复用细则与关闭边界条款；默认 `true` 与显式 `false` 均须先读取对应规则，不依赖工具失败或
+  恢复问题触发，读取规则本身不构成旧资料访问。
 - 工具、来源、授权或恢复出现问题时读取[恢复规则](references/recovery.md)。
 - 进入 W10 综合报告或提前核对交付边界时读取[报告指引](references/report-guidance.md)。
 - 发现宿主能力、选择文件位置或调用可选助手时读取[宿主工具边界](references/host-tools.md)。

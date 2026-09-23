@@ -47,6 +47,14 @@ canonical Skill（`skills/hetu-stock-analysis/`）拥有完整的研究执行链
 只读 legacy 兼容面已退场：`hetu_stock/{workflow,models,report,config}`、
 `legacy_cli.py` 及其专属测试与 Jinja 依赖已删除，只能通过 Git 历史追溯。
 
+五期中期（`zn_p5m`，功能复评通过、十二条要求在已批准范围内闭环）在 Skill 规则与产物检查器中补入两项能力：
+任务控制与恢复（自然语言取消、迟到返回不采用、调整只动剩余工作、提前交付仍过两轮自检、
+跨会话候选筛选与恢复）和资料复用与产物追溯（`reuse_previous_task_data` 默认开启、适用旧
+材料复制为本地副本并记五键 provenance、关闭复用不读旧资料）。行为证据限定于已验证的
+ZCode 桌面端协调方式（M2 上下文隔离另经 Flash 机制内容级补证），不外推为四宿主认证；
+三批历史用量已对账、预算与停止规则经离线验证关闭，均未部署在线监控（见
+`specs/2026-09-21-stock-analysis-workflow-v1-phase-5-middle-implementation.md`）。
+
 ### 授权失败语义
 
 authorized 模式下，当某个授权来源失败时，只阻塞与该来源相关的数据，其余已授权

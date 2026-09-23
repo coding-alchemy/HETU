@@ -1,0 +1,7 @@
+{
+  "source_run_id": "合成公司-000001.SZ-standard-20250601T100000+0800",
+  "source_task_id": "task-synth-2025-0001",
+  "source_artifact": "artifacts/raw/cninfo/annual-report--cninfo--2025-1231--0a1b2c3d.pdf",
+  "original_source": "cninfo 2025 年年度报告（fixture 合成定位）",
+  "note": "phase5_execution fixture: identity of the source task a copied artifact came from; content is fictional"
+}
