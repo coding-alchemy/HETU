@@ -50,6 +50,14 @@ canonical Skill 拥有完整研究执行链路：请求理解、研究规划、�
 
 `hetu-stock` 不是 Agent，也不是 LLM 客户端，不生成研究事实，也不校验研究语义。
 
+五期中期（功能复评通过，十二条要求在已批准范围内闭环）为 Skill 增加两项研究行为能力：任务控制与恢复（取消后
+不再发起新调用、迟到返回未经恢复不采用、调整只动剩余工作、提前交付仍完成两轮自检、跨会话
+恢复先筛选候选再按需读取检查点）和资料复用与产物追溯（`reuse_previous_task_data` 默认开启，
+适用旧材料复制为本地副本并记录来源任务、原文件、原始来源与两个时间；显式关闭时不查找、
+不读取旧任务资料，获取失败不回退）。这些行为的已有证据来自受控合成样本、ZCode 桌面端
+协调会话与 Flash 机制内容级补证；未覆盖的宿主组合不宣称支持，详见
+`specs/2026-09-21-stock-analysis-workflow-v1-phase-5-middle-implementation.md`。
+
 ## 当前支持范围
 
 Skill 只支持单只 A 股，即 `subject.type=security`。`industry`、`sector`、
