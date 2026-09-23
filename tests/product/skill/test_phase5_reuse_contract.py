@@ -240,7 +240,10 @@ def test_reuse_false_boundary_passed_to_subtasks_and_independent_review() -> Non
     'independent context' is not automatically old-material-free."""
     section = _context_section()
 
-    assert "实际开关与对应禁用边界必须传递给参与本次研究的临时研究子任务和交付前独立核验" in section
+    assert (
+        "实际开关与对应禁用边界必须传递给参与本次研究的临时研究子任务、"
+        "正式子任务（含首次派发与重派）和交付前独立核验" in section
+    )
     assert "只要求主任务遵守不算完成传递" in section
     assert "不自动视为无旧资料" in section
 
