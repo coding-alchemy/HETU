@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "hosts": {
+    "codex": {
+      "name": "Codex CLI",
+      "description": "OpenAI Codex 命令行宿主；Skill 经其技能发现目录安装，在交互会话或 exec 子命令中加载。",
+      "trigger": "宿主按其 Skill 发现机制在适用请求时加载本包；适用边界以 SKILL.md 为准。"
+    },
+    "claude": {
+      "name": "Claude Code",
+      "description": "Claude Code 命令行宿主；Skill 经其技能发现目录安装，在交互会话或打印模式中加载。",
+      "trigger": "宿主按其 Skill 发现机制在适用请求时加载本包；适用边界以 SKILL.md 为准。"
+    },
+    "opencode": {
+      "name": "OpenCode",
+      "description": "OpenCode 命令行宿主；Skill 经其技能发现目录安装，在 TUI 或 run 子命令中加载。",
+      "trigger": "宿主按其 Skill 发现机制在适用请求时加载本包；适用边界以 SKILL.md 为准。"
+    },
+    "zcode": {
+      "name": "ZCode",
+      "description": "ZCode 客户端宿主；Skill 经其技能发现目录安装，由交互协调者在其研究上下文中加载。",
+      "trigger": "宿主按其 Skill 发现机制在适用请求时加载本包；适用边界以 SKILL.md 为准。"
+    }
+  }
+}

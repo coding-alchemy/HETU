@@ -12,32 +12,50 @@ Phase-3 C3 and are retrievable only through Git history.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from typing import Any
 
 import typer
 
 from hetu_stock.helpers import app as helper_app
 from hetu_stock.skill import (
+    ExtensionError,
     HostTarget,
     SkillValidationError,
+    context_for_host,
     default_user_skill_root,
+    disable_extension,
     display_path,
+    enable_extension,
+    inspect_extension,
     inspect_installation,
+    install_extension,
     install_skill,
+    list_extensions,
     list_skill_backups,
     managed_env_owned,
     plan_uninstall,
     read_combo_association,
     rollback_skill,
+    uninstall_extension,
     uninstall_skill,
+    update_extension,
     update_host_ref,
+    validate_extension,
     validate_skill_package,
     verify_skill_manifest,
 )
 
 app = typer.Typer(invoke_without_command=True)
 skill_app = typer.Typer(no_args_is_help=True)
+extension_app = typer.Typer(
+    no_args_is_help=True,
+    help="管理本地第三方工作包扩展（x.*）。校验、安装、按宿主自然语言启用、更新与卸载；"
+    "这些管理命令不会启动股票分析。",
+)
 app.add_typer(skill_app, name="skill")
+skill_app.add_typer(extension_app, name="extension")
 app.add_typer(helper_app, name="helper")
 
 
@@ -292,3 +310,165 @@ def skill_uninstall(
 
     typer.echo("Uninstalled. Research, archived reports, authorization configuration,")
     typer.echo("other hosts, and unmanaged files were left untouched.")
+
+
+# ---------------------------------------------------------------------------
+# `skill extension` — Phase-5 stage 06 local third-party work-package extension
+# management.  These commands are deterministic management only: they never
+# start stock research, and they never print package bodies.
+# ---------------------------------------------------------------------------
+
+
+def _emit(payload: dict[str, Any], as_json: bool) -> None:
+    if as_json:
+        typer.echo(json.dumps(payload, ensure_ascii=False, default=str, sort_keys=True))
+        return
+    for key in sorted(payload):
+        value = payload[key]
+        if isinstance(value, (dict, list)):
+            typer.echo(f"{key}: {json.dumps(value, ensure_ascii=False, default=str)}")
+        else:
+            typer.echo(f"{key}: {value}")
+
+
+def _extension_fail(exc: Exception, as_json: bool) -> None:
+    if as_json:
+        _emit({"completed": False, "error": str(exc)}, as_json=True)
+    else:
+        typer.echo(f"extension management failed: {exc}", err=True)
+    raise typer.Exit(code=1) from exc
+
+
+@extension_app.command("list")
+def extension_list(as_json: bool = typer.Option(False, "--json")) -> None:
+    """List installed extensions and per-host enablement bindings."""
+    try:
+        payload = list_extensions()
+    except ExtensionError as exc:
+        _extension_fail(exc, as_json)
+    _emit(payload, as_json)
+
+
+@extension_app.command("inspect")
+def extension_inspect(
+    extension_id: str = typer.Option(..., "--id"),
+    version: str | None = typer.Option(None, "--version"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Show registry metadata for an extension (never the package body)."""
+    try:
+        payload = inspect_extension(extension_id, version=version)
+    except ExtensionError as exc:
+        _extension_fail(exc, as_json)
+    _emit(payload, as_json)
+
+
+@extension_app.command("validate")
+def extension_validate(
+    source: Path = typer.Option(..., "--source"),  # noqa: B008
+    as_json: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Validate a candidate extension package without installing it."""
+    try:
+        checked = validate_extension(source)
+    except (ExtensionError, OSError) as exc:
+        _extension_fail(exc, as_json)
+    payload = {"valid": True, "completed": True, **checked}
+    _emit(payload, as_json)
+
+
+@extension_app.command("install")
+def extension_install(
+    source: Path = typer.Option(..., "--source"),  # noqa: B008
+    as_json: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Install an extension version after validation.  Versions are read-only."""
+    try:
+        checked = install_extension(source)
+    except (ExtensionError, OSError) as exc:
+        _extension_fail(exc, as_json)
+    _emit({"completed": True, **checked}, as_json)
+
+
+@extension_app.command("update")
+def extension_update(
+    source: Path = typer.Option(..., "--source"),  # noqa: B008
+    as_json: bool = typer.Option(False, "--json"),  # noqa: B008
+) -> None:
+    """Publish a newer version; existing bindings keep their old version."""
+    try:
+        changes = update_extension(source)
+    except (ExtensionError, OSError) as exc:
+        _extension_fail(exc, as_json)
+    _emit({"completed": True, **changes}, as_json)
+
+
+@extension_app.command("enable")
+def extension_enable(
+    host: HostTarget = typer.Option(...),  # noqa: B008
+    extension_id: str = typer.Option(..., "--id"),
+    version: str | None = typer.Option(None, "--version"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Bind an extension to a host (defaults to the newest version)."""
+    try:
+        binding = enable_extension(host, extension_id, version=version)
+    except ExtensionError as exc:
+        _extension_fail(exc, as_json)
+    _emit(
+        {
+            "completed": True,
+            "host": host,
+            "id": extension_id,
+            "version": binding["version"],
+        },
+        as_json,
+    )
+
+
+@extension_app.command("disable")
+def extension_disable(
+    host: HostTarget = typer.Option(...),  # noqa: B008
+    extension_id: str = typer.Option(..., "--id"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Remove a host's binding for an extension."""
+    try:
+        binding = disable_extension(host, extension_id)
+    except ExtensionError as exc:
+        _extension_fail(exc, as_json)
+    _emit(
+        {
+            "completed": True,
+            "host": host,
+            "id": extension_id,
+            "version": binding["version"],
+        },
+        as_json,
+    )
+
+
+@extension_app.command("uninstall")
+def extension_uninstall(
+    extension_id: str = typer.Option(..., "--id"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Remove all versions; refused while any host binding remains."""
+    try:
+        uninstall_extension(extension_id)
+    except ExtensionError as exc:
+        _extension_fail(exc, as_json)
+    _emit({"completed": True, "id": extension_id}, as_json)
+
+
+@extension_app.command("context")
+def extension_context(
+    host: HostTarget = typer.Option(...),  # noqa: B008
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """Show what a host's next research session would see from extensions."""
+    try:
+        payload = context_for_host(host)
+    except ExtensionError as exc:
+        _extension_fail(exc, as_json)
+    _emit({**payload, "completed": True}, as_json)
