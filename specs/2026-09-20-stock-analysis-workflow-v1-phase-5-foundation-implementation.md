@@ -6,7 +6,8 @@
 > 创建日期：2026-09-20
 > 批准日期：2026-09-20（拆分方案 v1.5）
 > 评审通过日期：2026-09-20
-> 长期需求：[V1 长期需求](stock-analysis-workflow-v1-requirements.md) §8.3 第 4–5 项、§8.4
+> 长期需求：main `f0fcb66` 的 V1 长期需求 §8.3 第 4–5 项、§8.4；zn_dev 的
+> [长期需求](stock-analysis-workflow-v1-requirements.md)保留后半章节结构，前半状态由其概述引用本文
 > 后半去向：[五期后半需求去向](2026-09-20-stock-analysis-workflow-v1-phase-5-remainder-requirements.md)
 > 适用范围：F1 安装、更新、诊断、回滚、卸载；F2 旧成果只读检查、安全导出
 > 文档性质：前半需求、实现边界与验收结果的统一权威文档；替代迁移期的前半需求、前半设计与
@@ -26,10 +27,12 @@
    （`schema_version: 3`）目录只读检查并在授权内安全导出；原值与未知字段保留、源字节不变、
    不启动旧执行器。
 
-命令树恰好 10 个叶子（6 个 skill＋4 个 helper：time-boundary、authorization-check、
+main 前半交付面的命令树恰好 10 个叶子（6 个 skill＋4 个 helper：time-boundary、authorization-check、
 archive-inspect、archive-export），无扩展命令、旧执行入口或验收命令。main 既有研究行为
 （W0–W10、独立核验、同任务恢复、安全与质量要求）保持不变；canonical
-`skills/hetu-stock-analysis/` 及其 MANIFEST 保持 `main` 基点 `73f28f6` 版本，无差异。
+`skills/hetu-stock-analysis/` 及其 MANIFEST 在该前半交付面保持 `main` 基点 `73f28f6` 版本，
+无差异。上述 10 叶子与 Skill 无差异结论限定于已发布的 main 前半，不描述合并后的 zn_dev
+后半开发树；后半扩展命令和 Skill 增量仍按后半去向保留。
 
 ## 1. 需求与边界
 
@@ -224,5 +227,6 @@ MANIFEST、Skill 校验均通过）。逐轮细节（测试名、复现输入、
 - 秘密过滤仅覆盖已支持的 JSON 秘密字段；未做内容级任意秘密扫描，导出不宣称无损全量导出。
 - 本分支不依赖源工作区、真实安装副本或 `.hetu/` 原始记录即可使用与测试；原验收记录原地
   保留，本文档只携带脱敏摘要。
-- 本文档不代表整个五期拆分完成：代码整合与用户合并、zn_dev 同步回归尚未进行，后续按
-  备份分支保存的阶段 04/05 方案执行。
+- 前半已通过 PR #7 合入 main `f0fcb66`；2026-09-21 zn_dev 已完成该 main 的整合内容、
+  重复增量清理及直接影响回归。95 路径核对确认前半修复与后半成果均保留；后半仍待独立收尾。
+  本文档只描述 main 的前半已发布面，不把 zn_dev 的后半增量计入 10 叶子或 Skill 无差异结论。

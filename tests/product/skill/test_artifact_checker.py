@@ -301,6 +301,127 @@ def test_valid_run_passes_mechanically(checker: Any, tmp_path: Path) -> None:
     assert isinstance(result["checks"], list) and result["checks"]
 
 
+# ---------------------------------------------------------------------------
+# Phase-5 stage 06.2: manifest.run.extensions records actually-loaded
+# third-party packages; entry.work_package accepts a validated ``x.*`` ID only
+# when this run explicitly records it.  The checker never scans global plugin
+# directories to mint identities.
+# ---------------------------------------------------------------------------
+
+EXTENSION_RECORD = {
+    "id": "x.demo.rules",
+    "version": "0.1.0",
+    "source": "file:///synthetic/x-demo-rules-0.1.0",
+    "summary": "演示扩展（合成）",
+    "enabled_scope": "codex",
+}
+
+EXTENSION_RAW_REL = (
+    "artifacts/raw/x-demo-rules/note--x-demo-rules--"
+    "20260912T120000+0800--a1b2c3d4.json"
+)
+
+
+def _append_extension_artifact(research: Path, manifest: dict[str, Any]) -> None:
+    target = research / EXTENSION_RAW_REL
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('{"note": "合成扩展原始资料"}\n', encoding="utf-8")
+    manifest["artifacts"].append(
+        {
+            "path": EXTENSION_RAW_REL,
+            "type": "raw",
+            "media_format": "json",
+            "work_package": "x.demo.rules",
+            "sha256": sha256_file(target),
+            "source_id": "x-demo-rules",
+            "period_or_asof": None,
+            "created_at": "2026-09-12T12:00:00+08:00",
+            "schema_version": None,
+            "inputs": [],
+            "status": "adopted",
+        }
+    )
+
+
+def test_run_extensions_and_third_party_work_package_are_accepted(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+
+    def edit(manifest: dict[str, Any]) -> None:
+        manifest["run"]["extensions"] = [dict(EXTENSION_RECORD)]
+        _append_extension_artifact(research, manifest)
+
+    _edit_json(research / "manifest.json", edit)
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert result["mechanical_status"] == "PASS", result["issues"]
+
+
+def test_third_party_work_package_requires_run_extensions_record(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+
+    def edit(manifest: dict[str, Any]) -> None:
+        _append_extension_artifact(research, manifest)
+
+    _edit_json(research / "manifest.json", edit)
+    _refresh_research_lock(checker, research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "manifest.schema" in codes, result["issues"]
+    assert any("work_package" in issue["message"] for issue in result["issues"])
+    assert result["mechanical_status"] == "FAIL"
+
+
+RUN_EXTENSIONS_MUTATIONS: dict[str, Callable[[dict[str, Any]], None]] = {
+    "run-extensions-not-list": lambda manifest: manifest["run"].__setitem__(
+        "extensions", {}
+    ),
+    "run-extensions-entry-not-object": lambda manifest: manifest["run"].__setitem__(
+        "extensions", ["x.demo.rules"]
+    ),
+    "run-extensions-extra-key": lambda manifest: manifest["run"].__setitem__(
+        "extensions", [{**EXTENSION_RECORD, "grants": ["W5"]}]
+    ),
+    "run-extensions-missing-key": lambda manifest: manifest["run"].__setitem__(
+        "extensions",
+        [
+            {
+                key: value
+                for key, value in EXTENSION_RECORD.items()
+                if key != "enabled_scope"
+            }
+        ],
+    ),
+    "run-extensions-core-id": lambda manifest: manifest["run"].__setitem__(
+        "extensions", [{**EXTENSION_RECORD, "id": "W5"}]
+    ),
+    "run-extensions-empty-version": lambda manifest: manifest["run"].__setitem__(
+        "extensions", [{**EXTENSION_RECORD, "version": ""}]
+    ),
+}
+
+
+@pytest.mark.parametrize("mutation", sorted(RUN_EXTENSIONS_MUTATIONS))
+def test_run_extensions_schema_is_closed(
+    checker: Any, tmp_path: Path, mutation: str
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _edit_json(research / "manifest.json", RUN_EXTENSIONS_MUTATIONS[mutation])
+
+    result = checker.check_run(research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "manifest.schema" in codes, f"{mutation}: {result['issues']}"
+    assert result["mechanical_status"] == "FAIL"
+
+
 @pytest.mark.parametrize("depth", ("quick", "standard", "deep"))
 def test_canonical_run_directory_accepts_all_depths(
     checker: Any, tmp_path: Path, depth: str

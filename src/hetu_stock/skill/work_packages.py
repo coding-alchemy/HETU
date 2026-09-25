@@ -47,7 +47,7 @@ REQUIRED_SECTIONS = (
 class WorkPackageSpec:
     id: str
     name: str
-    kind: Literal["core", "official-extension"]
+    kind: Literal["core", "official-extension", "third-party"]
     required_when: str
     start_requires: tuple[str, ...]
     finalize_requires: tuple[str, ...]

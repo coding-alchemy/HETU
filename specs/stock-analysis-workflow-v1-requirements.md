@@ -569,6 +569,20 @@ Agent 必须识别并处理上市板块、风险警示、停复牌、新上市�
 10. Codex、Claude Code 和 OpenCode 对同一扩展执行一致的信任与安全边界；宿主专用能力不得
    形成绕过 canonical Skill 的第二套扩展机制。
 
+> 状态注记（2026-09-25，五期后半迁移批）：原第 5 组扩展管理（本节 §8.5 对应的
+> 扩展生命周期、`hetu-stock skill extension` 命令组、默认禁用、按宿主独立绑定与
+> run.extensions 加载记录）与第 6 组计量／验收工具（`scripts/host_acceptance.py`、
+> `scripts/capture_host_cli.py`、显式离线证据入口 `check --host-evidence` 与手动验收
+> workflow）的实现及行为测试，连同直接相关的第 7 组支持声明／宿主事实记录和第 8 组
+> 历史审计测试，已从固定来源 `8f9f674` 选择性迁入产品分支
+> `zn_p5t`（原 `codex/phase5-extensions-metering`，阶段 02 后更名），**已迁移，
+> 阶段 02 全面评审通过，阶段 03 固定备份与文档整合完成，评审通过、待用户合并 main**，
+> 未合入 main；
+> 原第 5–8 组编号不变。迁移不宣称任何宿主／模型组合认证通过或性能达标：完整宿主认证、
+> 性能验收、预算数值校准与 §9 各门禁仍按本文既有口径保持未闭合，详见
+> [后半需求去向](2026-09-20-stock-analysis-workflow-v1-phase-5-remainder-requirements.md)与
+> [五期扩展管理与计量工具迁移实现](2026-09-25-stock-analysis-workflow-v1-phase-5-extensions-metering-implementation.md)。
+
 ## 9. V1 验收与发布门禁
 
 ### 9.1 样本矩阵与数值门禁

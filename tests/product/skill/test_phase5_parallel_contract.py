@@ -15,17 +15,20 @@ adoption contract invariants (orchestration "汇合裁决与失败隔离",
 recovery "并行失败隔离与越权处置") and the shape assertions for the
 synthetic P03-P06 fixtures under ``tests/product/fixtures/phase5_parallel/``.
 
-Task 04.3 appends the tool-failure / deterministic-helper boundary
-clauses that already exist in the canonical references, plus the
-in-task shared-source single-first-fetch and confluence-without-redo
-optimization invariants. The historical impact-map write-back audit
-tests are kept on the source branch and its fixed snapshot; this copy
-carries no dependency on private machine evidence under ``.hetu/``.
+Task 04.3 appends the evidence write-back assertions: the stage-04
+write-back section in the stage-02 impact map (four columns, per-row
+audit with no new implementation, positive/negative case reference list
+whose test names must exist in the cited files, and the fixed stage-07
+ordered/parallel comparison contract with pending numbers), plus the
+tool-failure / deterministic-helper boundary clauses that already exist
+in the canonical references.
 """
 
 import json
 import re
 from pathlib import Path
+
+import pytest
 
 ROOT = Path("skills/hetu-stock-analysis")
 ORCHESTRATION = "references/orchestration.md"
@@ -34,6 +37,20 @@ RESULT = "references/work-package-result.md"
 RECOVERY = "references/recovery.md"
 TOOL_CATALOG = "references/tool-catalog.md"
 EVIDENCE_RULES = "references/evidence-rules.md"
+
+IMPACT_MAP = Path(".hetu/validation/phase-5/20260909-stage02-calibration/impact-map.md")
+WRITEBACK_HEADING = "## 5. 阶段 04 实现回写（2026-09-12）"
+
+# 8-B1：七项 writeback 测试审计的是这份 2026-09-09 历史 impact-map（.hetu 被
+# .gitignore 忽略，干净克隆不可得）。仅在证据完全缺失时跳过；路径存在但损坏、
+# 不可读或断言失败时仍照常失败。skip 不代表性能验收通过。
+_SKIP_IF_IMPACT_MAP_MISSING = pytest.mark.skipif(
+    not IMPACT_MAP.exists(),
+    reason=(
+        "本机缺少历史证据 .hetu/validation/phase-5/20260909-stage02-calibration/"
+        "impact-map.md；该文件是未迁移的历史审计输入，缺失跳过不代表性能验收通过"
+    ),
+)
 
 NEW_HEADING = "## 正式子任务与并行派发"
 TEMP_HEADING = "## 临时研究子问题"
@@ -441,6 +458,156 @@ def test_review_expectations_live_only_on_the_review_side() -> None:
             )
             assert "期望" not in payload, path.name
             assert "expectation" not in payload, path.name
+
+
+# ---------------------------------------------------------------------------
+# Task 04.3 — evidence write-back and stage-07 comparison preparation.
+# ---------------------------------------------------------------------------
+
+WRITEBACK_COLUMNS = ("已实现点", "预期减少动作", "短样本结果", "完整性能尚缺证据")
+
+WRITEBACK_TABLE_HEADER = "| §3 行 | 已实现点 | 预期减少动作 | 短样本结果 | 完整性能尚缺证据 |"
+
+AUDIT_ROWS = (
+    "#3取得未采用、已确认无效的失败重走",
+    "#2＋重复读取规则/能力发现",
+    "#4脚本重写",
+    "#5核验/修正上下文重建",
+    "#1串行等待",
+    "#2每轮重复上下文",
+)
+
+CONTRACT_ITEMS = (
+    "证券／发行人",
+    "深度",
+    "`as_of`",
+    "数据模式",
+    "宿主",
+    "模型",
+    "工具",
+    "授权",
+    "网络",
+    "字段口径",
+)
+
+REFERENCE_ROW_LABELS = ("#1", "#2", "#2＋规则/能力发现", "#3", "#4", "#5")
+
+CLAUSE_LABELS = (
+    "必要规则变化须回读",
+    "同名不等价材料不能误用",
+    "工具失败不报成功",
+    "未完成合理替代不标不可得",
+    "核验缺失不交付",
+)
+
+REFERENCE_PATTERN = re.compile(r"test_(phase5_\w+_contract)\.py::(test_\w+)")
+
+
+def _writeback_section() -> str:
+    text = IMPACT_MAP.read_text(encoding="utf-8")
+    return text[text.index(WRITEBACK_HEADING):]
+
+
+def _writeback_subsection(start_heading: str, end_heading: str) -> str:
+    raw = _writeback_section()
+    return raw[raw.index(start_heading):raw.index(end_heading)]
+
+
+@_SKIP_IF_IMPACT_MAP_MISSING
+def test_impact_map_writeback_is_append_only_new_section() -> None:
+    text = IMPACT_MAP.read_text(encoding="utf-8")
+
+    assert text.index("## 4. 明确不做的事") < text.index(WRITEBACK_HEADING)
+    assert _flow(_section(text, "## 4. 明确不做的事")).startswith(
+        "-不给耗时占比、节省比例、token预算或提速目标"
+    )
+    assert (
+        text.index(WRITEBACK_HEADING)
+        < text.index("### 5.1")
+        < text.index("### 5.2")
+        < text.index("### 5.3")
+        < text.index("### 5.4")
+        < text.index("### 5.5")
+    )
+
+
+@_SKIP_IF_IMPACT_MAP_MISSING
+def test_writeback_four_columns_present_and_no_unverified_benefit_claimed() -> None:
+    section = _writeback_section()
+
+    assert WRITEBACK_TABLE_HEADER in section
+    for column in WRITEBACK_COLUMNS:
+        assert column in section, column
+    assert '不写"已提速20%"，不宣称任何未经验证的收益' in _flow(section)
+    assert "本阶段不宣称提速" in _flow(section)
+    for line in section.splitlines():
+        if "已提速" in line:
+            assert "不写" in line or "不宣称" in line, line
+
+
+@_SKIP_IF_IMPACT_MAP_MISSING
+def test_writeback_audit_covers_all_six_rows_without_new_implementation() -> None:
+    audit = _flow(_writeback_subsection("### 5.1", "### 5.2"))
+
+    for row in AUDIT_ROWS:
+        assert row in audit, row
+    assert "已由03实现" in audit
+    assert "已由04实现" in audit
+    assert "已由03＋04实现" in audit
+    assert "本任务没有一项需要新增实现" in audit
+
+
+@_SKIP_IF_IMPACT_MAP_MISSING
+def test_writeback_reference_list_rows_cite_positive_and_negative_cases() -> None:
+    section = _writeback_subsection("### 5.3", "### 5.4")
+    rows = [line for line in section.splitlines() if line.startswith("| #")]
+
+    cited: dict[str, tuple[str, str]] = {}
+    for line in rows:
+        cells = [cell.strip() for cell in line.split("|")]
+        label = cells[1]
+        cited[label] = (cells[2], cells[3])
+        assert "::test_" in cells[2], label
+        assert "::test_" in cells[3], label
+
+    for label in REFERENCE_ROW_LABELS:
+        assert label in cited, label
+
+
+@_SKIP_IF_IMPACT_MAP_MISSING
+def test_writeback_reference_list_covers_brief_negative_case_clauses() -> None:
+    section = _flow(_writeback_subsection("### 5.3", "### 5.4"))
+
+    for clause in CLAUSE_LABELS:
+        assert clause in section, clause
+
+
+@_SKIP_IF_IMPACT_MAP_MISSING
+def test_writeback_reference_list_names_exist_in_their_test_files() -> None:
+    section = _writeback_subsection("### 5.3", "### 5.4")
+    referenced = REFERENCE_PATTERN.findall(section)
+    assert len(referenced) >= 12
+
+    for module, name in referenced:
+        path = Path("tests/product/skill") / f"test_{module}.py"
+        assert f"def {name}(" in path.read_text(encoding="utf-8"), f"{path}::{name}"
+
+
+@_SKIP_IF_IMPACT_MAP_MISSING
+def test_writeback_fixes_stage07_comparison_contract_with_pending_numbers() -> None:
+    raw = _writeback_subsection("### 5.4", "### 5.5")
+    contract = _flow(raw)
+
+    positions = _numbered_list_positions(raw, CONTRACT_ITEMS)
+    assert positions == sorted(positions)
+    assert '最小上下文：两侧均按"正式子任务与并行派发"的最小上下文执行' in contract
+    assert "质量要求：设计§6不变" in contract
+    assert "至少三个独立研究域的取证或分析区间真实重叠" in contract
+    assert "数值待02基线确认后沿用，现为待定" in contract
+    assert "模型、工具、授权或网络的任何两侧差异逐项写入对照记录并说明影响" in contract
+    assert "不以版本指纹判断等价" in contract
+    assert "列入07最小补验清单" in contract
+    assert "单独取得授权" in contract
 
 
 def test_tool_failure_takes_legal_alternative_or_gap_and_helpers_never_replace_agent() -> None:
