@@ -29,16 +29,10 @@ Codex、OpenCode、Claude Code 的完整研究认证仍为 `UNVERIFIED`。
 2026-09-23 补充：五期中期任务控制恢复（M1）与资料复用追溯（M2）已通过 PR #8 合入 main；
 2026-09-24 补充：五期下一批（长材料分批读取与上下文整理、正式并行与汇合、三项减少重复
 工作优化）已通过 PR #9 合入 main（`751ed53`）。
-2026-09-25 补充：后半第 5 组扩展管理与第 6 组计量／验收工具（含 `hetu-stock skill extension`
-命令组、`scripts/host_acceptance.py`、`scripts/capture_host_cli.py`、显式离线证据入口与手动
-验收 workflow），以及直接相关的第 7 组支持声明／宿主事实记录、第 8 组历史审计测试，已从
-固定来源 `8f9f674` 选择性迁入本分支，**已迁移，阶段 02 全面评审通过，阶段 03 固定备份与
-文档整合完成，评审通过、待用户合并 main**，未合入 main；
-并行收益／性能验证增量仍留源分支。本批迁移不据此扩大正式支持范围。
+本开发分支继续保留后半扩展、计量、宿主验证入口与并行收益／性能验证增量，不据此扩大正式支持范围。
 现行前半行为与安全边界见[五期前半实现](../specs/2026-09-20-stock-analysis-workflow-v1-phase-5-foundation-implementation.md)，
 中期行为与边界见[五期中期实现](../specs/2026-09-21-stock-analysis-workflow-v1-phase-5-middle-implementation.md)，
 下一批行为与边界见[五期下一批迁移实现](../specs/2026-09-24-stock-analysis-workflow-v1-phase-5-execution-implementation.md)，
-本批行为、边界与验收依据见[五期扩展管理与计量工具迁移实现](../specs/2026-09-25-stock-analysis-workflow-v1-phase-5-extensions-metering-implementation.md)，
 后半结果与缺口见[后半需求去向](../specs/2026-09-20-stock-analysis-workflow-v1-phase-5-remainder-requirements.md)。
 旧性能批次和宿主补验不自动续开。
 
