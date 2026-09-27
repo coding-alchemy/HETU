@@ -558,6 +558,10 @@ def update_extension(source: Path) -> dict[str, Any]:
         previous_version = _latest_version(entry["versions"])
         previous = entry["versions"][previous_version]
         target = _managed_version_dir(root, checked["id"], checked["version"])
+        # 同版本已登记在上方被拒，此处存在的只可能是上次更新中断留下的
+        # 未登记半成品；清掉它才能重试同版本（与 install 的处理对称）。
+        if target.exists():
+            shutil.rmtree(target)
         target.mkdir(parents=True)
         for relative in checked["files"]:
             destination = target / relative

@@ -1886,6 +1886,133 @@ def test_db_export_zero_rows_is_a_gap_not_silence(tmp_path, capsys):
     assert not (evidence / "usage-events.jsonl").exists()
 
 
+def test_db_export_null_started_at_refuses_export(tmp_path, capsys):
+    """F2：model_usage 混入 NULL started_at 行时受控拒绝完整导出。
+
+    NULL 行无法归窗，SQL 三值逻辑不得静默滤除后仍产出「完整导出」外观；
+    拒绝发生在发布前，两份导出产物均不写出。
+    """
+    module = load_module()
+    rows = [
+        _db_row(request="req_1", started=1_789_359_701_000),
+        _db_row(request="req_2", started=1_789_359_702_000),
+        _db_row(request="req_null", started=None),
+    ]
+    db = _make_zcode_db(tmp_path, rows=rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    code = module["main"]([
+        "db-export", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "model_usage" in err
+    assert "1" in err
+    assert "NULL" in err
+    assert "窗口归属不可证明" in err
+    assert not (evidence / "usage-events.jsonl").exists()
+    assert not (evidence / "db-export.json").exists()
+
+
+def test_db_export_null_tool_started_at_refuses_export(tmp_path, capsys):
+    """F2：仅 tool_usage 存在 NULL started_at 时同样拒绝完整导出。
+
+    前提：NULL 工具行除时间外其余关联合法（part 属主、callID、请求关联
+    与工具计数齐备）。对照同一输入在正常时间下导出成功且两个工具都正确
+    归属；仅把该时间置 NULL 后受控拒绝、产物零写入——拒绝只由窗口归属
+    不可证明触发，不被缺属主等其他校验错误掩盖。
+    """
+    module = load_module()
+    request_at_ms = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)
+
+    def _build(null_started: bool):
+        rows = [
+            _db_row(request="req_1", tool_count=2,
+                    started=request_at_ms + 1_000, amid="msg_1"),
+        ]
+        tool_rows = [
+            ("sess_x", "turn_1", "call_a1", "Skill", request_at_ms + 1_900),
+            ("sess_x", "turn_1", "call_null", "Read",
+             None if null_started else request_at_ms + 1_950),
+        ]
+        message_rows = [_msg_row("msg_1", created_ms=request_at_ms + 1_000)]
+        part_rows = [
+            _tool_part("p_a1", "msg_1", "sess_x", "call_a1", "Skill",
+                       request_at_ms + 1_900),
+            _tool_part("p_null", "msg_1", "sess_x", "call_null", "Read",
+                       request_at_ms + 1_950),
+        ]
+        target = tmp_path / ("null" if null_started else "ok")
+        target.mkdir()
+        return _make_zcode_db(
+            target,
+            rows=rows, tool_rows=tool_rows,
+            message_rows=message_rows, part_rows=part_rows,
+        )
+
+    # 对照：同一输入、正常时间 → 导出成功，两个工具都正确归属。
+    evidence_ok = tmp_path / "ev-ok"
+    evidence_ok.mkdir()
+    code_ok = module["main"]([
+        "db-export", "--evidence", str(evidence_ok), "--db", str(_build(False)),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ])
+    assert code_ok == 0
+    capsys.readouterr()
+    events = _read_events(evidence_ok)
+    assert [event["message_id"] for event in events] == ['["req_1",0]']
+    assert events[0]["tool_calls"] == [
+        {"id": "call_a1", "name": "Skill"},
+        {"id": "call_null", "name": "Read"},
+    ]
+
+    # 目标缺陷：仅该工具时间置 NULL → 受控拒绝、发布前零写入。
+    evidence_null = tmp_path / "ev-null"
+    evidence_null.mkdir()
+    code = module["main"]([
+        "db-export", "--evidence", str(evidence_null), "--db", str(_build(True)),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "tool_usage" in err
+    assert "NULL" in err
+    assert "窗口归属不可证明" in err
+    assert not (evidence_null / "usage-events.jsonl").exists()
+    assert not (evidence_null / "db-export.json").exists()
+
+
+def test_db_export_null_started_at_only_rows_reports_unplaceable_not_absent(
+    tmp_path, capsys
+):
+    """F2：仅有 NULL started_at 模型行时，拒绝理由必须是窗口归属不可证明。
+
+    行存在只是无法归窗，不得误报为「声明会话计量缺失／无记录」。
+    """
+    module = load_module()
+    rows = [_db_row(request="req_null", started=None)]
+    db = _make_zcode_db(tmp_path, rows=rows)
+    evidence = tmp_path / "ev"
+    evidence.mkdir()
+    code = module["main"]([
+        "db-export", "--evidence", str(evidence), "--db", str(db),
+        "--session", "sess_x", "--scope", "research",
+        "--request-at", "2026-09-14T00:00:00Z",
+    ])
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "model_usage" in err
+    assert "NULL" in err
+    assert "窗口归属不可证明" in err
+    assert "no model_usage rows" not in err
+    assert not (evidence / "usage-events.jsonl").exists()
+    assert not (evidence / "db-export.json").exists()
+
+
 def test_db_export_window_end_excludes_late_rows(tmp_path, capsys):
     module = load_module()
     request_at_ms = int(module["_iso_to_epoch"]("2026-09-14T00:00:00Z") * 1000)

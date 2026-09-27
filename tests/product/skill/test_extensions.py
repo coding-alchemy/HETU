@@ -11,6 +11,7 @@ capabilities are refused without executing anything.
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -496,6 +497,71 @@ def test_published_version_is_read_only_and_update_keeps_old(
     assert (
         registry["bindings"]["codex"]["x.demo.rules"]["version"] == "0.1.0"
     )
+
+
+def test_update_retry_after_interrupted_copy_recovers_and_keeps_old_binding(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """F1：更新在 mkdir 后、登记前中断时，同版本直接重试应可恢复。
+
+    首次更新注入一次复制失败后：登记表、旧版本文件与宿主绑定字节不变；
+    同版本重试必须成功（旧行为：残留半成品目录使重试抛 FileExistsError），
+    最终只新增候选版本，旧绑定不自动切换。
+    """
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    source = build_extension_package(tmp_path / "candidate")
+    install_extension(source)
+    enable_extension("codex", "x.demo.rules")
+
+    newer = build_extension_package(
+        tmp_path / "candidate-v2", version="0.2.0", summary="第二版规则"
+    )
+    registry_path = (
+        tmp_path / "data" / "hetu-stock" / "extensions" / "registry.json"
+    )
+    old_dir = (
+        tmp_path / "data" / "hetu-stock" / "extensions" / "x.demo.rules" / "0.1.0"
+    )
+
+    def _snapshot_old() -> dict:
+        return {
+            p.relative_to(old_dir): p.read_bytes()
+            for p in old_dir.rglob("*")
+            if p.is_file()
+        }
+
+    before_registry = registry_path.read_bytes()
+    before_old = _snapshot_old()
+
+    real_copy2 = shutil.copy2
+
+    def failing_copy2(src, dst, *, follow_symlinks=True):
+        if "0.2.0" in str(dst):
+            raise OSError("注入：复制新版本中途失败")
+        return real_copy2(src, dst, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(shutil, "copy2", failing_copy2)
+    with pytest.raises(OSError, match="注入"):
+        update_extension(newer)
+    monkeypatch.setattr(shutil, "copy2", real_copy2)
+
+    # 中断后旧状态字节不变：登记表、旧版本文件、绑定。
+    assert registry_path.read_bytes() == before_registry
+    assert _snapshot_old() == before_old
+    registry_after_failure = _registry(tmp_path / "data" / "hetu-stock")
+    assert registry_after_failure["bindings"]["codex"]["x.demo.rules"][
+        "version"
+    ] == "0.1.0"
+
+    # 同版本直接重试成功；最终版本集合与旧绑定不变。
+    changes = update_extension(newer)
+    assert changes["previous_version"] == "0.1.0"
+    assert changes["version"] == "0.2.0"
+    registry = _registry(tmp_path / "data" / "hetu-stock")
+    versions = registry["extensions"]["x.demo.rules"]["versions"]
+    assert set(versions) == {"0.1.0", "0.2.0"}
+    assert registry["bindings"]["codex"]["x.demo.rules"]["version"] == "0.1.0"
+    assert _snapshot_old() == before_old
 
 
 def test_uninstall_fails_while_another_host_still_binds(

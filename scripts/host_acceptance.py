@@ -2090,6 +2090,22 @@ def _zcode_db_events(
     settlement has been verified, and count as one owner in tool
     attribution. Unknown usage is never exported as zero.
     """
+    # NULL started_at rows belong to no verifiable window: SQL three-valued
+    # logic would silently filter them out of the window predicates below,
+    # producing a "complete export" that omits unplaceable rows. Refuse the
+    # whole export instead of guessing or dropping them; both tables are
+    # checked separately for the declared session, before any window filter.
+    for table in ("model_usage", "tool_usage"):
+        null_started = conn.execute(
+            f"SELECT count(*) FROM {table} "
+            "WHERE session_id = ? AND started_at IS NULL",
+            (session_id,),
+        ).fetchone()[0]
+        if null_started:
+            raise _ZcodeDbExportError(
+                f"session {session_id}: {table} 有 {null_started} 行 "
+                "started_at 为 NULL，窗口归属不可证明，拒绝完整导出"
+            )
     upper = " AND started_at < ?" if window_end_ms is not None else ""
     params: tuple[Any, ...] = (
         (session_id, request_at_ms, window_end_ms)

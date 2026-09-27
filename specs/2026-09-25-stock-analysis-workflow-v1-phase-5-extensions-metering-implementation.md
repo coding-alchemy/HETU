@@ -1,11 +1,14 @@
 # HETU V1 五期扩展管理与计量工具迁移实现
 
-> 文档版本：v1.1（v1.0 阶段 03 交付；v1.1 按用户复评订正五处：加载记录位置、
-> 计量对象与未知用量表述、db-export 与 check 输出合同分列、删除已关闭问题遗留表述、
-> 验收依据顺序）
+> 文档版本：v1.3（v1.0 阶段 03 交付；v1.1 按用户复评订正五处：加载记录位置、
+> 计量对象与未知用量表述、db-export 与 check 输出合同分栏、删除已关闭问题遗留表述、
+> 验收依据顺序；v1.2：F1「扩展更新中断重试」修复关闭；v1.3：F2「NULL `started_at`
+> 拒绝完整导出」修复关闭，两项均从未修登记移出并记入行为、直接测试与本次验证（§5））
 > 文档状态：阶段 01 迁移经用户确认，阶段 02 全面评审通过；阶段 03 固定备份与本文档整合
-> 已执行；**评审通过、待用户合并 main**，未合入 main
-> 创建／修订日期：2026-09-25
+> 已执行，该批已经 PR #10 合入 main（`3acf981`）。后续 F1/F2 定向修复在产品分支
+> `codex/phase5-f1-update-retry` 上完成并随本文档 v1.2/v1.3 订正登记，
+> **待用户评审与合并 main**，尚未合入 main
+> 创建／修订日期：2026-09-25；v1.2/v1.3 订正 2026-09-27
 > 适用范围：原第 5 组第三方扩展管理、第 6 组计量与宿主验收工具实现的选择性迁移，
 > 以及直接相关的第 7 组支持声明／宿主事实记录、第 8 组历史审计测试
 > 固定功能来源：`zn_dev=8f9f6743e216f2ca62d668cc5586c17db406278a`
@@ -150,12 +153,37 @@ main 的验收，以及固定来源集中修复批的最终门禁（1592 passed�
 - 完整宿主／模型组合认证未启动；三条性能验收线未通过；预算数值待校准。
 - Linux/ext4 仅保留未实测边界披露，不是当前交付任务。
 - remainder §4 第 8 项仍保留的非阻断登记：db-delivery 重跑抛未捕获
-  FileExistsError、NULL `started_at` 行静默掉出导出窗口、扩展更新中断重试等边缘问题、
+  FileExistsError 等边缘问题、
   `HETU_HOST_TOKEN` 无消费方、过程 SHA 锚定、8 处死代码／死数据，及 E3A、缺工具刺激、
   E1 归因、ZCode schema／环境限制等既有登记项（缺交付时点的 check 误通过已随 §4
-  第 2 项修复关闭，不列为遗留）。
+  第 2 项修复关闭，不列为遗留；扩展更新中断重试、NULL `started_at` 行静默掉出导出
+  窗口已分别随下述 F1/F2 订正关闭）。
 - **正常工程门禁为 `mypy src`**；脚本 mypy 存在 55 项既存诊断（与修复前配平、无新增），
   不把全脚本类型清零设为迁移条件，不声称全脚本 mypy 通过。
+
+**F1 已修关闭（2026-09-27，产品分支 `codex/phase5-f1-update-retry`）**：上项登记中的
+「扩展更新中断重试」——`update_extension` 在目标目录建立后、登记前中断时，登记表、
+旧版本文件与宿主绑定字节不变；同版本直接重试成功：经 `_managed_version_dir` 边界校验后
+清理上次未登记的残留目录再重建，最终仅新增候选版本，不自动切换旧绑定；已登记同版本
+仍拒绝（「版本已发布且只读」，本次行为验证复核）。直接测试
+`tests/product/skill/test_extensions.py::test_update_retry_after_interrupted_copy_recovers_and_keeps_old_binding`
+先红（旧行为：残留目录使重试在 `mkdir` 抛 `FileExistsError`）后绿；本次验证
+`tests/product/skill/test_extensions.py` 与 `tests/product/cli/test_extension_cli.py`
+直接回归 **74 passed、0 failed、0 skipped**。
+
+**F2 已修关闭（2026-09-27，产品分支 `codex/phase5-f1-update-retry`）**：上项登记中的
+「NULL `started_at` 行静默掉出导出窗口」——`scripts/host_acceptance.py::_zcode_db_events`
+在窗口查询前分别核对声明会话的 `model_usage` 与 `tool_usage`，任一行 `started_at` 为
+NULL 即抛 `_ZcodeDbExportError` 拒绝完整导出，理由含会话、表名、行数与「窗口归属
+不可证明」；两份导出产物（`usage-events.jsonl`、`db-export.json`）零写出。正常时间的
+合法 callID/part 关联仍导出成功且工具归属正确；既有产物保持 create-only 不被覆盖
+（`test_db_export_existing_outputs_are_refused_before_any_write` 回归覆盖）。直接测试
+`test_db_export_null_started_at_refuses_export`、
+`test_db_export_null_tool_started_at_refuses_export`（含同输入正常时间成功对照）、
+`test_db_export_null_started_at_only_rows_reports_unplaceable_not_absent` 先红（旧逻辑：
+混入 NULL 行时错误导出成功；仅 NULL 行时误报「no model_usage rows」缺失）后绿；本次
+验证 `tests/product/validation/test_host_acceptance.py` 全文件回归
+**189 passed、0 failed、0 skipped**。db-delivery 重跑 FileExistsError 等其余登记项维持未修。
 
 ## 6. 迁移、评审与无私有证据验证结果
 
