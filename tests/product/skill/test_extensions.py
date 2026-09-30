@@ -431,6 +431,138 @@ def test_enable_and_context_reject_duplicate_work_package_ids(
     assert "冲突" in context["reason"]
 
 
+# --- cross-extension hard dependency cycles (修复 A) ----------------------------
+
+
+def _install_cycle_parts(tmp_path: Path) -> None:
+    """A: a1（0.2.0 起依赖 b1）；B: b1 依赖 a1。分版本构造真实跨扩展环。"""
+    install_extension(
+        build_extension_package(
+            tmp_path / "a-v1",
+            extension_id="x.demo.alpha",
+            package_ids=(("x.demo.a1", (), (), ()),),
+        )
+    )
+    install_extension(
+        build_extension_package(
+            tmp_path / "b",
+            extension_id="x.demo.beta",
+            package_ids=(("x.demo.b1", ("x.demo.a1",), (), ()),),
+        )
+    )
+    update_extension(
+        build_extension_package(
+            tmp_path / "a-v2",
+            extension_id="x.demo.alpha",
+            version="0.2.0",
+            package_ids=(("x.demo.a1", ("x.demo.b1",), (), ()),),
+        )
+    )
+
+
+def test_enable_rejects_cross_extension_cycle_and_keeps_old_binding(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """新启用造成跨扩展硬依赖环时拒绝；登记与既有绑定保持原状。"""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    _install_cycle_parts(tmp_path)
+    enable_extension("codex", "x.demo.alpha", version="0.1.0")
+    enable_extension("codex", "x.demo.beta")
+    registry_before = _registry(tmp_path / "data" / "hetu-stock")
+
+    with pytest.raises(ExtensionError, match="环"):
+        enable_extension("codex", "x.demo.alpha")
+
+    registry_after = _registry(tmp_path / "data" / "hetu-stock")
+    assert registry_after == registry_before
+    assert registry_after["bindings"]["codex"]["x.demo.alpha"]["version"] == "0.1.0"
+    assert registry_after["bindings"]["codex"]["x.demo.beta"]["version"] == "0.1.0"
+
+
+def test_context_closes_existing_cycle_propagates_and_keeps_unrelated(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """已有循环状态：context 关闭环所属扩展并传播依赖失效，无关扩展保留。"""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    _install_cycle_parts(tmp_path)
+    install_extension(
+        build_extension_package(
+            tmp_path / "g",
+            extension_id="x.demo.gamma",
+            package_ids=(("x.demo.g1", ("x.demo.a1",), (), ()),),
+        )
+    )
+    install_extension(
+        build_extension_package(
+            tmp_path / "u",
+            extension_id="x.demo.unrelated",
+            package_ids=(("x.demo.u1", (), (), ()),),
+        )
+    )
+    enable_extension("codex", "x.demo.alpha", version="0.1.0")
+    enable_extension("codex", "x.demo.beta")
+    enable_extension("codex", "x.demo.gamma")
+    enable_extension("codex", "x.demo.unrelated")
+
+    # 模拟此前缺陷放入的循环状态：绑定指向成环的 0.2.0。
+    registry = _registry(tmp_path / "data" / "hetu-stock")
+    registry["bindings"]["codex"]["x.demo.alpha"]["version"] = "0.2.0"
+    (tmp_path / "data" / "hetu-stock" / "extensions" / "registry.json").write_text(
+        json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+    context = context_for_host("codex")
+    assert [c["id"] for c in context["candidates"]] == ["x.demo.unrelated"]
+    assert "x.demo.alpha" in context["reason"]
+    assert "x.demo.beta" in context["reason"]
+    assert "环" in context["reason"]
+    assert "x.demo.gamma" in context["reason"]
+    assert "硬依赖" in context["reason"]
+
+
+def test_enable_allows_acyclic_multi_work_package_dependencies(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """合法反例：A 含 a1/a2、B 含 b1/b2；a1→b1、b2→a2 无环，两者保持可用。"""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    install_extension(
+        build_extension_package(
+            tmp_path / "a-v1",
+            extension_id="x.demo.alpha",
+            package_ids=(("x.demo.a1", (), (), ()), ("x.demo.a2", (), (), ())),
+        )
+    )
+    install_extension(
+        build_extension_package(
+            tmp_path / "b",
+            extension_id="x.demo.beta",
+            package_ids=(
+                ("x.demo.b1", (), (), ()),
+                ("x.demo.b2", ("x.demo.a2",), (), ()),
+            ),
+        )
+    )
+    update_extension(
+        build_extension_package(
+            tmp_path / "a-v2",
+            extension_id="x.demo.alpha",
+            version="0.2.0",
+            package_ids=(
+                ("x.demo.a1", ("x.demo.b1",), (), ()),
+                ("x.demo.a2", (), (), ()),
+            ),
+        )
+    )
+    enable_extension("codex", "x.demo.alpha", version="0.1.0")
+    enable_extension("codex", "x.demo.beta")
+    enable_extension("codex", "x.demo.alpha")
+    context = context_for_host("codex")
+    assert [c["id"] for c in context["candidates"]] == [
+        "x.demo.alpha",
+        "x.demo.beta",
+    ]
+
+
 # --- registry lifecycle -------------------------------------------------------
 
 
@@ -581,6 +713,100 @@ def test_uninstall_fails_while_another_host_still_binds(
     uninstall_extension("x.demo.rules")
     registry = _registry(tmp_path / "data" / "hetu-stock")
     assert "x.demo.rules" not in registry["extensions"]
+
+
+def test_uninstall_recovery_refused_while_host_still_binds(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """登记损坏（仅缺扩展条目、绑定与目录仍在）时，恢复清理入口同样拒绝绕过绑定检查。"""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    install_extension(build_extension_package(tmp_path / "candidate"))
+    enable_extension("zcode", "x.demo.rules")
+
+    data_home = tmp_path / "data" / "hetu-stock"
+    registry_path = data_home / "extensions" / "registry.json"
+    registry = json.loads(registry_path.read_text(encoding="utf-8"))
+    del registry["extensions"]["x.demo.rules"]
+    registry_path.write_text(
+        json.dumps(registry, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    managed = data_home / "extensions" / "x.demo.rules"
+
+    with pytest.raises(ExtensionError, match="绑定"):
+        uninstall_extension("x.demo.rules")
+    # 拒绝后残留目录与绑定都保持原状。
+    assert managed.is_dir()
+    assert "x.demo.rules" in _registry(data_home)["bindings"]["zcode"]
+
+
+def _make_dirs_readonly(path: Path) -> None:
+    for directory in [path, *(p for p in path.rglob("*") if p.is_dir())]:
+        directory.chmod(0o555)
+
+
+def _make_dirs_writable(path: Path) -> None:
+    for directory in [path, *(p for p in path.rglob("*") if p.is_dir())]:
+        directory.chmod(0o755)
+
+
+def _snapshot_tree(path: Path) -> dict:
+    return {
+        p.relative_to(path): p.read_bytes() for p in path.rglob("*") if p.is_file()
+    }
+
+
+def test_uninstall_delete_failure_is_not_success_and_retry_completes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """删除失败不得返回成功；登记不再指向残留目录，修复权限后同一命令重试完成。"""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    install_extension(build_extension_package(tmp_path / "candidate"))
+    extensions_root = tmp_path / "data" / "hetu-stock" / "extensions"
+    managed = extensions_root / "x.demo.rules"
+
+    _make_dirs_readonly(managed)
+    with pytest.raises(ExtensionError, match="删除"):
+        uninstall_extension("x.demo.rules")
+    # 残留目录保留为最小恢复信息；登记不指向可能部分删除的目录。
+    assert managed.is_dir()
+    registry = _registry(tmp_path / "data" / "hetu-stock")
+    assert "x.demo.rules" not in registry["extensions"]
+
+    _make_dirs_writable(managed)
+    result = uninstall_extension("x.demo.rules")
+    assert result == {"id": "x.demo.rules", "uninstalled": True}
+    assert not managed.exists()
+    # 没有残留时，未登记的扩展仍是受控拒绝。
+    with pytest.raises(ExtensionError, match="未安装"):
+        uninstall_extension("x.demo.rules")
+
+
+def test_uninstall_registry_commit_failure_keeps_package_and_registry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """登记提交失败：完整旧包与登记字节保持原状，修复后同一命令重试完成。"""
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    install_extension(build_extension_package(tmp_path / "candidate"))
+    extensions_root = tmp_path / "data" / "hetu-stock" / "extensions"
+    managed = extensions_root / "x.demo.rules"
+    registry_path = extensions_root / "registry.json"
+    before_registry = registry_path.read_bytes()
+    before_files = _snapshot_tree(managed)
+
+    extensions_root.chmod(0o555)
+    try:
+        with pytest.raises(OSError):
+            uninstall_extension("x.demo.rules")
+    finally:
+        extensions_root.chmod(0o755)
+
+    assert registry_path.read_bytes() == before_registry
+    assert _snapshot_tree(managed) == before_files
+
+    result = uninstall_extension("x.demo.rules")
+    assert result["uninstalled"] is True
+    assert not managed.exists()
+    assert "x.demo.rules" not in _registry(tmp_path / "data" / "hetu-stock")["extensions"]
 
 
 @pytest.mark.parametrize("escape", ["absolute", "relative"])
