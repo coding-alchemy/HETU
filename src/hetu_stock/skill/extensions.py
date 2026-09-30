@@ -623,6 +623,53 @@ def _find_version(entry: dict[str, Any], version: str | None) -> tuple[str, dict
     return version, versions[version]
 
 
+def _selected_work_package_requires(
+    record: dict[str, Any]
+) -> dict[str, tuple[str, ...]]:
+    """读取实际选中版本包内文件，返回每个工作包的硬依赖（may_reopen 不参与）。
+
+    登记级 requires 是扩展并集，分不清依赖方向；跨扩展判环必须按工作包 ID
+    建图，依赖以安装时已校验、完整性已核验的包内声明为准。
+    """
+    base = Path(str(record.get("path", "")))
+    files = record.get("files", {})
+    requires: dict[str, tuple[str, ...]] = {}
+    for wp_id in record.get("provides", []):
+        spec = None
+        for relative in files:
+            if Path(relative).stem != wp_id:
+                continue
+            try:
+                parsed = load_work_package(base / relative)
+            except (OSError, SkillValidationError):
+                continue
+            if parsed.id == wp_id:
+                spec = parsed
+                break
+        if spec is None:
+            raise ExtensionError(f"工作包文件缺失或不可读: {wp_id}")
+        requires[wp_id] = (*spec.start_requires, *spec.finalize_requires)
+    return requires
+
+
+def _work_package_cycle_members(edges: dict[str, set[str]]) -> set[str]:
+    """返回处于硬依赖环上的工作包 ID：能从自身出发再回到自身的节点。"""
+    members: set[str] = set()
+    for start in edges:
+        stack = list(edges[start])
+        seen: set[str] = set()
+        while stack:
+            node = stack.pop()
+            if node == start:
+                members.add(start)
+                break
+            if node in seen:
+                continue
+            seen.add(node)
+            stack.extend(edges.get(node, ()))
+    return members
+
+
 def _resolve_bindings(
     registry: dict[str, Any], bindings: dict[str, Any]
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
@@ -631,7 +678,9 @@ def _resolve_bindings(
     依赖只能由实际有效（登记完整、完整性校验通过、兼容）的提供者满足，
     包内 provides 满足自身 requires，失效沿依赖传播到直接和传递依赖方；
     同一加载集合中重复的工作包 ID 全部拒绝，不靠顺序保留任何一个。
-    单个候选失败不影响无关候选。
+    按实际选中版本的工作包 ID 建硬依赖图（may_reopen 不参与），环所属
+    扩展对本宿主关闭；不用扩展级 requires 并集判环，合法多工作包组合
+    不受影响。单个候选失败不影响无关候选。
     """
     effective: dict[str, dict[str, Any]] = {}
     failures: dict[str, str] = {}
@@ -668,6 +717,17 @@ def _resolve_bindings(
                 )
                 del effective[ext_id]
 
+    package_requires: dict[str, dict[str, tuple[str, ...]]] = {}
+    for ext_id in list(effective):
+        try:
+            package_requires[ext_id] = _selected_work_package_requires(
+                effective[ext_id]
+            )
+        except ExtensionError as exc:
+            label = f"{ext_id}@{bindings[ext_id]['version']}"
+            failures[ext_id] = f"{label}: {exc}"
+            del effective[ext_id]
+
     changed = True
     while changed:
         changed = False
@@ -685,6 +745,22 @@ def _resolve_bindings(
                 failures[ext_id] = f"{label}: 硬依赖未启用: {', '.join(missing)}"
                 del effective[ext_id]
                 changed = True
+        edges: dict[str, set[str]] = {}
+        for ext_id in effective:
+            for wp_id, deps in package_requires[ext_id].items():
+                edges[wp_id] = {dep for dep in deps if dep in pool}
+        cycle_members = _work_package_cycle_members(edges)
+        if cycle_members:
+            for ext_id in list(effective):
+                hit = cycle_members & set(effective[ext_id].get("provides", []))
+                if hit:
+                    label = f"{ext_id}@{bindings[ext_id]['version']}"
+                    failures[ext_id] = (
+                        f"{label}: 硬依赖存在环（{', '.join(sorted(hit))}），"
+                        "环所属扩展对本宿主关闭"
+                    )
+                    del effective[ext_id]
+                    changed = True
     return effective, failures
 
 
@@ -741,8 +817,8 @@ def uninstall_extension(extension_id: str) -> dict[str, Any]:
     root = extensions_root()
     with _registry_lock(root):
         registry = _read_registry(root)
-        if extension_id not in registry["extensions"]:
-            raise ExtensionError(f"扩展未安装: {extension_id}")
+        # 绑定检查对登记分支与残留恢复分支同样生效：登记损坏（仅缺扩展
+        # 条目）时，残留目录的清理不得绕过仍有效的宿主绑定。
         bound_hosts = [
             host
             for host in HOSTS
@@ -752,10 +828,25 @@ def uninstall_extension(extension_id: str) -> dict[str, Any]:
             raise ExtensionError(
                 f"其他宿主仍绑定该扩展，未授权删除: {', '.join(bound_hosts)}"
             )
-        target = _managed_extension_dir(root, extension_id)
-        del registry["extensions"][extension_id]
-        shutil.rmtree(target, ignore_errors=True)
-        _commit_registry(root, registry)
+        if extension_id in registry["extensions"]:
+            target = _managed_extension_dir(root, extension_id)
+            # 先提交登记移除：提交失败时完整旧包与登记都保持原状；提交成功
+            # 后登记不再指向目录，后续删除中断也不会留下指向残留的登记。
+            del registry["extensions"][extension_id]
+            _commit_registry(root, registry)
+        else:
+            # 未登记但有受管残留目录：上次卸载中断的最小恢复信息，同一卸载
+            # 命令继续完成清理；越界 ID 仍按受管边界拒绝。
+            target = _managed_extension_dir(root, extension_id)
+            if not target.exists():
+                raise ExtensionError(f"扩展未安装: {extension_id}")
+        if target.exists():
+            try:
+                shutil.rmtree(target)
+            except OSError as exc:
+                raise ExtensionError(
+                    f"删除失败: {target} ({exc})；修复条件后重试同一卸载命令即可继续"
+                ) from exc
     return {"id": extension_id, "uninstalled": True}
 
 

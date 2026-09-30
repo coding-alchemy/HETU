@@ -444,3 +444,75 @@ def test_malformed_version_record_rejects_update_before_any_write(
     assert registry_path.read_bytes() == before
     after = json.loads(registry_path.read_text(encoding="utf-8"))
     assert "0.2.0" not in after["extensions"][_EXTENSION_ID]["versions"]
+
+
+# --- uninstall failure consistency (修复 B) -------------------------------------
+
+_UNINSTALL_ARGS = ["skill", "extension", "uninstall", "--id", _EXTENSION_ID, "--json"]
+
+
+def _managed_dir(home: Path) -> Path:
+    return home / "data" / "hetu-stock" / "extensions" / _EXTENSION_ID
+
+
+def _chmod_dirs(path: Path, mode: int) -> None:
+    for directory in [path, *(p for p in path.rglob("*") if p.is_dir())]:
+        directory.chmod(mode)
+
+
+def test_uninstall_delete_failure_fails_and_retry_completes(managed_home: Path) -> None:
+    """删除失败：非零退出、completed=False、含可定位原因；修复后同一命令完成。"""
+    _install(build_extension_package(managed_home / "candidate"))
+    managed = _managed_dir(managed_home)
+
+    _chmod_dirs(managed, 0o555)
+    result = runner.invoke(app, _UNINSTALL_ARGS)
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    failure = json.loads(result.output)
+    assert failure["completed"] is False
+    assert _EXTENSION_ID in failure["error"] or "删除" in failure["error"]
+    assert managed.is_dir()
+
+    _chmod_dirs(managed, 0o755)
+    retry = runner.invoke(app, _UNINSTALL_ARGS)
+    assert retry.exit_code == 0, retry.output
+    assert json.loads(retry.output)["completed"] is True
+    assert not managed.exists()
+
+
+def test_uninstall_registry_commit_failure_keeps_package_and_fails_controlled(
+    managed_home: Path,
+) -> None:
+    """登记提交失败：非零退出且无 Traceback；完整旧包与登记保持原状。"""
+    _install(build_extension_package(managed_home / "candidate"))
+    extensions_root = managed_home / "data" / "hetu-stock" / "extensions"
+    managed = _managed_dir(managed_home)
+    registry_path = extensions_root / "registry.json"
+    before_registry = registry_path.read_bytes()
+    before_files = {
+        p.relative_to(managed): p.read_bytes()
+        for p in managed.rglob("*")
+        if p.is_file()
+    }
+
+    extensions_root.chmod(0o555)
+    try:
+        result = runner.invoke(app, _UNINSTALL_ARGS)
+    finally:
+        extensions_root.chmod(0o755)
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    failure = json.loads(result.output)
+    assert failure["completed"] is False
+    assert registry_path.read_bytes() == before_registry
+    assert {
+        p.relative_to(managed): p.read_bytes()
+        for p in managed.rglob("*")
+        if p.is_file()
+    } == before_files
+
+    retry = runner.invoke(app, _UNINSTALL_ARGS)
+    assert retry.exit_code == 0, retry.output
+    assert not managed.exists()

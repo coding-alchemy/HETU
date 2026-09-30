@@ -456,7 +456,7 @@ def extension_uninstall(
     """Remove all versions; refused while any host binding remains."""
     try:
         uninstall_extension(extension_id)
-    except ExtensionError as exc:
+    except (ExtensionError, OSError) as exc:
         _extension_fail(exc, as_json)
     _emit({"completed": True, "id": extension_id}, as_json)
 
