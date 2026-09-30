@@ -19,7 +19,16 @@ V1 一期实现已完成 Agent 主导研究闭环，Codex 上一次真实人工�
 2026-09-13 阶段 07.2 实机批次后，四宿主（Codex、OpenCode、Claude Code、ZCode）功能层已验收
 （全新安装与发现、正/反/边界触发矩阵、扩展管理四动作、原生接口探针；claude 隔离以
 PreToolUse hook 实测有效）；ZCode 的 public×standard 组合质量门槛已验收，
-Codex、OpenCode、Claude Code 的完整研究认证仍为 `UNVERIFIED`。
+quick（6 次）/deep（1 次）有证据未达每组合 10 次门槛；长期"深度与多模型组合补验"
+专项五槽／三域已按 D5／B 类限定口径获用户最终验收（不等于完整组合认证）。
+Codex、OpenCode、Claude Code 的完整研究认证仍为 `UNVERIFIED`，2026-09-27 起按用户
+决定延后备案、不计入五期 P0，五期现行验收仅要求 ZCode。
+2026-09-30 本批仅 ZCode×GLM-5.3-Flash×standard×public 按用户批准的 5 次计入／
+4 次合格／80% 门槛取得**限定认证**；获证正常研究类别为半导体制造、钢铁、白酒、
+医药制造，安装／触发／按需读链已有证据。恒瑞医药计数含仅本样本批准的隔离未验证
+及旧 R2 元资料访问例外，G67-R1 失败仍留分母；这些事实不改写为原始行为通过。
+quick、deep、其他模型和未获证类别仍为 `UNVERIFIED`，长期 V1 发布候选门槛及阶段 13
+main 集成仍未完成，见[第 5–7 组现行要求与验收](../specs/2026-09-27-phase5-groups-5-7-implementation.md)。
 安装兼容性本身不等同于支持，功能层认证也不等同于完整研究支持，只有完成
 组合级验收并形成完整证据后才能更新支持状态。截至 2026-09-17，三条性能验收线均未正式
 通过，五期未最终验收（现状与缺口见
@@ -31,10 +40,11 @@ Codex、OpenCode、Claude Code 的完整研究认证仍为 `UNVERIFIED`。
 工作优化）已通过 PR #9 合入 main（`751ed53`）。
 2026-09-25 补充：后半第 5 组扩展管理与第 6 组计量／验收工具（含 `hetu-stock skill extension`
 命令组、`scripts/host_acceptance.py`、`scripts/capture_host_cli.py`、显式离线证据入口与手动
-验收 workflow），以及直接相关的第 7 组支持声明／宿主事实记录、第 8 组历史审计测试，已从
-固定来源 `8f9f674` 选择性迁入本分支，**已迁移，阶段 02 全面评审通过，阶段 03 固定备份与
-文档整合完成，评审通过、待用户合并 main**，未合入 main；
-并行收益／性能验证增量仍留源分支。本批迁移不据此扩大正式支持范围。
+验收 workflow），以及直接相关的第 7 组支持声明／宿主事实记录、第 8 组历史审计测试，
+已通过 PR #10 合入 main（`3acf981`）；F1 更新中断同版本重试与 F2 双表 NULL
+`started_at` 拒绝修复已通过 PR #11 合入 main（`449e14b`）。第 5–7 组现行要求与状态见
+[五期第 5–7 组需求、设计与验收记录](../specs/2026-09-27-phase5-groups-5-7-implementation.md)，
+正式支持范围仅按上述本批限定声明与可回源证据判定。
 现行前半行为与安全边界见[五期前半实现](../specs/2026-09-20-stock-analysis-workflow-v1-phase-5-foundation-implementation.md)，
 中期行为与边界见[五期中期实现](../specs/2026-09-21-stock-analysis-workflow-v1-phase-5-middle-implementation.md)，
 下一批行为与边界见[五期下一批迁移实现](../specs/2026-09-24-stock-analysis-workflow-v1-phase-5-execution-implementation.md)，
