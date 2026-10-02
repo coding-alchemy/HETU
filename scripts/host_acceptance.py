@@ -2470,6 +2470,7 @@ def _zcode_isolation_scan(
         "first_unparseable_line": None,
         "first_request_message_count": None,
     }
+    session_ids: set[str] = set()
     for payload, error, line_number in _iter_zcode_records(transcript):
         if error is not None:
             # an unreadable record is a coverage gap, not an ignorable line:
@@ -2479,6 +2480,9 @@ def _zcode_isolation_scan(
                 scan["first_unparseable_line"] = line_number
             continue
         scan["request_count"] += 1
+        record_session_id = payload.get("sessionId")
+        if isinstance(record_session_id, str) and record_session_id:
+            session_ids.add(record_session_id)
         request = payload.get("request") or {}
         request_blob = json.dumps(request, ensure_ascii=False)
         if decoy_marker and decoy_marker in request_blob:
@@ -2510,7 +2514,23 @@ def _zcode_isolation_scan(
         or scan["marker_in_responses"] > 0
         or scan["decoy_path_in_tool_inputs"] > 0
     )
-    record["session_id"] = _native_session_id(transcript.stem)
+    # the reported session id must match the id the usage events carry. A
+    # staged copy may be renamed (dwf actors are staged under a synthesized
+    # agent-form name), so the records' own sessionId is authoritative when
+    # it is consistent; only records carrying no sessionId at all fall back
+    # to the rollout file-name form, which embeds the native id for both
+    # live rollouts and normal Agent staging copies
+    if len(session_ids) == 1:
+        record["session_id"] = next(iter(session_ids))
+        record["session_id_source"] = "transcript"
+    elif session_ids:
+        # records disagreeing on their own session id leave this transcript's
+        # identity unverifiable: claim no covered session for it so `check`
+        # fails closed instead of guessing an identity
+        record["session_id_source"] = "conflict"
+    else:
+        record["session_id"] = _native_session_id(transcript.stem)
+        record["session_id_source"] = "filename"
     # a transcript with no usable request payload cannot verify anything
     record["valid_coverage"] = scan["request_count"] > 0
     record.update(scan)
@@ -2559,6 +2579,11 @@ def _zcode_isolation_report(
             record["verdict"] = "violation"
         elif record.get("unparseable_records"):
             record["verdict"] = "evidence_gap"
+        elif record.get("session_id_source") == "conflict":
+            # a transcript whose records disagree on their own session id
+            # cannot be tied to any metered context, so its boundary can
+            # never be claimed verified for a specific participating session
+            record["verdict"] = "evidence_gap"
         elif record.get("tool_targets_outside_allowed"):
             record["verdict"] = "boundary_unproven"
         else:
@@ -2591,6 +2616,10 @@ def _zcode_isolation_report(
     )
     sanity["verdict"] = (
         "not_verified" if not sanity.get("transcript_found")
+        # a sanity transcript whose records disagree on their own session id
+        # cannot be tied to any known session, so its decoy hit — though
+        # still recorded — proves the detector for nothing: fail closed
+        else "evidence_gap" if sanity.get("session_id_source") == "conflict"
         else "violation_detected" if sanity.get("accessed")
         else "detector_missed_violation"
     )

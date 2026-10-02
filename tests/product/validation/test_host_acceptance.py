@@ -1331,7 +1331,7 @@ def _stage_zcode_transcript(directory, agent_id, records, corrupt_tail=False):
 
 
 def _zcode_record(*, message_count=2, marker=None, tool_path=None,
-                  started="2026-09-08T00:00:10Z"):
+                  started="2026-09-08T00:00:10Z", session_id=None):
     request_messages = [{"role": "user", "content": "probe task"}]
     if marker:
         request_messages.append({"role": "tool", "content": f"result {marker}"})
@@ -1339,7 +1339,7 @@ def _zcode_record(*, message_count=2, marker=None, tool_path=None,
     if tool_path:
         tool_calls.append({"id": "t1", "name": "Read",
                            "input": {"file_path": tool_path}})
-    return {
+    record = {
         "requestId": "req-1",
         "startedAt": started,
         "completedAt": "2026-09-08T00:00:20Z",
@@ -1352,6 +1352,9 @@ def _zcode_record(*, message_count=2, marker=None, tool_path=None,
             "toolCalls": tool_calls,
         },
     }
+    if session_id is not None:
+        record["sessionId"] = session_id
+    return record
 
 
 def _run_isolation_report(tmp_path, restricted_records, sanity_records,
@@ -1539,6 +1542,135 @@ def test_rd_isolation_evidence_must_cover_participating_contexts(tmp_path):
     payload = json.loads(result_path.read_text(encoding="utf-8"))
     assert code == 1
     assert any("s2" in failure for failure in payload["failures"])
+
+
+def test_rd_dwf_staged_transcript_reports_native_session_id(tmp_path):
+    # a dwf actor's rollout is staged under the agent-form synthesized file
+    # name while its records still carry the native session id the usage
+    # events use: coverage must be reported under the native id
+    report, payload = _run_isolation_report(
+        tmp_path,
+        restricted_records=[
+            _zcode_record(tool_path="/probe/allowed/material.txt",
+                          session_id="sess_dwf-demo-actor_2_1"),
+        ],
+        sanity_records=[
+            _zcode_record(marker="HETU_DECOY_TEST",
+                          tool_path="/probe/old-research/decoy.txt"),
+        ],
+        restricted_agent="dwf-demo-actor_2_1",
+    )
+    assert payload["verdict"] == "pass"
+    assert payload["covered_sessions"] == ["sess_dwf-demo-actor_2_1"]
+
+
+def test_rd_records_without_session_id_keep_filename_identity(tmp_path):
+    # rollout records predating the sessionId field still identify the
+    # session by the model-io-<session> file name, the same form the
+    # agent-kind watcher reports for normal Agent dispatches
+    report, payload = _run_isolation_report(
+        tmp_path,
+        restricted_records=[
+            _zcode_record(tool_path="/probe/allowed/material.txt"),
+        ],
+        sanity_records=[
+            _zcode_record(marker="HETU_DECOY_TEST",
+                          tool_path="/probe/old-research/decoy.txt"),
+        ],
+    )
+    assert payload["covered_sessions"] == ["sess_subagent_agent_aaaa1111"]
+
+
+def test_rd_conflicting_session_ids_claim_no_coverage(tmp_path):
+    # records disagreeing on their own session id leave the transcript's
+    # identity unverifiable: no covered session may be claimed for it, so
+    # the check fails closed instead of guessing an identity
+    report, payload = _run_isolation_report(
+        tmp_path,
+        restricted_records=[
+            _zcode_record(tool_path="/probe/allowed/material.txt",
+                          session_id="sess_aaa"),
+            _zcode_record(tool_path="/probe/allowed/material.txt",
+                          session_id="sess_bbb"),
+        ],
+        sanity_records=[
+            _zcode_record(marker="HETU_DECOY_TEST",
+                          tool_path="/probe/old-research/decoy.txt"),
+        ],
+    )
+    assert payload["covered_sessions"] == []
+    assert payload["verdict"] != "pass"
+
+
+def test_rd_sanity_session_id_conflict_blocks_pass(tmp_path):
+    # the detector-sanity transcript itself carries two different session
+    # ids: the decoy hit it observed stays recorded, but a transcript that
+    # cannot be tied to any known session proves nothing, so the sanity
+    # case must stay an evidence gap and the report must not pass
+    report, payload = _run_isolation_report(
+        tmp_path,
+        restricted_records=[
+            _zcode_record(tool_path="/probe/allowed/material.txt",
+                          session_id="sess_aaa"),
+        ],
+        sanity_records=[
+            _zcode_record(marker="HETU_DECOY_TEST",
+                          tool_path="/probe/old-research/decoy.txt",
+                          session_id="sess_sanity_a"),
+            _zcode_record(marker="HETU_DECOY_TEST",
+                          tool_path="/probe/old-research/decoy.txt",
+                          session_id="sess_sanity_b"),
+        ],
+    )
+    permissive = payload["cases"]["permissive"]
+    assert permissive["verdict"] == "evidence_gap"
+    # the observed decoy access stays a recorded fact; only the verdict closes
+    assert permissive["accessed"] is True
+    assert permissive["decoy_path_in_tool_inputs"] == 2
+    assert payload["verdict"] != "pass"
+    assert payload["host_isolation_available_for_02"] is False
+
+
+def test_rd_check_matches_dwf_native_coverage_end_to_end(tmp_path):
+    # final coverage comparison: usage events recorded under the dwf native
+    # id must be recognized as covered by an isolation report built from the
+    # renamed staged copy of the same actor's transcript
+    module = load_module()
+    stage = tmp_path / "stage"
+    evidence = tmp_path / "ev"
+    events = [_good_research_event(session_id="sess_dwf-demo-actor_2_1")]
+    meta = _base_meta()
+    meta["isolation"]["evidence"] = "isolation-evidence-zcode.json"
+    _write_evidence(evidence, events, meta)
+    _stage_zcode_transcript(
+        stage, "dwf-demo-actor_2_1",
+        [_zcode_record(tool_path="/probe/allowed/material.txt",
+                       session_id="sess_dwf-demo-actor_2_1")],
+    )
+    _stage_zcode_transcript(
+        stage, "sanity2222",
+        [_zcode_record(marker="HETU_DECOY_TEST",
+                       tool_path="/probe/old-research/decoy.txt")],
+    )
+    report = module["_zcode_isolation_report"](
+        evidence,
+        task_identity="task-1",
+        restricted_agent=["dwf-demo-actor_2_1"],
+        sanity_agent="sanity2222",
+        decoy_marker="HETU_DECOY_TEST",
+        decoy_path="/probe/old-research/decoy.txt",
+        allowed_path="/probe/allowed",
+        staging_dir=str(stage),
+    )
+    assert report["verdict"] == "pass"
+    result_path = tmp_path / "result.json"
+    code = module["main"](
+        ["check", "--evidence", str(evidence), "--output", str(result_path)]
+    )
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert code == 0
+    assert payload["passed"] is True
+    assert not any("does not cover" in failure for failure in payload["failures"])
 
 
 # ---------------------------------------------------------------------------
@@ -4107,11 +4239,14 @@ def test_wh_file_and_agent_watchers_share_native_session_ids(
     snapshot_dir = tmp_path / "staging"
     snapshot_dir.mkdir()
     snapshot = snapshot_dir / "model-io-sess_subagent_agent_a1.jsonl"
-    snapshot.write_text(
-        "".join(json.dumps(r) + "\n" for r in [
-            _rollout_record("rq-r1", base + 10, base + 20)]),
-        encoding="utf-8",
-    )
+    # a normal Agent staging copy's records carry the same native session id
+    # the model-io-<session> file name embeds, so the scan's record-backed
+    # identity and the file watcher's name-backed identity agree; when the
+    # two differ (a renamed dwf staging copy) the scan follows the records'
+    # native id, covered by the rd isolation tests
+    staged = _rollout_record("rq-r1", base + 10, base + 20)
+    staged["sessionId"] = "sess_subagent_agent_a1"
+    snapshot.write_text(json.dumps(staged) + "\n", encoding="utf-8")
     monkeypatch.setattr(Path, "home", lambda: home)
     monkeypatch.setattr(time_module, "sleep", lambda *_: None)
     module = load_module()

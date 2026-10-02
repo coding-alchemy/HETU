@@ -1,15 +1,8 @@
-"""Phase-5 middle static prompt-contract tests (task control and recovery).
+"""Stage-03 task 03.2 static prompt-contract tests.
 
-Assert the text invariants of the stop-condition, timeout, cancel and
-recovery contract migrated to the canonical Skill references for the
-phase-5 middle scope (M1). Behavior samples (C01-C10) are exercised
-separately by the controller.
-
-Scope note: the source stage-03 test file additionally asserted the full
-three-tier budget TABLE (per-depth reference numbers and the parallelism
-column). Those budget-table / parallelism assertions stay out of the
-middle scope (formal parallelism and budget-value calibration are later
-work); only the necessary control-boundary assertions are kept here.
+Assert the text invariants of the budget, stop-condition, timeout, cancel and
+recovery contract added to the canonical Skill references by phase-5 task 03.2.
+Behavior samples (C01-C07) are exercised separately by the controller.
 """
 
 import re
@@ -61,11 +54,24 @@ def _flow(text: str) -> str:
     return re.sub(r"\s+", "", text)
 
 
-def test_budget_reference_values_never_become_approved_defaults() -> None:
-    section = _flow(_section(_read(ORCHESTRATION), "## 三档预算"))
+def test_budget_defaults_are_approved_policy_not_measured_calibration() -> None:
+    raw = _section(_read(ORCHESTRATION), "## 三档预算")
+    section = _flow(raw)
 
-    assert "参考值（历史假设，未验证，待校准）" in section
-    assert "不得自动升级为默认" in section
+    for header in ("外部调用上限", "同类重试上限", "并行度上限", "授权数据费用边界"):
+        assert header in section
+    depth_rows = [
+        line for line in raw.splitlines() if re.match(r"^\| (quick|standard|deep) \|", line)
+    ]
+    assert len(depth_rows) == 3
+    expected_calls = {"quick": "120", "standard": "120", "deep": "260"}
+    for row in depth_rows:
+        cells = [cell.strip() for cell in row.split("|")[1:-1]]
+        assert cells[1:4] == [expected_calls[cells[0]], "3", "3"], row
+        assert cells[4] == "不新增付费授权", row
+    assert "策略默认预算" in section
+    assert "用户批准" in section
+    assert "尚未充分实测校准" in section
 
 
 def test_budget_observability_gap_subscription_boundary_and_near_exhaustion() -> None:
@@ -78,6 +84,11 @@ def test_budget_observability_gap_subscription_boundary_and_near_exhaustion() ->
     assert "预算即将耗尽时优先处理最影响核心论点的未知" in section
     assert "预算到限不能把未满足的深度标成完成" in section
     assert "W0记录实际采用值" in section
+    assert "次外部检索或取数调用" in section
+    assert "失败调用也计入" in section
+    assert "准备与收尾预留" in section
+    assert "计入本轮总预算" in section
+    assert "新增付费支出须先获得明确授权和额度" in section
 
 
 def test_w0_records_budget_and_reuse_before_accessing_old_materials() -> None:
@@ -89,6 +100,8 @@ def test_w0_records_budget_and_reuse_before_accessing_old_materials() -> None:
     assert "复用" in text
     assert "记录缺口" in text
     assert "不把已有订阅的授权范围误记为本次新增费用授权" in text
+    assert "策略默认预算" in text
+    assert "准备与收尾预留" in text
 
 
 def test_same_target_retry_counting_switches_path_or_leaves_gap() -> None:

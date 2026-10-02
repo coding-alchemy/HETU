@@ -1,6 +1,6 @@
 # HETU V1 五期前半实现：安装维护与旧成果（功能基础交付）
 
-> 文档版本：V1 五期前半实现 v1.0
+> 文档版本：V1 五期前半实现 v1.1（2026-09-27：订正后半验收宿主及安装平台补验范围）
 > 文档状态：前半已实现；迁移经用户人工确认，全面评审与集中复评通过（R1–R8 全部关闭）；
 > 整个五期拆分尚未完成
 > 创建日期：2026-09-20
@@ -92,8 +92,8 @@ archive-inspect、archive-export），无扩展命令、旧执行入口或验收
 ### 1.5 支持声明边界
 
 - 平台：安装维护已验证范围为 macOS/APFS（真实交换、并发串行化、中断恢复及不支持交换负例
-  均实测）；Linux/ext4 实测与完整宿主认证留后半，未实测前不宣称对应平台已支持。Linux 共用
-  实现及不支持时安全失败机制保留，但不宣称已验证。
+  均实测）。Linux 共用实现及不支持时安全失败机制保留，但不宣称已验证；按用户
+  2026-09-27 决定，Linux/ext4 实测不属于五期或长期需求，不列后半待办。
 - 脱敏：秘密过滤限已支持的 JSON 秘密字段，不承诺任意自然语言秘密识别。
 - 旧成果：仅明确映射 `schema_version: 3`；未知版本与无法映射字段保留原样并标明范围。
 - 宿主：ZCode 安装目标（`--host zcode`）由安装器支持；ZCode 正式安装与自动发现认证属后半，
@@ -206,7 +206,7 @@ MANIFEST、Skill 校验均通过）。逐轮细节（测试名、复现输入、
 
 | 原要求 | 去向 | 本文档位置 | 实现／测试 | 既有证据 | 适用边界 |
 |---|---|---|---|---|---|
-| 长期 §8.3.4–5（五期 3.1）：原子替换、失败恢复旧版、旧版备份、明确卸载边界、不暴露凭据的诊断 | 前半 F1（本文档） | §1.1–1.2、§2.1–2.2 | `src/hetu_stock/skill/installer.py`、`scripts/install.sh`、`src/hetu_stock/cli.py`；`tests/product/skill/test_installer.py`、`tests/product/install/test_install_script.py`、`tests/product/cli/test_skill_cli.py` | §4.1 阶段 05 摘要；§4.3 R1–R3 | macOS/APFS 已验证；Linux/ext4 与正式宿主认证留后半 |
+| 长期 §8.3.4–5（五期 3.1）：原子替换、失败恢复旧版、旧版备份、明确卸载边界、不暴露凭据的诊断 | 前半 F1（本文档） | §1.1–1.2、§2.1–2.2 | `src/hetu_stock/skill/installer.py`、`scripts/install.sh`、`src/hetu_stock/cli.py`；`tests/product/skill/test_installer.py`、`tests/product/install/test_install_script.py`、`tests/product/cli/test_skill_cli.py` | §4.1 阶段 05 摘要；§4.3 R1–R3 | macOS/APFS 已验证；ZCode 正式宿主认证留后半，其他宿主延后备案 |
 | 长期 §8.4（五期 3.5）：旧成果读取、审计或导出；原内容可取回；不能映射部分保留原样；不启动旧研究流程 | 前半 F2（本文档） | §1.3–1.4、§2.3 | `src/hetu_stock/helpers/archive.py`；`tests/helpers/test_archive.py` 及 `tests/product/fixtures/archive/legacy-run/` | §4.1 阶段 06 摘要；§4.3 R4–R7 | schema 3 与已支持旧内容；秘密过滤限已支持 JSON 字段 |
 
 被本文档替代的过程文档（最后内容一致，均可追溯，不因其旧而无效）：
@@ -222,8 +222,8 @@ MANIFEST、Skill 校验均通过）。逐轮细节（测试名、复现输入、
 
 ## 6. 已知边界与后半去向
 
-- Linux/ext4 真实交换、并发、中断恢复与不支持文件系统负例未实测；正式宿主自动发现认证
-  未完成；ZCode 新增控制／协作、复用、扩展采用、计量／性能等后半范围逐项见后半去向记录。
+- ZCode 正式宿主自动发现认证未完成；控制／协作、复用、扩展采用、计量／性能等后半范围
+  逐项见后半去向记录。Linux/ext4 的未实测事实不构成五期或长期需求缺口。
 - 秘密过滤仅覆盖已支持的 JSON 秘密字段；未做内容级任意秘密扫描，导出不宣称无损全量导出。
 - 本分支不依赖源工作区、真实安装副本或 `.hetu/` 原始记录即可使用与测试；原验收记录原地
   保留，本文档只携带脱敏摘要。
