@@ -1,31 +1,73 @@
 # HETU 执行计划索引
 
+## 当前执行状态
+
+本轮没有待启动计划。用户于 2026-10-02 决定不再投入性能验收，并批准清理已执行完的
+执行计划。第 5–7 组限定收口及阶段 05 本批汇总与复评成果保持有效；第 8 组性能数值
+未验收、五期整体未完成的事实保留，不安排新采样、配对或校准，不重复请求延期批准。
+
+本目录只保留总索引；已执行、被现行记录接替或停止执行的旧计划均已从工作区清理。
+现行事实与成果入口：
+
+- [收尾证据矩阵](../2026-09-25-zn-dev-closeout-evidence.md) §18–§22：三档默认预算、
+  X1／X4 的结论与额度、本批汇总和计划清理记录。
+- [后半需求去向](../2026-09-20-stock-analysis-workflow-v1-phase-5-remainder-requirements.md)：
+  已交付行为、有效验收和未完成事实；不作为新增执行授权。
+
+完整运行卡、旧计划与原章节号从下方固定 Git 提交回溯；清理不表示未验收项已完成。
+
+提交、推送与 main 集成按用户后续具体指令处理；清理不新增运行授权。
+
 ## 已完成计划
 
+- 五期第 5–7 组独立迁移（2026-09-27）：
+  [设计](../2026-09-27-phase5-groups-5-7-migration-design.md)与计划已获用户批准；
+  迁移已经 PR #12 合入 main（`176a754`）交付，现行要求与验收结果统一见
+  [五期第 5–7 组需求、设计与验收记录](../2026-09-27-phase5-groups-5-7-implementation.md)；
+  本目录 4 份已执行计划已从工作区清理，原文经下方固定 Git 提交回溯。
+
+- 五期 F1/F2 定向修复合并迁移（2026-09-27）：
+  F1/F2 实现和直接测试已经 PR #11 合入 main（`449e14b`），不再按旧计划启动 F2；
+  本目录 4 份已执行计划已清理；过程与当时门禁经固定 Git 提交回溯，现行交付状态见[扩展管理与计量工具实现](../2026-09-25-stock-analysis-workflow-v1-phase-5-extensions-metering-implementation.md)。
 - 五期扩展管理与计量工具迁移（2026-09-25）：从 main（`751ed53`）创建 `zn_p5t`
   （原 `codex/phase5-extensions-metering`，仅改名不改历史）选择性迁入原第 5、6 组
   实现及随迁第 7/8 组记录／测试；阶段 01 迁移经人工确认，阶段 02 全面评审通过，
-  无实现阻断及代码修复；阶段 03 固定备份、文档整合与最终工程门禁已完成，待用户
-  合并 main。现行要求、行为规则、实现入口、验收依据与适用限制统一见
+  无实现阻断及代码修复；阶段 03 固定备份、文档整合与最终工程门禁已完成，阶段 04
+  经 PR #10 合入 main（`3acf981`）。现行要求、行为规则、实现入口、验收依据与适用
+  限制统一见
   [五期扩展管理与计量工具迁移实现](../2026-09-25-stock-analysis-workflow-v1-phase-5-extensions-metering-implementation.md)。
   本主题过程文档（迁移设计、证据摘要及执行计划目录）已按阶段 03 从工作区删除，
   完整备份固定于备份分支 `zn_p5t_plan` 提交 `2d773de`（含固定来源快照与逐文件
-  SHA-256 清单；该分支不得合入 main）；阶段 05 zn_dev 去重与 rebase 未启动，
-  须用户另行授权。
+  SHA-256 清单；该分支不得合入 main）；阶段 05 zn_dev 去重与 rebase 已经用户单独
+  授权执行完成，rebase 前状态固定于备份分支 `zn_p5t_dev_bak`，未推送、远端历史
+  改写须另行授权。
+- zn_dev 剩余四项集中修复（2026-09-24，2026-09-25 复评后修复）：
+  阶段 01–03 按已批准计划连续执行完成，修复提交 ebfbd8d（计量关联/结算/导出完整性）与
+  dc2ca33（扩展版本/登记表/flag 解析/历史审计跳过）；阶段 04 复评七项缺口与第二轮 2 项
+  已修复收口（2b84ada、3213bab、2479777，合并入增量提交 20fb6ff）；最终门禁 1592 passed、
+  6 skipped（均为带理由宿主可用性 skip），exit 0。2026-09-25 评审阻断项修复：host-tools.md
+  两处 `hetu skill extension` → `hetu-stock skill extension`；阶段 04 路线图/阶段文件/索引
+  状态同步；非阻断项与冗余清单登记至后半去向 §4。阶段 05（2026-09-25）：全面评审确认的
+  4 项迁移前阻断问题（uninstall 越界删除、check 计时 fail-open、缺宿主覆盖有效夹具、
+  描述续行误取）经用户批准后修复完成，实现提交 `8e0177f`，定向回归 282 passed、
+  7 skipped（均为带理由宿主可用性 skip）；claude 夹具 `--permission-prompt-tool` 从
+  accepted_flags 移除并登记为证据不足（未确定，不推断不支持）。修复成果已随五期扩展管理
+  与计量工具迁移批交付，经 PR #10 合入 main（`3acf981`）。本目录 6 份已执行计划已清理；第 7/8 组认证、采样与校准未由该修复批启动。
+
 - 五期下一批迁移：上下文管理、正式并行与重复工作减少（2026-09-24）：从 main（`c4e5258`）
   创建 `zn_p5e` 选择性迁入原第 1 组剩余部分、第 3、4 组；阶段 01 迁移经人工确认，阶段 02
   首轮评审一项正式子任务复用边界传递缺口（R1）经 `2566c5e` 修复并复评通过；阶段 03 固定
-  最终方案备份、文档整合与最终工程门禁已完成，待用户合并 main。现行要求、行为规则、实现
-  入口、验收依据与适用限制统一见
+  最终方案备份、文档整合与最终工程门禁已完成，并经 PR #9 合入 main（`751ed53`）。现行要求、
+  行为规则、实现入口、验收依据与适用限制统一见
   [五期下一批迁移实现](../2026-09-24-stock-analysis-workflow-v1-phase-5-execution-implementation.md)。
-  本主题过程文档（迁移设计、证据摘要及执行计划目录）已按阶段 03 从工作区删除，完整备份
+  本主题过程文档（迁移设计、证据摘要及执行计划目录）已按阶段 03 从产品工作区删除，完整备份
   固定于备份分支 `zn_p5e_plan` 提交 `6d5bb4b`（该分支不得合入 main）；阶段 04 zn_dev
-  清理与 rebase 未启动，须用户另行授权。
+  已迁增量清理与 rebase 按该备份中的阶段 04 计划经用户单独授权执行。
 - 五期中期迁移：任务控制恢复与资料复用（M1/M2，2026-09-21 至 2026-09-23）：
   从 main（`f0fcb66`）创建 `zn_p5m` 选择性迁入 M1/M2；阶段 01 迁移经人工确认，
   代码及 R1/R2 复评通过；M2-6 Flash 机制补证复评通过，十二条功能要求在已批准范围内
   闭环；用量对账 B1–B4 与预算／监测 B5–B6 均已复评通过关闭；阶段 06 文档整合与
-  最终工程门禁已完成，待用户合并 main。现行能力、边界、验收结果与用量收尾统一见
+  最终工程门禁已完成，并经 PR #8 合入 main（`c4e5258`）。现行能力、边界、验收结果与用量收尾统一见
   [五期中期实现](../2026-09-21-stock-analysis-workflow-v1-phase-5-middle-implementation.md)。
   本主题过程文档（中期设计、证据摘要、收尾问题原因分析及两套执行计划目录）已按
   阶段 06 从工作区删除，完整备份固定于备份分支 `zn_p5m_plan` 提交 `03aaba8`
@@ -33,13 +75,31 @@
 
 ## 历史与未启动范围
 
-五期前半拆分（安装维护 F1 与旧成果 F2）的迁移、全面评审与文档整理已于 2026-09-20 完成：
+原五期历史路线图与阶段计划已全部从工作区清理，原文通过下方固定 Git 提交回溯：
+其中任务控制恢复、资料复用追溯已随中期迁移交付并经复评闭环、合入 main（PR #8）；
+正式并行协作已通过 PR #9 合入 main；扩展管理与计量工具实现及随迁记录／测试已通过
+PR #10 合入 main；长期完整认证与性能未验收事实继续保留；按用户最新决定不继续性能验收。
+P2 已在 A2 资格门后停止，
+A3／AQ／AD 未启动；后半重设计与新运行须另行批准。原索引的逐批历史摘要可从冻结提交
+`357a9d3` 的同路径回溯，不在总索引重复维护。
+
+2026-09-23 zn_dev 整理：zn_dev 独有的压缩提交 rebase 到含五期中期的 main（`c4e5258`），
+已迁入 main 的中期设计、中期迁移计划目录与原五期需求／设计（固定回源提交 `c0c8c53`）
+从工作区删除，rebase 前状态固定于备份分支 `zn_dev_bak`（`52d934a`）；后半独有增量保留，
+未推送、未合并。
+
+五期前半拆分（安装维护 F1 与旧成果 F2）的迁移、全面评审与文档整理已于 2026-09-20 完成，
+用户合入 main、zn_dev 同步与最终回归已于 2026-09-21 完成，阶段 01–05 全部收尾。
+zn_dev 按用户要求以 rebase 保留线性增量（`b548374`），随后解除冻结并更新远端（`b973419`）。
 迁移经用户人工确认，全面评审与集中复评通过（R1–R8 全部关闭，复评提交 `ec5eea8`）。现行
 能力、边界与验收结果统一见
 [V1 五期前半实现](../2026-09-20-stock-analysis-workflow-v1-phase-5-foundation-implementation.md)。
 其执行计划（路线图、阶段 01–05、95 路径去向与文档去向映射）已从工作区删除，保存于独立
 备份分支 `codex/phase5-split-plan-backup`（阶段 03 同步提交 `efcc576`，完成补记见该分支
-最新提交）；后续阶段 04/05 从该备份提交读取，不复制回本目录。
+最新提交 `25e14a5`）。该备份只用于历史追溯，不参与产品合并、不复制回本目录。
+原始来源由 `phase5-split-source-20260920` 标签及提交 `357a9d3` 保留，标签不得移动或删除；
+本机 pre-push 已保留标签保护，zn_dev 的分支冻结已解除。历史依据见
+[五期拆分决策](https://github.com/coding-alchemy/HETU/blob/357a9d3fca481bcd6b45da8ae46ba3c13c0833ba/specs/2026-09-20-stock-analysis-workflow-v1-phase-5-split-design.md)。
 
 V1 四期（报告信息完整性与分析有效性）已完成并由用户验收（2026-09-06，用户审阅 M04 完整报告
 与 F01 降级报告后明确验收；阶段 03 行为门禁 11/11 PASS，全量门禁通过）。其执行计划已从工作区
@@ -67,6 +127,50 @@ V1 三期信息源研究、证据整改和 Deep 运行质量整改已经完成�
 V1 长期需求目前只有需求，不得把需求文档当作已批准执行计划：
 
 - [V1 长期需求：完善个股分析工作流](../stock-analysis-workflow-v1-requirements.md)
+
+## 已清理计划的历史回溯
+
+2026-10-02 按用户授权从工作区删除 20 份已执行完的计划文件。清理前逐文件核对，
+全部与本地固定提交 `f0353f21a2acd4b6613d9ed088c12548cb3ed143` 中的字节一致。
+该提交是本地历史来源，不代表服务器已同步；未新建备份分支、未移动既有引用。
+验收记录、实现文档、原始 `.hetu/`、历史 check 和未完成项保留。
+
+| 原目录（相对 `specs/plans/`） | 已清理范围 | 现行成果入口 |
+|---|---|---|
+| `phase5-f1-f2-migration/` | README 与阶段 01–03，共 4 份 | [扩展管理与计量工具实现](../2026-09-25-stock-analysis-workflow-v1-phase-5-extensions-metering-implementation.md) |
+| `phase5-groups-5-7-migration/` | README 与阶段 01–03，共 4 份 | [第 5–7 组统一验收记录](../2026-09-27-phase5-groups-5-7-implementation.md) |
+| `zn-dev-remaining-groups-fix/` | README 与阶段 01–05，共 6 份 | [后半需求去向](../2026-09-20-stock-analysis-workflow-v1-phase-5-remainder-requirements.md)、[扩展管理与计量工具实现](../2026-09-25-stock-analysis-workflow-v1-phase-5-extensions-metering-implementation.md) |
+| `zn-dev-closeout/` | `2026-09-25-01-offline-assessment.md`、`2026-09-25-02-targeted-fixes.md`、`2026-09-25-03-quality-acceptance.md`、`2026-09-25-05-closeout.md`，共 4 份 | [证据矩阵](../2026-09-25-zn-dev-closeout-evidence.md) §8／§14／§16／§20；阶段 04 及记录索引的后续清理见本节续清理记录 |
+| `stock-analysis-workflow-v1-phase-5/` | `2026-09-08-03-control-context-reuse.md`、`2026-09-08-04-parallel-and-performance.md`，共 2 份 | [五期中期实现](../2026-09-21-stock-analysis-workflow-v1-phase-5-middle-implementation.md)、[五期下一批迁移实现](../2026-09-24-stock-analysis-workflow-v1-phase-5-execution-implementation.md) |
+
+现行文档标为「历史」的计划链接指向本节；原章节号仍指相应固定提交中的历史文件，
+不是本索引的章节号。完整文件名及原文可在仓库根目录只读查询：
+
+```bash
+git ls-tree -r --name-only f0353f21a2acd4b6613d9ed088c12548cb3ed143 -- specs/plans/
+git show f0353f21a2acd4b6613d9ed088c12548cb3ed143:specs/plans/zn-dev-closeout/2026-09-25-03-quality-acceptance.md
+```
+
+首批 20 份文件使用 `f0353f21a2acd4b6613d9ed088c12548cb3ed143` 与上表原路径回源。
+
+本次续清理剩余 7 份文件：它们已被现行实现／验收记录接替或停止执行，不继续作为工作区
+计划保留。清理前逐文件确认字节完整保存在本地提交
+`d12415290feb20aa117af73443251c08e1bb5e48`；本轮未创建备份或修改 Git 引用。
+
+| 原目录（相对 `specs/plans/`） | 本次清理范围 | 现行事实入口 |
+|---|---|---|
+| `zn-dev-closeout/` | `2026-09-25-04-performance-calibration.md` 与 `README.md`，共 2 份 | [证据矩阵](../2026-09-25-zn-dev-closeout-evidence.md) §18–§22；原运行卡与批准全文从本地固定提交回源 |
+| `stock-analysis-workflow-v1-phase-5/` | `2026-09-08-01-observation-and-evidence.md`、`2026-09-08-02-baseline-calibration.md`、`2026-09-08-06-extensions-and-archive.md`、`2026-09-08-07-host-and-final-acceptance.md` 与 `README.md`，共 5 份 | [后半需求去向](../2026-09-20-stock-analysis-workflow-v1-phase-5-remainder-requirements.md)、各期实现文档及第 5–7 组统一验收记录 |
+
+本次 7 份文件使用 `d12415290feb20aa117af73443251c08e1bb5e48` 与本次表中的原路径回源：
+
+```bash
+git show d12415290feb20aa117af73443251c08e1bb5e48:specs/plans/zn-dev-closeout/2026-09-25-04-performance-calibration.md
+git show d12415290feb20aa117af73443251c08e1bb5e48:specs/plans/stock-analysis-workflow-v1-phase-5/2026-09-08-07-host-and-final-acceptance.md
+```
+
+两次累计清理 27 份计划文件；`specs/plans/` 仅保留本总索引。已接受结论、未验收事实、
+原始证据和历史失败均不改写，也不因计划清理要求恢复旧批次或新增运行。
 
 ## 新增计划约定
 
