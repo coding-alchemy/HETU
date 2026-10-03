@@ -160,6 +160,31 @@ MANIFEST_SCRIPT_KEYS = frozenset(
     }
 )
 MANIFEST_INPUT_KEYS = frozenset({"path", "sha256"})
+# Phase-5 stage-03 conditional run fields: absent means "not recorded"
+# (old runs stay valid and are never back-filled).
+MANIFEST_RUN_CONDITIONAL_KEYS = frozenset(
+    {"task_id", "parent_task_id", "reuse_previous_task_data", "extensions"}
+)
+# Phase-5 stage-06 conditional run field: entries recording third-party work
+# packages actually loaded this run.  Identities come only from this explicit
+# record — the checker never scans global plugin directories to mint them.
+MANIFEST_RUN_EXTENSION_KEYS = frozenset(
+    {"id", "version", "source", "summary", "enabled_scope"}
+)
+EXTENSION_ID_PATTERN = re.compile(r"^x\.[a-z0-9-]+\.[a-z0-9-]+$")
+# Phase-5 stage-03 conditional artifact key: a nested object recording that
+# this entry's material was copied from a source task. All five subkeys are
+# required whenever the key appears; values never contain secrets and
+# source_artifact is a relative locator inside the source task.
+MANIFEST_PROVENANCE_KEYS = frozenset(
+    {
+        "source_task_id",
+        "source_artifact",
+        "original_source",
+        "original_acquired_at",
+        "copied_at",
+    }
+)
 DATA_MODES = frozenset({"public", "authorized"})
 REQUEST_DEPTHS = frozenset({"quick", "standard", "deep"})
 SOURCE_ADAPTER_ENVELOPE_KEYS = frozenset(
@@ -397,6 +422,17 @@ def _validate_output_location(
 
 def _nonempty_string(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _structural_relative_locator(raw: object) -> bool:
+    """Structural-only form of ``_safe_relative``'s path rules for values
+    that locate something inside ANOTHER task's tree (provenance
+    source_artifact): absolute paths and ``..`` escapes are invalid. The
+    referenced task and file are never accessed and need not exist."""
+    if not isinstance(raw, str) or not raw:
+        return False
+    candidate = Path(raw)
+    return not candidate.is_absolute() and ".." not in candidate.parts
 
 
 def _valid_sha256(value: object) -> bool:
@@ -930,6 +966,7 @@ def _check_manifest(
     manifest: dict[str, Any],
     issues: list[dict[str, str]],
     warnings: list[dict[str, str]],
+    recorded_extensions: set[str] | None = None,
 ) -> tuple[set[str], dict[str, str]]:
     """Validate structure and entries; return registered paths and statuses."""
     registered: set[str] = set()
@@ -957,13 +994,30 @@ def _check_manifest(
         _schema_issue(issues, "manifest.json", "manifest run must be an object")
     else:
         run_missing = set(MANIFEST_RUN_KEYS) - set(run_block)
-        run_extra = set(run_block) - set(MANIFEST_RUN_KEYS)
+        run_extra = (
+            set(run_block) - set(MANIFEST_RUN_KEYS) - MANIFEST_RUN_CONDITIONAL_KEYS
+        )
         if run_missing or run_extra:
             _schema_issue(
                 issues,
                 "manifest.json#run",
                 "manifest run block violates the closed schema "
                 f"(missing={sorted(run_missing)}, extra={sorted(run_extra)})",
+            )
+        for key in ("task_id", "parent_task_id"):
+            if key in run_block and not _nonempty_string(run_block.get(key)):
+                _schema_issue(
+                    issues,
+                    f"manifest.json#run.{key}",
+                    f"run.{key} must be a non-empty string when recorded",
+                )
+        if "reuse_previous_task_data" in run_block and not isinstance(
+            run_block.get("reuse_previous_task_data"), bool
+        ):
+            _schema_issue(
+                issues,
+                "manifest.json#run.reuse_previous_task_data",
+                "run.reuse_previous_task_data must be a boolean when recorded",
             )
         for key in (
             "run_id",
@@ -1037,6 +1091,53 @@ def _check_manifest(
                     "manifest.json#run.runtime_skill.sha256",
                     "runtime Skill sha256 must be 64 lowercase hexadecimal characters",
                 )
+    if recorded_extensions is None:
+        recorded_extensions = set()
+    if isinstance(run_block, dict):
+        extensions_block = run_block.get("extensions")
+        if "extensions" in run_block:
+            if not isinstance(extensions_block, list) or not extensions_block:
+                _schema_issue(
+                    issues,
+                    "manifest.json#run.extensions",
+                    "run.extensions must be a non-empty list when recorded",
+                )
+            else:
+                for index, extension in enumerate(extensions_block):
+                    extension_path = f"manifest.json#run.extensions[{index}]"
+                    if not isinstance(extension, dict):
+                        _schema_issue(
+                            issues, extension_path, "extension entry must be an object"
+                        )
+                        continue
+                    missing = MANIFEST_RUN_EXTENSION_KEYS - set(extension)
+                    extra = set(extension) - MANIFEST_RUN_EXTENSION_KEYS
+                    if missing or extra:
+                        _schema_issue(
+                            issues,
+                            extension_path,
+                            "extension entry violates the closed schema "
+                            f"(missing={sorted(missing)}, extra={sorted(extra)})",
+                        )
+                        continue
+                    for key in MANIFEST_RUN_EXTENSION_KEYS:
+                        if not _nonempty_string(extension.get(key)):
+                            _schema_issue(
+                                issues,
+                                f"{extension_path}.{key}",
+                                f"run.extensions {key} must be a non-empty string",
+                            )
+                    if not EXTENSION_ID_PATTERN.fullmatch(str(extension.get("id", ""))):
+                        _schema_issue(
+                            issues,
+                            f"{extension_path}.id",
+                            "run.extensions id must look like x.<namespace>.<name>",
+                        )
+                    elif all(
+                        _nonempty_string(extension.get(key))
+                        for key in MANIFEST_RUN_EXTENSION_KEYS
+                    ):
+                        recorded_extensions.add(extension["id"])
     entries = manifest.get("artifacts")
     if not isinstance(entries, list) or not entries:
         _schema_issue(issues, "manifest.json", "artifacts must be a non-empty list")
@@ -1053,6 +1154,8 @@ def _check_manifest(
             allowed.add("script")
         if entry_status == "failed":
             allowed.add("failure")
+        if "provenance" in entry:
+            allowed.add("provenance")
         missing_keys = MANIFEST_ENTRY_BASE_KEYS - set(entry)
         extra_keys = set(entry) - allowed
         if missing_keys or extra_keys:
@@ -1062,6 +1165,54 @@ def _check_manifest(
                 "entry key set violates the closed manifest schema "
                 f"(missing={sorted(missing_keys)}, extra={sorted(extra_keys)})",
             )
+        if "provenance" in entry:
+            provenance = entry.get("provenance")
+            entry_label = str(entry.get("path", entry_path))
+            if not isinstance(provenance, dict) or set(provenance) != MANIFEST_PROVENANCE_KEYS:
+                _schema_issue(
+                    issues,
+                    entry_label,
+                    "provenance must be an object with exactly "
+                    f"{sorted(MANIFEST_PROVENANCE_KEYS)}",
+                )
+            else:
+                for key in sorted(MANIFEST_PROVENANCE_KEYS):
+                    if not _nonempty_string(provenance.get(key)):
+                        _schema_issue(
+                            issues,
+                            entry_label,
+                            f"provenance.{key} must be a non-empty string",
+                        )
+                if not _structural_relative_locator(
+                    provenance.get("source_artifact")
+                ):
+                    _schema_issue(
+                        issues,
+                        entry_label,
+                        "provenance.source_artifact must be a relative "
+                        "locator inside the source task: absolute paths and "
+                        "'..' escapes are invalid",
+                    )
+                for key in ("original_acquired_at", "copied_at"):
+                    if not _valid_timestamp(provenance.get(key)):
+                        _schema_issue(
+                            issues,
+                            entry_label,
+                            f"provenance.{key} must be an ISO 8601 timestamp "
+                            "with timezone",
+                        )
+            if (
+                isinstance(run_block, dict)
+                and run_block.get("reuse_previous_task_data") is False
+            ):
+                issues.append(
+                    _issue(
+                        "manifest.reuse_contradiction",
+                        entry_label,
+                        "entry copies material from a source task while "
+                        "run.reuse_previous_task_data is false",
+                    )
+                )
         if not isinstance(entry_type, str) or entry_type not in MANIFEST_TYPES:
             _schema_issue(
                 issues,
@@ -1069,13 +1220,15 @@ def _check_manifest(
                 f"entry type must be one of {MANIFEST_TYPES}, got {entry_type!r}",
             )
         work_package = entry.get("work_package")
-        if not isinstance(work_package, str) or work_package not in {
-            name.split("-")[0] for name in WORK_PACKAGES
-        }:
+        if not isinstance(work_package, str) or (
+            work_package not in {name.split("-")[0] for name in WORK_PACKAGES}
+            and work_package not in recorded_extensions
+        ):
             _schema_issue(
                 issues,
                 str(entry.get("path", entry_path)),
-                "entry work_package must be one of W0-W10",
+                "entry work_package must be one of W0-W10 or an id recorded "
+                "in run.extensions",
             )
         for key in ("media_format",):
             if key in entry and not _nonempty_string(entry.get(key)):
@@ -2738,6 +2891,7 @@ def _check_scripts(
     research_root: Path,
     registered: set[str],
     issues: list[dict[str, str]],
+    recorded_extensions: set[str],
 ) -> None:
     scripts_root = research_root / "artifacts" / "scripts"
     actual: set[str] = set()
@@ -2765,6 +2919,7 @@ def _check_scripts(
                 )
             )
     known_owners = {name for name in WORK_PACKAGES} | {name.split("-")[0] for name in WORK_PACKAGES}
+    known_owners.update(recorded_extensions)
     for relative in actual:
         owner = relative.split("/")[2] if relative.count("/") >= 2 else ""
         if relative.count("/") >= 3 and owner not in known_owners:
@@ -2772,7 +2927,7 @@ def _check_scripts(
                 _issue(
                     "script.unknown_owner",
                     relative,
-                    "scripts must live under artifacts/scripts/<W0-W10>/, "
+                    "scripts must live under artifacts/scripts/<W0-W10 or recorded extension id>/, "
                     f"unknown owner directory {owner!r}",
                 )
             )
@@ -3336,6 +3491,7 @@ def check_run(
 
     registered: set[str] = set()
     entry_statuses: dict[str, str] = {}
+    recorded_extensions: set[str] = set()
     manifest_data: dict[str, Any] | None = None
     if "manifest.json" not in missing:
         try:
@@ -3360,7 +3516,7 @@ def check_run(
             else:
                 manifest_data = manifest
                 registered, entry_statuses = _check_manifest(
-                    research_root, manifest, issues, warnings
+                    research_root, manifest, issues, warnings, recorded_extensions
                 )
                 if lock_present:
                     _check_identity_bindings(manifest, lock, issues)
@@ -3484,7 +3640,7 @@ def check_run(
         _check_execution_claim_records(research_root, registered, warnings)
 
     _check_data_artifacts(research_root, registered, issues)
-    _check_scripts(research_root, registered, issues)
+    _check_scripts(research_root, registered, issues, recorded_extensions)
     checks.append(
         _check(
             "script.registration",

@@ -1,0 +1,11 @@
+{
+  "material_id": "late-material",
+  "outlet": "合成公告速递",
+  "source_type": "转载",
+  "metric": "2025年全年营业收入预告",
+  "value": "168000",
+  "unit": "万元",
+  "event_date": "2026-01-20",
+  "published_at": "2026-01-20T09:30:00+08:00",
+  "note": "合成受控材料：事件与发布均晚于 as_of=2025-12-31（fixture，主体虚构，无事实内容）"
+}

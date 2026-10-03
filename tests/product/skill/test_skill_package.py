@@ -195,3 +195,47 @@ def test_work_package_value_error_message_is_preserved_at_public_boundary(
     )
     with pytest.raises(SkillValidationError, match="unknown dependency target: W99"):
         validate_skill_package(root)
+
+
+# 阶段 07.1b：包清单必须覆盖实际宿主元数据。元数据只映射名称／描述／触发提示，
+# 不增加研究指令；MANIFEST.json 必须按哈希覆盖该文件。
+SKILL_ROOT = Path("skills/hetu-stock-analysis")
+HOST_METADATA_PATH = SKILL_ROOT / "hosts.json"
+KNOWN_HOSTS = ("codex", "claude", "opencode", "zcode")
+ALLOWED_HOST_METADATA_FIELDS = {"name", "description", "trigger"}
+
+
+def test_host_metadata_maps_only_name_description_trigger() -> None:
+    import json
+    import re
+
+    payload = json.loads(HOST_METADATA_PATH.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == "1.0"
+    assert set(payload["hosts"]) == set(KNOWN_HOSTS)
+    forbidden = re.compile(r"\bW(?:10|[0-9])\b|工作包|orchestration")
+    for host in KNOWN_HOSTS:
+        metadata = payload["hosts"][host]
+        assert set(metadata) == ALLOWED_HOST_METADATA_FIELDS, (
+            f"{host}: 宿主元数据字段只允许 name/description/trigger"
+        )
+        for field, value in metadata.items():
+            assert isinstance(value, str) and value.strip(), (
+                f"{host}.{field}: 必须是 非空字符串"
+            )
+            assert not forbidden.search(value), (
+                f"{host}.{field}: 宿主元数据不得包含研究指令内容"
+            )
+
+
+def test_manifest_covers_host_metadata_by_hash() -> None:
+    import hashlib
+    import json
+
+    manifest = json.loads(
+        (SKILL_ROOT / "MANIFEST.json").read_text(encoding="utf-8")
+    )
+    relative = "hosts.json"
+    assert relative in manifest["files"], "MANIFEST.json 必须覆盖宿主元数据 hosts.json"
+    digest = hashlib.sha256()
+    digest.update(HOST_METADATA_PATH.read_bytes())
+    assert manifest["files"][relative] == digest.hexdigest()

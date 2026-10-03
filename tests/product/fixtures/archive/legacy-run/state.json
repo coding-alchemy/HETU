@@ -1,0 +1,90 @@
+{
+  "schema_version": "3",
+  "request": {
+    "subject": {"type": "security", "symbol": "000001.SZ"},
+    "as_of": "2026-06-30T18:00:00+08:00",
+    "depth": "standard",
+    "data_mode": "public",
+    "attachments": ["attachments/field-notes.md"]
+  },
+  "evidence_ledger": {
+    "ev-s2-filing": {"source_id": "src-filing", "permission": "public"}
+  },
+  "thesis_state": {
+    "main_thesis": "合成论点：示例公司渠道库存去化慢于表观收入。",
+    "adopted_claim_ids": ["claim-s2-filing"]
+  },
+  "workflow_state": {
+    "run_id": "11111111-2222-3333-4444-555555555555",
+    "status": "PAUSED",
+    "current_stage": 2,
+    "completed_stages": [0, 1],
+    "pause_reason": "等待用户决定",
+    "resume_stage": 2,
+    "user_decisions": [
+      {
+        "action": "RETRY",
+        "reason": "用户要求改用 2026 半年报口径。",
+        "corrected_as_of": "2026-08-31T18:00:00+08:00"
+      }
+    ],
+    "pause_history": []
+  },
+  "stage_attempts": {
+    "2": [
+      {
+        "stage_id": 2,
+        "conclusions": ["首次尝试：渠道调研样本不足，未取得结论。"],
+        "evidence": [],
+        "claims": [],
+        "thesis_updates": [],
+        "issues": [{"severity": "major", "message": "样本不足"}],
+        "monitoring_rules": []
+      },
+      {
+        "stage_id": 2,
+        "conclusions": ["二次尝试：渠道库存去化慢于表观收入。"],
+        "evidence": [
+          {
+            "evidence_id": "ev-s2-filing",
+            "source_id": "src-filing",
+            "provider": "example-provider",
+            "dataset": "filings",
+            "locator": "attachments/field-notes.md#p3",
+            "permission": "public"
+          }
+        ],
+        "claims": [
+          {
+            "claim_id": "claim-s2-filing",
+            "type": "judgment",
+            "text": "渠道库存去化慢于表观收入。",
+            "confidence": "medium",
+            "evidence_ids": ["ev-s2-filing"],
+            "counterevidence_ids": []
+          }
+        ],
+        "thesis_updates": [],
+        "issues": [],
+        "monitoring_rules": []
+      }
+    ]
+  },
+  "active_stage_attempts": {
+    "2": [
+      {
+        "stage_id": 2,
+        "conclusions": ["二次尝试：渠道库存去化慢于表观收入。"],
+        "evidence": [],
+        "claims": [],
+        "thesis_updates": [],
+        "issues": [],
+        "monitoring_rules": []
+      }
+    ]
+  },
+  "evaluation_time": "2026-07-01T09:00:00+08:00",
+  "authorization_attestation": null,
+  "api_token": "fake-secret-value-0000",
+  "unknown_field": {"value": "保留原值"}
+}

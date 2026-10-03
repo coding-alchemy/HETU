@@ -53,11 +53,16 @@ def test_current_entrypoints_share_the_same_subject_contract() -> None:
     assert "自由文本会被拒绝" not in current_documents["usage"]
 
 
-def test_current_usage_does_not_describe_v01_uninstall_as_current() -> None:
+def test_current_usage_describes_the_supported_uninstall_boundary() -> None:
     usage = _read(USAGE)
     assert "V0.1 不提供自动卸载" not in usage
-    assert "当前安装器不提供自动卸载命令" in usage
-    assert "安装器不会删除非受管文件" in usage
+    assert "当前安装器不提供自动卸载命令" not in usage
+    # Stage 05 provides uninstall; the doc must point at the managed command
+    # and keep the non-managed-deletion boundary explicit (line wrapping in
+    # the Markdown source is normalized before matching).
+    flattened = " ".join(usage.split())
+    assert "skill uninstall --host <host> --yes" in flattened
+    assert "安装器不会删除 非受管文件" in flattened
 
 
 # Patterns that flag a forbidden *current* normal command. Each is anchored to
@@ -248,6 +253,24 @@ def test_usage_guide_does_not_claim_cli_validates_research_semantics() -> None:
     usage = _read(USAGE)
     assert "CLI 负责确定性校验" not in usage
     assert "请求规范化、状态迁移校验、证据元数据检查、门禁评估与报告校验" not in usage
+
+
+def test_readme_documents_explicit_host_evidence_entry() -> None:
+    readme = _read(README)
+    # 显式选定证据的检查入口只在设置 HETU_HOST_EVIDENCE 时追加，且任何通过
+    # 都不构成宿主组合的正式支持认证
+    assert "HETU_HOST_EVIDENCE" in readme
+    assert "--host-evidence" in readme
+    assert "不构成任何宿主／模型组合的正式支持认证" in readme
+
+
+def test_usage_guide_documents_explicit_host_evidence_entry() -> None:
+    usage = _read(USAGE)
+    assert "--host-evidence" in usage
+    assert "host-support-record.json" in usage
+    assert "未执行" in usage
+    assert "不支持" in usage
+    assert "不构成宿主正式支持认证" in usage
 
 
 def test_changelog_records_current_unreleased_v02_and_v01_baseline() -> None:

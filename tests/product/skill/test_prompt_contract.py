@@ -131,3 +131,29 @@ def test_each_reopen_target_has_one_exact_explanation_line() -> None:
                 assert len(re.findall(rf"^- {target}:\s*\S.*$", revisit, re.MULTILINE)) == 1
         else:
             assert revisit.strip() == "不适用"
+
+
+def test_delivery_presentation_precedes_lock_and_post_lock_scoring() -> None:
+    skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    flow = re.sub(r"\s+", "", _section(skill, "## 最终交付"))
+
+    ordered = [
+        flow.index("W10两轮自检完成、发布阻断问题为零且必要回访重新定稿后才能交付"),
+        flow.index("定稿前独立核对、修正及直接影响复查完成且报告满足交付条件后"),
+        flow.index("立即向用户呈现最终报告或其可打开的定位"),
+        flow.index("版本锁定与锁后评分在交付呈现之后按既有流程进行"),
+    ]
+    assert ordered == sorted(ordered)
+    assert "评分结果不是用户收到最终报告的前置条件" in flow
+    assert "批量运行的协调层同样逐样本留下用户可见的交付呈现" in flow
+    assert "内部任务通知或交付标记文件不能代替" in flow
+
+    w10 = _work_package_path("W10").read_text(encoding="utf-8")
+    w10_flow = re.sub(r"\s+", "", w10)
+    assert (
+        "问题解决后完成安全自检，再正式交付；需要验收锁定与锁后评分时，在交付呈现之后进行"
+        in w10_flow
+    )
+    assert (
+        w10_flow.index("定稿前独立证据核对") < w10_flow.index("在交付呈现之后进行")
+    )

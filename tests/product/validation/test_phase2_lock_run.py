@@ -342,3 +342,33 @@ def test_lock_output_carries_no_verdict_or_adoption_fields(
     text = lock_record_path.read_text(encoding="utf-8")
     for forbidden in ("PASS", "INVALID", "FAIL", "采纳", "采用状态"):
         assert forbidden not in text
+
+
+def test_lock_publish_prints_canonical_delivery_message_path(
+    lock_module: object, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """锁定成功后输出锁目录内交付消息正本路径。
+
+    验收 check 要求 --delivery-message 与锁记录内路径一致（锁目录内的
+    正本）；P1 实测协调者不知此约定，现场读源码排查后重跑 4 次 check。"""
+    arguments = _lock_arguments(tmp_path)
+    argv = [
+        "--run-id", "synthetic-run-0001",
+        "--request", str(arguments["request_path"]),
+        "--research-root", str(arguments["research_root"]),
+        "--delivery-message", str(arguments["delivery_message_path"]),
+        "--environment", str(arguments["environment_path"]),
+        "--visible-before", str(arguments["visible_before_path"]),
+        "--visible-after", str(arguments["visible_after_path"]),
+        "--batch-root", str(arguments["batch_root"]),
+        "--runtime-skill-id", str(arguments["runtime_skill_id"]),
+        "--runtime-skill-sha256", str(arguments["runtime_skill_sha256"]),
+        "--model-id", str(arguments["model_id"]),
+    ]
+    assert lock_module.main(argv) == 0  # type: ignore[attr-defined]
+    out = capsys.readouterr().out
+    canonical = (
+        Path(str(arguments["batch_root"])) / "locks" / "synthetic-run-0001"
+        / "delivery-message.md"
+    )
+    assert str(canonical) in out

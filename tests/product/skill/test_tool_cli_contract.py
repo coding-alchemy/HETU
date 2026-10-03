@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -132,6 +133,62 @@ TOOL_CASES = [
     ),
 ]
 
+# 阶段 07.1b：统一的 CLI 合同层语义非法输入缺口。每个工具给出一个“JSON 可解析但
+# 语义非法”的输入，合同要求 exit 1 并写出 failure envelope（与 unparseable 区分）。
+SEMANTIC_INVALID_INPUTS = {
+    "financial_statements": {
+        "result": {
+            "data": {
+                "report_list": {
+                    "20241231": {
+                        "data": [{"item_title": "营业收入", "item_value": 100}],
+                    },
+                },
+            },
+        },
+    },
+    "announcement_index": {"pages": [], "as_of": "2025-01-31"},
+    "numeric_consistency": {
+        "revenue": "not-a-number",
+        "revenue_unit": "CNY",
+        "cost": "60",
+        "cost_unit": "CNY",
+    },
+    "financial_ratio_series": {
+        "subject": "600519.SH",
+        "scope": "consolidated",
+        "unit": "CNY",
+        "periods": [
+            {
+                "period": "2024-12-31",
+                "revenue": "100",
+                "cost": "60",
+                "attributable_profit": "15",
+                "operating_cash_flow": "18",
+                "current_assets": "50",
+                "current_liabilities": "20",
+                "accounts_receivable": "10",
+                "inventory": "12",
+                "total_assets": "100",
+            },
+        ],
+    },
+    "market_series_metrics": {
+        "subject": "600519.SH",
+        "adjustment": "qfq",
+        "timezone": "Asia/Shanghai",
+        "as_of": "2024-06-07T15:00:00+08:00",
+        "input_hash": "a1b2c3d4e5f6a7b8",
+        "window": 2,
+        "bars": [
+            {"timestamp": "2024-06-06T15:00:00+08:00", "close": "10"},
+            {"timestamp": "2024-06-07T15:00:00+08:00", "close": "0"},
+        ],
+    },
+}
+
+CASES_BY_ID = {case.id: case for case in TOOL_CASES}
+
 
 def _run_script(
     case: ToolCase,
@@ -249,3 +306,60 @@ def test_existing_output_is_refused_with_exit_2(
 
     assert completed.returncode == 2
     assert output_path.read_text(encoding="utf-8") == "existing evidence\n"
+
+
+@pytest.mark.parametrize(
+    "case_id", sorted(SEMANTIC_INVALID_INPUTS), ids=sorted(SEMANTIC_INVALID_INPUTS)
+)
+def test_semantic_invalid_input_exits_1_with_failure_envelope(
+    case_id: str, tmp_path: Path
+) -> None:
+    case = CASES_BY_ID[case_id]
+    input_path = _write_json(
+        tmp_path / "input.json", SEMANTIC_INVALID_INPUTS[case_id]
+    )
+    output_path = tmp_path / "envelope.json"
+
+    completed = _run_script(case, input_path, output_path)
+
+    assert completed.returncode == 1, completed.stderr
+    envelope = _read_envelope(output_path)
+    assert envelope["schema_version"] == "1.0"
+    assert envelope["tool"] == case.tool
+    assert envelope["status"] == "failed"
+    assert envelope["error_type"]
+    assert envelope["error_message"]
+    assert "result" not in envelope
+
+
+def test_pdf_text_extract_missing_dependency_fails_without_output(
+    tmp_path: Path,
+) -> None:
+    """A missing runtime dependency must fail closed: non-zero exit, no output."""
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir()
+    shim_dir.joinpath("pypdf.py").write_text(
+        'raise ImportError("No module named \'pypdf\'")\n', encoding="utf-8"
+    )
+    input_path = tmp_path / "input.pdf"
+    input_path.write_bytes(b"%PDF-1.4 fake")
+    output_path = tmp_path / "output.txt"
+    env = {**os.environ, "PYTHONPATH": str(shim_dir)}
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPTS_DIR / "pdf_text_extract.py"),
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+
+    assert completed.returncode != 0
+    assert not output_path.exists()

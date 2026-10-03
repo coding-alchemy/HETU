@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +8,37 @@ from pathlib import Path
 import pytest
 
 CHECKER = Path(__file__).resolve().parents[3] / "scripts" / "check_docs.py"
+REPO_ROOT = Path(__file__).resolve().parents[3]
+HOST_ACCEPTANCE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "host-acceptance.yml"
+
+
+def test_host_acceptance_workflow_is_manual_only_and_secret_backed() -> None:
+    workflow = HOST_ACCEPTANCE_WORKFLOW.read_text(encoding="utf-8")
+    # 真实验收只接显式手动触发，不接 push/PR 默认自动执行
+    assert "workflow_dispatch" in workflow
+    assert re.search(r"^\s*push:", workflow, re.MULTILINE) is None
+    assert "pull_request" not in workflow
+    # 凭据只经 GitHub Secrets 引用，仓库内不出现明文；case 清单留占位说明
+    assert "secrets." in workflow
+    assert "仅已批准 case" in workflow
+    # 受约束观察输入：claude 探针 / zcode attach 规格
+    assert re.search(r"^\s+probe:", workflow, re.MULTILINE) is not None
+    assert re.search(r"^\s+watch_specs:", workflow, re.MULTILINE) is not None
+
+
+def test_host_acceptance_workflow_run_step_injects_inputs_via_env() -> None:
+    workflow = HOST_ACCEPTANCE_WORKFLOW.read_text(encoding="utf-8")
+    # step 级 env 不跨步骤：run 步骤必须自行注入全部输入
+    run_step = workflow.split("name: Run single approved case", 1)[1]
+    run_step = run_step.split("- name:", 1)[0]
+    assert "AUTHORIZATION_REF: ${{ inputs.authorization_ref }}" in run_step
+    assert "PROBE: ${{ inputs.probe }}" in run_step
+    assert "WATCH_SPECS: ${{ inputs.watch_specs }}" in run_step
+    assert '--authorization-ref "$AUTHORIZATION_REF"' in run_step
+    assert "--probe" in run_step
+    assert '--watch-agent "$spec"' in run_step
+    # 宿主与观察模式不匹配时明确失败，不接任意 shell
+    assert "未执行" in run_step
 
 
 def _write(root: Path, relative: str, text: str) -> None:

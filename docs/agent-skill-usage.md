@@ -10,12 +10,34 @@ cd HETU
 ./scripts/install.sh --host codex
 ```
 
-将 `codex` 改为 `claude` 或 `opencode` 即可安装到其他宿主。已有 Skill 需要更新时
-使用 `./scripts/install.sh --host <host> --force`。
+将 `codex` 改为 `claude`、`opencode` 或 `zcode` 即可安装到其他宿主。已有 Skill 需要
+更新时使用 `./scripts/install.sh --host <host> --force`；更新采用原子目录交换，旧版
+保留为备份，新环境准备或切换失败时旧环境与旧 Skill 保持可用。由旧版安装器创建的
+`hetu-stock/venv` 布局会被安全识别并保留为上一可用组合，可直接 `--force` 升级。
 
-V1 一期实现已完成 Agent 主导研究闭环，Codex 上一次真实人工主链证明 Agent 产品路径基本可用。Codex、OpenCode 与
-Claude Code 的正式宿主认证仍统一为 `UNVERIFIED`；安装兼容性本身不等同于支持，一次人工
-主链也不等同于正式支持，只有完成版本化全场景验收并形成完整证据后才能更新支持状态。
+V1 一期实现已完成 Agent 主导研究闭环，Codex 上一次真实人工主链证明 Agent 产品路径基本可用。
+2026-09-13 阶段 07.2 实机批次后，四宿主（Codex、OpenCode、Claude Code、ZCode）功能层已验收
+（全新安装与发现、正/反/边界触发矩阵、扩展管理四动作、原生接口探针；claude 隔离以
+PreToolUse hook 实测有效）；ZCode 的 public×standard 组合质量门槛已验收，
+quick（6 次）/deep（1 次）有证据未达每组合 10 次门槛；长期"深度与多模型组合补验"
+专项五槽／三域已按 D5／B 类限定口径获用户最终验收（不等于完整组合认证）。
+Codex、OpenCode、Claude Code 的完整研究认证仍为 `UNVERIFIED`，2026-09-27 起按用户
+决定延后备案、不计入五期 P0，五期现行验收仅要求 ZCode。
+2026-09-30 本批仅 ZCode×GLM-5.3-Flash×standard×public 按用户批准的 5 次计入／
+4 次合格／80% 门槛取得**限定认证**；获证正常研究类别为半导体制造、钢铁、白酒、
+医药制造，安装／触发／按需读链已有证据。恒瑞医药计数含仅本样本批准的隔离未验证
+及旧 R2 元资料访问例外，G67-R1 失败仍留分母；这些事实不改写为原始行为通过。
+quick、deep、其他模型和未获证类别仍为 `UNVERIFIED`，长期 V1 发布候选门槛仍未完成，见[第 5–7 组现行要求与验收](../specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status)。
+安装兼容性本身不等同于支持，功能层认证也不等同于完整研究支持，只有完成
+组合级验收并形成完整证据后才能更新支持状态。截至 2026-09-17，三条性能验收线均未正式
+通过，五期未最终验收（现状与缺口见
+`.hetu/validation/phase-5/20260917-stage07-evidence-summary/`）。
+
+五期安装维护、旧成果处理、任务控制恢复、资料复用追溯、上下文管理、正式并行与汇合、
+三项减少重复工作的优化、扩展管理和计量工具已交付；扩展更新中断同版本重试及双表
+NULL `started_at` 拒绝问题已修复。现行行为、安全边界、验收依据与未完成项统一见
+[五期实现](../specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
+正式支持范围按本批限定声明与可回源证据判定，旧性能批次和宿主补验不自动续开。
 
 安装后在宿主中直接说：`用公开数据标准分析 600519`。当前正常入口是宿主中的自然语言
 Agent 请求：可直接给出明确公司名称、6 位 A 股代码，或带大写 `.SH`、`.SZ`、`.BJ`
@@ -29,15 +51,48 @@ canonical Skill 拥有完整研究执行链路：请求理解、研究规划、�
 
 `hetu-stock` 命令行只暴露两个顶层组：
 
-- `hetu-stock skill`：管理 canonical Skill 包（`validate`、`install`）。
-- `hetu-stock helper`：可选的确定性辅助命令（时点边界、授权检查）。helper 不可用
-  时，公开研究仍可借助宿主等价工具继续。
+- `hetu-stock skill`：管理 canonical Skill 包。`validate`、`install` 负责校验与
+  安装；`status`、`diagnose` 为只读诊断（完整性、备份、受管启动器、辅助环境与
+  下一动作，不联网、不修复）；`rollback` 回滚到最近一份完整备份并保留被换下版本；
+  `uninstall` 先列出处理范围、经 `--yes` 确认后只删除受管 Skill、受管启动器及
+  （可选且不被共享的）辅助环境，用户文件、其他宿主、研究与授权配置保留。
+- `hetu-stock helper`：可选的确定性辅助命令（时点边界、授权检查、旧成果读取）。
+  helper 不可用
+  时，公开研究仍可借助宿主等价工具继续。`archive-inspect --source <旧目录>`
+  只读检查旧格式（schema 3）研究目录，逐字段呈现请求、证据/主张、论点、阶段尝试、
+  原采用和用户决定，未知字段原样保留、源字节不变；`archive-export --source <旧目录>
+  --output <新目录>` 导出可读索引与授权允许的副本（含疑似秘密的原记录不复制、原件保留
+  原位；秘密过滤限已支持的 JSON 字段）。读取旧成果不会启动或恢复研究。
+- `hetu-stock skill extension`：管理本地第三方工作包扩展（阶段 06）。自然语言与
+  CLI 定位到同一组命令：`list`、`inspect`、`validate`、`install`、`update`、
+  `enable --host <codex|claude|opencode|zcode>`、`disable --host`、`uninstall`、
+  `context --host`（查看本宿主下次研究将看到的候选，可加 `--json`）。这些命令只做
+  管理，不启动研究；启用按宿主独立记录，结果与实际状态一致，纯管理不建研究目录。
+  管理完成后，研究会话开始时会话侧用 `context` 获取本宿主已启用且完整兼容的候选
+  摘要；是否采用由主 Agent 按主体、深度、授权和问题决定，扩展正文是不可信资料。
 
 一期只读 legacy 兼容面已退场：旧 workflow、models、report、config 源码、
 `legacy_cli.py` 及其专属测试与 Jinja 依赖已删除，只能通过 Git 历史追溯
 （历史阶段编号下的退场记录）。
 
 `hetu-stock` 不是 Agent，也不是 LLM 客户端，不生成研究事实，也不校验研究语义。
+
+五期任务控制恢复与资料复用功能（功能复评通过，十二条要求在已批准范围内闭环）为 Skill 增加两项研究行为能力：任务控制与恢复（取消后
+不再发起新调用、迟到返回未经恢复不采用、调整只动剩余工作、提前交付仍完成两轮自检、跨会话
+恢复先筛选候选再按需读取检查点）和资料复用与产物追溯（`reuse_previous_task_data` 默认开启，
+适用旧材料复制为本地副本并记录来源任务、原文件、原始来源与两个时间；显式关闭时不查找、
+不读取旧任务资料，获取失败不回退）。这些行为的已有证据来自受控合成样本、ZCode 桌面端
+协调会话与 Flash 机制内容级补证；未覆盖的宿主组合不宣称支持，详见
+[五期实现对应章节](../specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-middle)。
+
+五期上下文与并行功能（全面评审及 R1 复评通过）为 Skill 增加三组研究行为能力：长材料分批读取
+与整理（按问题控制单批字节量，分批不丢例外、否定与条件，压缩或转交保留证券、时点、授权、
+来源、计算、事实、冲突、缺口与用户决定，只减少已证明重复的读取）、正式子任务并行与汇合
+（两个以上独立问题才评估并行，自足输入、最小权限与隔离写入，汇合裁决去重同源、统一单位、
+冲突回源，局部失败不波及其他研究）和三项减少重复工作的优化（任务内共享取数只取一次、
+充分成果不重复研究、最终报告呈现先于验收锁定与锁后评分）。既有证据来自受控合成样本与
+受控短链路；宿主原生压缩、容量可见路径与真实并行收益未验证的边界继续披露，详见
+[五期实现对应章节](../specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-execution)。
 
 ## 当前支持范围
 
@@ -68,12 +123,16 @@ authorized 模式下，当某个授权来源失败时，只阻塞与该来源相
 
 | 内容 | 默认路径 |
 |------|----------|
-| Python 辅助工具隔离环境 | `${XDG_DATA_HOME:-$HOME/.local/share}/hetu-stock/venv` |
-| CLI 启动器 | `$HOME/.local/bin/hetu-stock` |
+| Python 辅助工具隔离环境（按版本独立） | `${XDG_DATA_HOME:-$HOME/.local/share}/hetu-stock/envs/env-<时间戳>-<pid>` |
+| 当前组合记录 | `${XDG_DATA_HOME:-$HOME/.local/share}/hetu-stock/installation.json` |
+| CLI 启动器 | `$HOME/.local/bin/hetu-stock`（指向当前版本环境的符号链接） |
+| Skill 暂存／备份／事务记录 | 目标 skills 根目录外的受管区 `<skills 上级>/.hetu-skill-maintenance/<目标摘要>/`，宿主 Skill 发现不会读取该目录 |
 | canonical Skill 源 | 当前仓库的 `skills/hetu-stock-analysis` |
 
-脚本通过绝对启动器完成自检，因此 `~/.local/bin` 不在 PATH 时安装仍然有效。若宿主
-无法从 PATH 找到 `hetu-stock`，Skill 会改用 `$HOME/.local/bin/hetu-stock`。
+每次维护在最终保留路径新建独立版本环境，完成依赖安装与 CLI 自检后才切换启动器；
+成功后只保留当前与上一可用组合，供回滚使用。脚本通过绝对启动器完成自检，因此
+`~/.local/bin` 不在 PATH 时安装仍然有效。若宿主无法从 PATH 找到 `hetu-stock`，
+Skill 会改用 `$HOME/.local/bin/hetu-stock`。
 
 ## Skill 更新与自定义安装
 
@@ -99,8 +158,30 @@ hetu-stock skill install --host claude --force
 | Codex | `$CODEX_HOME/skills` 或 `~/.codex/skills` |
 | Claude | `~/.claude/skills` |
 | OpenCode | `$XDG_CONFIG_HOME/opencode/skills` 或 `~/.config/opencode/skills` |
+| ZCode | `~/.zcode/skills`（依据原生发现证据核对） |
 
 每个宿主安装后的目录名均为 `hetu-stock-analysis`，包含 `SKILL.md`、引用文档和报告撰写指引。
+
+### 诊断、回滚与卸载
+
+```bash
+# 只读查看安装状态（完整性、备份、启动器、辅助环境）
+hetu-stock skill status --host claude
+hetu-stock skill diagnose --host claude
+
+# 回滚到最近一份完整备份（被换下版本保留为备份）
+hetu-stock skill rollback --host claude
+# 或指定 diagnose 列出的备份目录
+hetu-stock skill rollback --host claude --backup <维护区备份目录>
+
+# 卸载：先列出处理范围，确认后加 --yes；--remove-env 仅在无其他宿主使用时删除环境
+hetu-stock skill uninstall --host claude
+hetu-stock skill uninstall --host claude --yes
+```
+
+这些维护命令只操作受管目录与受管启动器，不删除宿主的其他配置、研究资料、旧报告、
+授权配置或非受管文件。Skill 发布与启动器切换各自原子；跨目录的整套维护不是单个
+原子操作，任一步失败会恢复已切换的部分，旧版在此之前不会被删除。
 
 ## 常见安装问题
 
@@ -123,9 +204,10 @@ $HOME/.local/bin/hetu-stock --help
 也可以自行将 `$HOME/.local/bin` 加入 PATH。安装脚本不会自动修改 `.profile`、
 `.bashrc`、`.zprofile` 或 `.zshrc`。
 
-当前安装器不提供自动卸载命令。需要卸载时只可移除上述受管 venv、启动器和所选宿主的
-`hetu-stock-analysis` Skill 目录；安装器不会删除非受管文件，也不会删除整个宿主配置
-目录。Skill 覆盖仍为非原子语义，备份和失败回滚属于 V1 安装治理增强。
+卸载使用 `hetu-stock skill uninstall --host <host> --yes`（见上文），安装器不会删除
+非受管文件，也不会删除整个宿主配置目录。覆盖安装的原子目录交换已实测
+macOS/APFS（真实交换、并发串行化、中断后恢复及不支持交换的负例）；Linux/ext4
+与其他文件系统的实测留待五期后半补齐，未实测前不把对应平台记为已支持。
 
 ## 开发安装
 
@@ -182,3 +264,34 @@ canonical Skill 负责综合与撰写，不再由 `hetu-stock` 命令行渲染�
 任何渲染命令。authorized 来源失败时只阻塞相关数据，
 运行保持 authorized 直到用户显式决定；public 研究在 helper 不可用时仍可借助宿主
 等价工具继续。
+
+## 五期观察入口（阶段 01，尚未认证）
+
+`scripts/host_acceptance.py` 提供确定性计量与宿主观察入口，供五期验收使用；普通研究不需要调用它。
+
+```bash
+python scripts/host_acceptance.py probe --host zcode --output <新的观察目录>
+python scripts/host_acceptance.py run  --host <host> --case <研究侧 case.json> --output <新的观察目录>
+python scripts/host_acceptance.py sweep --evidence <已有观察目录> --session <协调会话 sess_*>
+python scripts/host_acceptance.py check --evidence <已有观察目录> --output <结果.json>
+```
+
+- `probe` 只核对原生能力（版本、观测目录、metadata usage 样例、可选的带标注实况小探针），不分析股票；`host` 取 `codex|claude|opencode|zcode`。能力不成立时退出非零并列出缺口。ZCode 另有 `--isolation` 模式：对协调层按受控诱饵程序派发的两个子代理（受限例＋放任反例）做转录扫描，生成只含布尔、计数与判定依据的最小隔离证据（受限例 hold、放任例须检出、初始加载/历史注入/资料访问三项控制全部 verified 才判 pass）；`--staging-dir` 可核验轮转前快照。
+- `run` 只校验并登记单个显式 case（证券、中性请求、时点、模式、深度、复用开关、获准材料），拒绝任意 shell 内容与评审答案；真实派发由协调上下文按 case 执行，脚本不决定研究下一步。ZCode attach 模式以 `--watch-agent <原生id>=<scope>`（可重复，scope 必须显式）同时观察多个会话：子代理按 metadata 解析、`sess_*` 直观察协调者会话、`file:<路径>=<scope>` 观察"日志轮转前快照"。采集按完整行推进游标、退前排空、轮转/截断/坏行/非 completed 终态均写入 `collection-gaps.jsonl` 并按代数分段；工具事件只保留 id/name/分类（wrapper 派发单列），正文、参数与凭据不落盘。`--request-at`/`--delivered-at` 记录真实用户请求与协调交付时点。
+- `check` 离线复核观察目录中的用量与计时：按来源会话与消息 id 去重、累计快照按段压缩（起始快照按基线相减）、缓存口径未知不归一、完整性逐指标判定（输入/输出任一为 null 即不完整）、截断行与 collection gap 即失败、非 probe 运行必须声明至少 research＋review 必需范围；隔离证据须实际存在、可解析、对应本任务并满足两案例与三项控制要求。passed=false 即证据不完整；交付端点未独立观察（coordinator-reported/last-scope-completed）、实际发生而未声明的 scope、隔离证据未覆盖的参与上下文均判失败，探针通过与完整基线资格（baseline_qualification）分开输出。
+- `check --host-evidence <观察目录>`（2026-09-12，阶段 07.1a 新增）：对显式选定、已完成真实采证的观察目录运行同一套 check，额外要求目录内存在 `host-support-record.json` 宿主支持记录（白名单字段 `host`／`authorization`／`required_tools`／`recorded_at`，只记录宿主、授权与必要工具事实，不存凭据本体）。观察目录缺失、记录缺失或字段不合法时非零退出并打印“未执行／不支持”，缺记录等失败同样写入新的检查结果（默认 `<观察目录>/host-support-check.json`，create-only），绝不把跳过当作通过。该记录由 `run --authorization-ref <授权引用名，不含凭据>` 在授权与能力验证通过后、执行 case 前写入观察目录，字段只含本次已验证的 `host`／`authorization`／`required_tools` 事实，无授权引用或无已验证能力事实时不写（下游如实判“不支持”）。工程门禁 `scripts/check.sh` 仅在设置 `HETU_HOST_EVIDENCE` 环境变量时追加该入口，默认门禁完全离线，不启动任何宿主或模型。该入口的通过仍不构成宿主正式支持认证；真实验收另有仅手动触发的 `.github/workflows/host-acceptance.yml`（只接已批准 case 与宿主配置，凭据只经 GitHub Secrets 引用）。
+- `run --delivery-sweep`（2026-09-09 新增）：交付回合发生在 `run` 退出之后，run 自身永远观察不到。该模式要求恰好一个 `<id>=coordination` 观察规格且不给 `--delivered-at`；收尾时不记交付缺口，改记 `delivery_source=pending-sweep` 并保存协调会话游标（`sweep-state.json`）。协调者在交付后（观察目录内写入交付标记文件，默认 `delivery-message.md`）的下一回合运行 `sweep --evidence <目录> --session <协调会话>`：sweep 消费 rollout 尾部全部完整记录并一次性盖章 `delivery-observation.json`，端点取最后记录的原生 `completedAt`；标记 mtime 只用于核验"交付先于 sweep"（晚于端点即失败），不用于切分记录——一个回合跨多个 API 调用，按标记切分会把交付回合自己的尾部丢掉。因此 sweep 只能保守地多计（拖晚 sweep 只会增大端点与总量，不会漏计交付回合），交付后应尽早在下一回合执行 sweep；重跑 sweep 拒绝，端点不会漂移。`check` 遇 pending-sweep 时必须能解析该观察（缺文件、标记缺失或晚于端点、会话不符均失败），通过后以观察端点闭合请求→交付区间。live 模式按 sweep-state 游标续读（游标经 JSON 往返的 identity 强制回元组、推进后原地原子回写，均为 2026-09-10 修复——此前 live sweep 带存储游标必然误报 rotated 或无法回写）；`--transcript` 快照模式从字节 0 消费并靠身份去重，快照前已发生的轮转丢失不可检测，快照须紧贴交付。
+- `run --watch-control <文件>`（2026-09-10 新增）：运行中按同源游标语义轮询 JSONL 控制文件。`{"op":"watch","id":"<原生id>","scope":"<scope>"}` 动态注册晚现会话（核对/修正上下文在研究完成后才派发，id 无法在 run 启动时预知）；`{"op":"finalize"}` 声明交付收尾——在此之前 run 即使全部当前 watcher 已结束也不退出，持续等待新会话并增量采集协调转录，finalize 后按原静默规则排空退出。expected_scopes 覆盖全部曾加入的 watcher，单一证据目录声明整个任务。fail-closed：坏行、非法/冲突/finalize 后的注册、delivery-sweep 下追加第二个 coordination、无 finalize 超时、控制文件自身轮转/截断或退出时残留半行，均写入 `collection-gaps.jsonl` 并使 `check` 失败。
+- `run --resume` 与 `status`（2026-09-10 基础设施修复新增）：run 每个变更周期把全部 watcher 游标、控制游标与 request_at 持久化到 `watch-state.json`（首循环即持久化）；采集器被外部终止后，`run --resume`（同目录、省略 `--watch-agent`、其余旗标同原启动）从保存状态续跑，死窗期间发生的轮转/截断按既有语义记缺口——损失被界定为死窗内未消费字节而非整个任务窗。`status --evidence <目录>` 为只读视图（工件、逐 scope 事件数、缺口、watcher 游标、agent 元数据状态与转录空闲时长），用于区分正常长调用与代理停摆。同批修复：file: watcher 与隔离扫描的 session_id 统一为原生会话 id（去 `model-io-` 前缀），live agent watcher＋隔离验证组合自此可通过 check。
+
+已验证（2026-09-08，第三轮修复后）：ZCode 受控链路探针（非股票分析）四 scope（研究/核对/修正/协调）全程采集可用；修正判定后交付尾部为已知缺口，结果如实为“小计＋缺口”（passed=false，非完整计量），证据见 .hetu/validation/phase-5/20260908-stage01-fix3/chain-probe/。隔离证据按旧任务数据边界核验研究/核对/修正三个参与上下文的初始加载、历史注入与资料访问（空/损转录不证隔离、越界访问即失败），verdict=pass，证明范围限于受控种子标记设置。B04 核对事件回放与审计值精确一致（33,319 输出 token、46 个工具调用、缓存读取 1,279,616 与写入 0 分列）。**宿主限制（重要）**：claude 无头模式实测无可用路径级隔离（证据见 .hetu/validation/phase-5/20260908-stage01-fix/probe-isolation/），且其观察器按 mtime 初选转录、未绑定启动进程的原生会话 id，可能采到并发任务会话——这两点使 claude 当前不满足完整计量与隔离前提；Codex/OpenCode 未接入。ZCode 隔离无法观察未知自动注入机制，**每次真实采样须重立隔离证据**。**轮转风险（重要）**：本机 rollout 为全局小轮转池（约 3 个文件）且被并发会话共享——采集必须紧贴任务执行，或先用 stage-agent-transcript.sh 快照再以 file: 规格观察；快照是含完整请求的工作副本，仅存放 /tmp 并在采集后删除，证据只保留白名单字段与布尔判定。以上均不能视为宿主正式支持认证。
+
+已验证（2026-09-09，02 前置修复后）：`run --delivery-sweep` ＋ `sweep --transcript` 在真实运行形态（probe_mode=false）达成 `check` `passed=true` 且 `baseline_qualification=established`——交付端点取自协调会话原生记录、请求→交付区间完整闭合、零采集缺口，证据见 .hetu/validation/phase-5/20260909-stage02-calibration/chain-probe-sweep-r3/（三轮迭代与失败轮次记录见同目录 probe-record.md：轮转丢尾由 fail-closed 拦截、快照过早由时序判定拦截，最终以"交付回合只写标记、下一回合先快照再 sweep"固化操作合同）。修复前该宿主计量只能输出"小计＋缺口"，基线资格结构上不成立；修复仅新增交付终点观察，不改研究语义与既有结果。claude／Codex／OpenCode 的限制与未接入状态不变。
+
+已验证（2026-09-10，基础设施修复后）：`run --resume`＋`watch-state` 持久化使被外部终止（含 `kill -9`）的采集器可在同一观察目录续跑，损失界定为死窗内未消费字节（离线 V7a 干净恢复后单目录 established、V7b 死窗轮转损失 2 条且 fail-closed）；真实形态探针 **r5** 完整复演 S2 事故场景（研究 agent-kind watcher live 挂载→采集器 kill -9→status 确认→resume→核对/修正动态 agent 注册→隔离原生 id 覆盖→finalize→live sweep）达成 `passed=true`／`established`／零缺口、独立复算一致（.hetu/validation/phase-5/20260910-stage02-collection-verify/chain-probe-r5/，实现与验证见同目录 fix2-record.md）。单测套件 102/102。遗留边界如实：采集器死亡且协调层长时间未察觉期间无保护（S2 约 70 分钟即此情形，缓解为 status 尽早发现＋立即 resume）；协调会话文件池压翻代在 live 期间损失有界、死窗期间按缺口呈现。
+
+已验证（2026-09-10，动态注册修复后）：`run --watch-control` 在真实派发顺序（研究完成→等待→核对加入→修正加入→finalize 交付收尾）下以**单一证据目录**达成 `check` `passed=true` 且 `baseline_qualification=established`、独立复算一致、等待期协调记录实时落盘；无 finalize 超时与等待期轮转均 fail-closed。离线进程级验证（V5/V6）见 .hetu/validation/phase-5/20260910-stage02-collection-verify/（缺口证实 V1–V4、实现与顺带缺陷修复见 fix-record.md）；**真实形态**经链路探针 r4 复验（真实会话、真实派发顺序、live sweep 游标续读首次真实执行成功，证据见同目录 chain-probe-r4-record.md）。此前结论需相应修订：r3 探针通过仅覆盖"全部会话 id 在 run 启动时已知"的形态（其 review 代理先派发内部等待）；live sweep 带存储游标的两个缺陷为该日修复，r1 的"rotated"拒绝不能反推当时确有轮转。S1 质量结果与其余既有证据的有效性不变。
+
+已验证（2026-09-11，阶段 03 合同落地）：研究 Skill 新增四组合同并经静态测试与受控行为样本验证（证据见 .hetu/validation/phase-5/20260911-stage03-execution/）。①任务关系与复用：`manifest.run` 条件字段 task_id/parent_task_id/reuse_previous_task_data（缺省＝未记录，旧运行不补写、不失效）；条目 provenance 五键（source_task_id/source_artifact/original_source/original_acquired_at/copied_at，source_artifact 仅结构校验——拒绝绝对路径与 `..`，不访问来源任务）；reuse=false 与 provenance 并存判显式矛盾；checker 不推断用途等价（两次尝试、多支持原文不判重复）。②预算与控制：三档预算为参考值（待校准，禁止当已批准默认）；同类重试计数到限换路/缩小/留缺口；七类停止条件各自停止对应工作；超时按八字段模板继续不暂停；取消后迟到返回一律未采用；恢复先五维筛选、真实歧义才问、false 不查旧任务、不重做无影响已完成项（C01–C10 全过）。③能力与长材料：host-tools 固化能力预检（未知版本只记能力）、独立核对入口（修正后只复查直接影响）、字节预算参考值分批推进、长材料七维度版本化＋压缩转交必留清单（关键否定移除评审判 FAIL 负例、容量未知拒绝编造实证）（L1–L3 全过）。④默认复用：`reuse_previous_task_data` 默认 true，"不用旧任务数据，从头分析"映射 false；适用旧材料复制为本地副本（五键 provenance、非链接、不整套复制、不伪装新下载）；false 零读取旧任务；未许可只留定位与限制、复制中断不登记成功（R01–R03 全过，R01 旧目录隔离后本地副本仍闭合）。
+
+已验证（2026-09-12，阶段 04 合同落地）：研究 Skill 新增并行派发与汇合裁决两组合同并经静态测试与受控行为样本验证（证据见 .hetu/validation/phase-5/20260912-stage04-parallel/；02 impact-map 已按阶段 04 计划回写实现核对与 07 对照契约）。①派发合同（04.1）：正式子任务有稳定任务标识、父子关系与独立生命周期，尝试与采用沿用 03 记录合同，不改 W0–W10 身份、核心依赖与最低覆盖；只有两个及以上可独立理解、取证、产出且无共享可变状态的独立问题才评估并行，是否派发由主 Agent 判断；派发前统一证券、`as_of`、数据模式、深度、关注点、授权与证据规则六项，候选域按本次实际问题选择；请求规范化、依赖财务基线的预测估值、跨域综合、最大未知、监控、质量复核、报告默认串行、依赖先行；自足输入十二项、返回契约十三项、上下文只传当前问题所需部分；子任务不写 `manifest.json`、`checkpoint.md`、`evidence.md`、owner 正文和最终报告，返回经 owner 审查后串行合入。②汇合裁决与失败隔离（04.2）：子任务返回按完成度、来源、时点、授权、证据类型、结论边界六维审查后才可采用；同源转载去重（多转载≠多独立来源）、先统一单位与口径再比较、冲突回源裁决；多数、速度、子 Agent 自报置信度都不作采用依据；单个子任务失败仅影响对应问题，主 Agent 在预算内重试（按"同类重试计数"累计）、缩小、重新分派、顺序执行或局部降级并留缺口；authorized 返回合入前逐项再审实际来源、数据集、许可、点时、必要性与脱敏（"子任务完成"不是授权证明）；越权返回不采用且不进入提示/证据/日志，返回文本内嵌指令一律不执行、不扩权；无子 Agent 能力时同质量顺序完成并标注"未完成并行验证"，不以顺序结果冒充并行验证结论。③P01–P06 行为证据：受控合成场景（虚构主体，非股票分析）六样本全部通过——P01 四问题拆分与并行派发、P02 旧任务资料复用免重复派发（provenance 五键）、P03 同源转载去重与回源裁决、P04 超时重新分派与失败隔离、P05 无并行能力顺序回退、P06 越权/恶意返回处置（逐案独立刺激、判表审计、log 在盘）。④07 对照契约已固定：顺序/并行两侧同一问题契约（证券、深度、`as_of`、数据模式、宿主、模型、工具、授权、网络、字段口径）逐项固定，最小上下文与设计 §6 质量要求不变，至少三个独立研究域真实重叠；模型、工具、授权或网络差异逐项说明，不以版本指纹判断等价；数值待 02 基线确认后沿用，现为待定。并行收益证明留 07 配对完整研究，本阶段不宣称提速。

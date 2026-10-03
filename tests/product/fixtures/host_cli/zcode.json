@@ -1,0 +1,12 @@
+{
+  "captured_at": "2026-09-12",
+  "help_text": null,
+  "host": "zcode",
+  "notes": "宿主 CLI 未安装，未捕获任何协议字段，不猜测新版本。",
+  "protocol": {
+    "accepted_flags": [],
+    "checked_absent": []
+  },
+  "status": "unavailable",
+  "version": null
+}
