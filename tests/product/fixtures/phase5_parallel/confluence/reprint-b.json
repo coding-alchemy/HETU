@@ -1,0 +1,13 @@
+{
+  "material_id": "reprint-b",
+  "outlet": "合成证券日报B",
+  "source_type": "转载",
+  "underlying_text_id": "synth-q3-revenue-2025",
+  "underlying_text": "合成集团2025年前三季度营业收入为120000万元，同比增长12%。",
+  "metric": "2025年前三季度营业收入",
+  "value": "120000",
+  "unit": "万元",
+  "event_date": "2025-10-28",
+  "published_at": "2025-10-28T11:40:00+08:00",
+  "note": "合成受控材料：同源转载B，与转载A同一底层文本、不同转载渠道（fixture，主体虚构，无事实内容）"
+}

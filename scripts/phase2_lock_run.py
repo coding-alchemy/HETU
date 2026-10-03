@@ -269,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"lock failed: {error}", file=sys.stderr)
         return 2
     print(lock_record)
+    # 验收 check 要求 --delivery-message 与锁记录内路径一致；显式给出
+    # 锁目录内正本路径，避免协调层现场读源码排查（P1 实测重跑 4 次）。
+    print("canonical delivery message for check: "
+          f"{lock_record.parent / 'delivery-message.md'}")
     return 0
 
 

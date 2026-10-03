@@ -1,6 +1,7 @@
 # 河图研投助手
 
-基于证据的 A 股个股分析 Agent Skill：用户用自然语言向 Codex 或 OpenCode 发起
+基于证据的 A 股个股分析 Agent Skill：用户用自然语言向宿主 Agent（ZCode、Codex、
+Claude Code、OpenCode）发起
 研究请求，canonical Skill 负责请求理解、研究规划、来源选择、失败处理、综合与最终
 中文 Markdown 报告；`hetu-stock` 命令行只负责 Skill 包管理与可选的确定性辅助。
 
@@ -8,17 +9,34 @@
 
 | 项目 | 当前状态 |
 |------|----------|
-| 产品版本 | **V0.2（未正式发布）** |
-| 交付阶段 | V1 一至三期已完成：Agent 主导研究闭环、报告与产物合同、信息源治理及双模型 `deep` 内容验收均已落地 |
+| 产品版本 | **V0.2（未正式发布；V1 未完成）** |
+| 交付阶段 | V1 一至四期已交付；五期安装维护、旧成果检查导出、任务控制恢复、资料复用追溯、长材料处理、正式并行与汇合、三项减少重复工作的优化、扩展管理及计量／验收工具已交付，更新中断同版本重试与双表 NULL `started_at` 拒绝问题已修复。2026-09-27 起五期适用验收仅要求 ZCode（见[五期现行状态](specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status)）；第 5 组限定接受、第 6 组原五运行范围限定闭合、第 7 组单一目标组合本批限定认证达标，均有明示例外。quick/deep、未获证类别和其他模型仍未认证；性能未宣称达标，五期整体未完成 |
 | 支持范围 | 单只中国 A 股 `security` |
 | Python | 3.11、3.12 |
-| 原生宿主验收 | Codex、OpenCode、Claude Code 均为 `UNVERIFIED`；Codex 已完成人工主链，但未完成正式全场景认证 |
+| 宿主验收（2026-09-14 质量门槛；2026-09-15 计量治愈；2026-09-30 本批限定认证） | **ZCode：standard×public 历史质量门槛已验收**（10 次独立端到端、10/10 质量通过、全部锁定与独立评分、关键主张追溯 100%）；**本批仅 ZCode×GLM-5.3-Flash×standard×public 限定认证达标**（4 合格／5 计入＝80%，安装链成立，支持范围与恒瑞单样本例外见[第 5–7 组现行要求与验收](specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status)）。长期"深度与多模型组合补验"专项五槽／三域仍按 D5／B 类限定口径有效（见[专项验收结论](specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-depth-model-source)）；历史 2026-09-15 db durable 回填 11 次中 6 次完全通过、5 次剩原运行非计量缺口，原结果不回写。quick（6 次）／deep（1 次）及其他模型的完整组合认证未建立；**Codex、OpenCode、Claude Code：功能层已验收**，完整研究 `UNVERIFIED`（延后备案）。本批结果不等于 V1 发布候选验收或性能达标 |
+| 本批限定支持声明 | 仅 ZCode×`GLM-5.3-Flash`×standard×public，获证正常研究类别为科创板半导体制造、主板钢铁、主板消费白酒、主板医药制造；上下文限原生验收会话配置（未记录数值容量、不发布容量承诺），关键工具限已留痕的 Skill、文件与公开网页取证能力及 `hetu-stock-analysis` 行为语义。恒瑞样本的启动前隔离／同期 watcher 未执行及旧 R2 元资料访问获**仅本样本**计数例外，原行为未获证明；G67-R1 失败仍留分母。其他宿主、模型、深度、数据模式或未获证类别维持 `UNVERIFIED`；验证时点与证据见[第 5–7 组验收记录](specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-certification) §7.1、§9.5 |
+| 性能验收（2026-09-17） | 三条性能验收线**均未正式通过**：全流程配对 0/3、0/1、0/1（端点新口径下仅 P1 可证，为优化前参考值）；并行独立域真实重叠已证、中位提速与工具 ≤ 基线未成立（单对窗口口径观察差异不构成验收，且该对不满足独立从零）；复用收益对照未测。当前性能数字均为所声明窗口内的观察结果，不支持正式端到端达标判定 |
 
 版本变化见 [版本日志](CHANGELOG.md)。
 
+五期已交付行为、有效验收和未完成要求统一见[五期实现](specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
+上表带日期的验收结果保留其历史适用范围，不表示后半已整体通过。
+
+## 研究证据入口（本地）
+
+五期验收证据（组合级研究、触发矩阵、安装验证、批次记录）位于
+`.hetu/validation/phase-5/`，**仅供本地使用**（含个人路径与未脱敏运行数据，
+不作为共享材料；对外分享须先脱敏）。关键索引：
+
+- 五期阶段 07 宿主验收矩阵与最小补验清单：`.hetu/validation/phase-5/20260912-stage07-host-acceptance/host-capability-matrix.md`
+- zcode×standard 组合 10 次证据与批次记录：`.hetu/validation/phase-5/20260913-stage07-research-batch/batch-record.md`
+- 阶段 07 现状汇总与剩余缺口清单（2026-09-17）：`.hetu/validation/phase-5/20260917-stage07-evidence-summary/status-summary.md`、`gap-list.md`
+- 性能相关记录：并行专项 P1（`20260915-stage07-parallel-benefit/record.md`）、全流程配对盘点（`20260916-stage07-fullflow-pairing/record.md`）、顺序/并行对判定与订正层（`20260917-stage07-seqpar-pair/`）
+- 宿主原生接口事实表：`tests/product/fixtures/host_cli/native-interfaces.json`
+
 ## 当前能力
 
-研究执行权由 Agent 主导。用户用自然语言向 Codex 或 OpenCode 发起请求：
+研究执行权由 Agent 主导。用户用自然语言向宿主 Agent 发起请求：
 
 ```text
 用公开数据标准分析 600519。
@@ -30,7 +48,7 @@ canonical Skill（`skills/hetu-stock-analysis/`）拥有完整的研究执行链
 
 ```text
 用户请求（自然语言）
-  -> 宿主 Agent（Codex / OpenCode）+ canonical Skill：
+  -> 宿主 Agent（ZCode / Codex / Claude Code / OpenCode）+ canonical Skill：
        请求理解、研究规划、来源选择、失败处理、证据综合、最终 Markdown 报告
   -> hetu-stock CLI：Skill 包管理 + 可选确定性辅助（helper）
   -> 中文 Markdown 报告
@@ -38,12 +56,31 @@ canonical Skill（`skills/hetu-stock-analysis/`）拥有完整的研究执行链
 
 `hetu-stock` 命令行只暴露两个顶层组：
 
-- `hetu-stock skill`：管理 canonical Skill 包（`validate`、`install`）。
-- `hetu-stock helper`：可选的确定性辅助命令（时点边界、授权检查）。helper 不可用
+- `hetu-stock skill`：管理 canonical Skill 包（`validate`、`install`、`status`、
+  `diagnose`、`rollback`、`uninstall`）。
+- `hetu-stock helper`：可选的确定性辅助命令（时点边界、授权检查、旧成果只读检查与
+  安全导出）。helper 不可用
   时，公开研究仍可用宿主等价工具继续。
 
 只读 legacy 兼容面已退场：`hetu_stock/{workflow,models,report,config}`、
 `legacy_cli.py` 及其专属测试与 Jinja 依赖已删除，只能通过 Git 历史追溯。
+
+五期任务控制恢复与资料复用功能（功能复评通过、十二条要求在已批准范围内闭环）在 Skill 规则与产物检查器中补入两项能力：
+任务控制与恢复（自然语言取消、迟到返回不采用、调整只动剩余工作、提前交付仍过两轮自检、
+跨会话候选筛选与恢复）和资料复用与产物追溯（`reuse_previous_task_data` 默认开启、适用旧
+材料复制为本地副本并记五键 provenance、关闭复用不读旧资料）。行为证据限定于已验证的
+ZCode 桌面端协调方式（M2 上下文隔离另经 Flash 机制内容级补证），不外推为四宿主认证；
+三批历史用量已对账、预算与停止规则经离线验证关闭，均未部署在线监控（见
+[五期实现对应章节](specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-middle)）。
+
+五期上下文与并行功能（全面评审及 R1 复评通过）在 Skill 规则中补入三组能力：长材料
+分批读取与整理（按问题控制单批字节量、分批不截断必读规则与例外、压缩或转交保留决定所需
+事实与限制、重复读取的有限减少）、正式子任务并行与汇合（自足输入与最小权限、汇合裁决、
+局部失败隔离与越权处置）和三项减少重复工作的优化（任务内共享取数、汇合不重做已完成部分、
+交付先于验收锁定与锁后评分）。既有证据为受控合成样本（L1–L3、P01–P06）、一条 ZCode 受控
+短链路（B2）与 2026-09-17 三项优化短链路；宿主原生压缩效果、容量可见路径、单批安全读取量
+与真实并行收益仍未验证，不宣称长上下文或性能验收通过（见
+[五期实现对应章节](specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-execution)）。
 
 ### 授权失败语义
 
@@ -77,11 +114,14 @@ cd HETU
 
 ```bash
 ./scripts/install.sh --host codex
-# 也可改为 --host claude 或 --host opencode
+# 也可改为 --host claude、--host opencode 或 --host zcode
 ```
 
-脚本支持 macOS/Linux，在用户目录创建隔离 Python 环境，并安装 canonical Skill。
-已有 Skill 需要更新时显式增加 `--force`。安装布局、PATH 和 TLS 排障见
+脚本支持 macOS/Linux，在用户目录创建按版本隔离的 Python 环境，并安装 canonical Skill。
+已有 Skill 需要更新时显式增加 `--force`；更新采用原子目录交换，失败或中断后旧版 Skill
+与旧环境保持可用，可用 `hetu-stock skill diagnose` 查看状态、`skill rollback` 回滚、
+`skill uninstall` 卸载。安装维护已验证范围为 macOS/APFS，Linux/ext4 实测尚未完成。
+安装布局、PATH 和 TLS 排障见
 [Agent Skill 安装与使用](docs/agent-skill-usage.md)。
 
 如果机器上有多套 Python，可以显式选择，例如：
@@ -125,6 +165,19 @@ bash scripts/check.sh
 `scripts/check.sh` 是当前唯一的完整仓库门禁：它收集全部测试，运行 `product` 与
 `helpers` 测试、Ruff、mypy、文档检查、Skill manifest 更新/无差异检查及 Skill 校验。
 一期 `legacy` 与 `frozen` 测试已随旧源码一起删除。
+
+默认运行是完全离线的工程门禁：不启动任何宿主或模型。需要复核已显式选定的证据
+目录时，设置 `HETU_HOST_EVIDENCE=<观察目录>` 再运行同一脚本，会在测试之后追加
+`scripts/host_acceptance.py check --host-evidence <观察目录>`（复用同一 check 入口，
+结果写入该目录内新的 `host-support-check.json`，已存在则拒绝覆盖）。无论哪种运行，
+工程门禁通过或单次 check 通过都不构成任何宿主／模型组合的正式支持认证；未认证
+组合仍以版本状态表中的 `UNVERIFIED` 为准。支持记录
+`host-support-record.json` 由 `run --authorization-ref <授权引用名，不含凭据>` 在授权与
+能力验证通过后、执行 case 前写入观察目录（create-only；无授权引用或无已验证能力事实时
+不写，下游 `check --host-evidence` 如实判“不支持”）。真实验收另有仅手动触发的
+`.github/workflows/host-acceptance.yml`，凭据只经 GitHub Secrets 引用；其观察输入只有
+两种受约束模式（claude `--probe`、zcode `--watch-agent` 规格），codex/opencode 或
+未给观察输入时 `run` 以 exit 1 明确失败——尚缺组合保持明确未认证，不是静默跳过。
 
 ## 文档
 
