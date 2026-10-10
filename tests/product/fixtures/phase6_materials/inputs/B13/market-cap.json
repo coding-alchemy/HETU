@@ -1,0 +1,8 @@
+{
+  "price": "10",
+  "price_unit": "元/股",
+  "total_shares": "120",
+  "total_shares_unit": "百万股",
+  "float_shares": "80",
+  "float_shares_unit": "百万股"
+}

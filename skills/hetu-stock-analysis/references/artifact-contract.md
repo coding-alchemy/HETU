@@ -190,6 +190,25 @@ manifest 登记该记录文件及其全部本地输入。
 
 阶段 05 起可用无状态检查器 `scripts/check-run-artifacts.py` 对一次已完成研究做单次机械检查：输入为研究根、最终消息副本与 lock record（定位见 repo 级 `scripts/phase2_lock_run.py`）；输出 `{schema_version, mechanical_status, message_input_status, checks, issues, warnings}`，每条记录含 `code`、`path`、`message`。`issues` 只包含文件缺失或不可读、不安全路径、同一版本哈希不一致、manifest 不能解析、采用产物完全无法定位等硬错误；`warnings` 包含命名风格、等价表头、章节简称或范围、机器追溯不完整等不直接证明内容错误的差异。只有 `issues`、未锁定消息或失败硬检查使 `mechanical_status=FAIL`。检查器不判断自然语言真假、是否应当建表或来源适用性；`PASS` 只是机械硬门禁通过，不是发布许可。
 
+## 专题交付锁定（阶段 06 起，仅限任务卡批准的不生成完整报告的运行）
+
+专题取数运行（任务卡明确不生成 `report.md`、部分工作包按边界未启动）的交付闭环仍走完整顺序：
+owner 定稿→专题范围 W9/W10→实际用户可见交付→锁定→锁后独立核验，不得裁剪。专题模式下的合同差异仅为：
+
+- 锁定使用 `scripts/phase2_lock_run.py --report-mode thematic`：lock record 的 `report` 字段记录
+  `{"mode": "thematic", "report_absent": true}`，树内存在 `report.md` 时拒绝锁定；request、
+  delivery message、environment、visible_before/after 五个输入与树哈希、消息哈希绑定全部保留。
+- 交付消息＝实际发送给用户的最终消息逐字节副本，其哈希入 lock record；文件清单哈希不能替代交付消息。
+- 封存树包含专题范围的 W9/W10 结果文件；W10 的映射表（同五字段表头：报告章节、关键主张定位、
+  owner 工作包、证据定位、采用状态）置于「完成边界与自检」节，「报告章节」列填写专题交付范围定位，
+  关键主张定位必须是 owner 文件或 evidence.md 中可搜索的原文。
+- 机械检查使用 `check-run-artifacts.py --scope thematic`（可按运行边界指定 `--required-work-packages`）：
+  report.md 在树内为 issue，`artifacts/scripts` 缺失降为 warning，manifest、lock、trace 与身份镜像
+  检查全部保留——专题路径不是绕过内容核验的通道。
+- 自定义必需工作包不得裁掉 W9/W10。专题缺映射表、关键主张不可搜索或必要 owner／证据链缺失
+  属 issue；纯格式提示仍为 warning。full 模式拒绝专题 report 字段，必须核验完整报告路径与哈希。
+- 完整报告运行的现有检查与锁定行为逐字不变；专题模式只对任务卡批准的专题运行开放，不扩为通用豁免。
+
 ## 报告到来源的追溯链
 
 报告关键事实至少形成以下链条，内部映射集中在 W10：
@@ -214,6 +233,8 @@ Markdown 分隔行。解析器接受 `1`、`第 1 章`、`1. 任务与时点`、
 ## 回访修订与禁止覆盖
 
 工作包回访时更新当前结论，同时在"修订记录"追加旧值、新值、原因、新证据和受影响下游；不得删除已被下游采用的旧事实、失败或冲突。W10 发现上游问题时通知 owner 回访，不能直接修改上游。上游证据或计算改变时，回访 owner、保留修订记录并递归复核受影响下游。
+
+副本保留当前本地输入、原始生产者／原取得时间、必要许可及采用关系；U 在当前任务定位并保留原关系，不因同名编号认定相同。原件只读、修订追加；同任务当前 owner 修订后摘要同步，独立任务或新资料不改历史产物。许可禁止复制时只留允许定位与限制，不伪造可核验副本。
 
 ## 安全边界
 

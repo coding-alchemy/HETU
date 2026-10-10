@@ -372,3 +372,31 @@ def test_lock_publish_prints_canonical_delivery_message_path(
         / "delivery-message.md"
     )
     assert str(canonical) in out
+
+
+def test_lock_run_thematic_mode_seals_report_free_tree(
+    lock_module: object, tmp_path: Path
+) -> None:
+    """thematic 模式封存无 report.md 的专题运行：report 键记 report_absent。"""
+    arguments = _lock_arguments(tmp_path)
+    research: Path = arguments["research_root"]  # type: ignore[assignment]
+    (research / "report.md").unlink()
+
+    record = lock_module.lock_run(**arguments, report_mode="thematic")  # type: ignore[operator]
+
+    data = json.loads(record.read_text(encoding="utf-8"))
+    assert data["report"] == {"mode": "thematic", "report_absent": True}
+    assert data["delivery_message"]["sha256"] == sha256_file(
+        Path(str(arguments["delivery_message_path"]))
+    )
+    assert data["research_root"]["tree_sha256"] == research_tree_sha256(research)
+
+
+def test_lock_run_thematic_mode_refuses_report_in_tree(
+    lock_module: object, tmp_path: Path
+) -> None:
+    """thematic 模式在树内存在 report.md 时拒绝锁定。"""
+    arguments = _lock_arguments(tmp_path)
+
+    with pytest.raises(OSError, match="report.md"):
+        lock_module.lock_run(**arguments, report_mode="thematic")  # type: ignore[operator]
