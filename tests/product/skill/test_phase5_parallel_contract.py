@@ -13,7 +13,7 @@ separately by the controller.
 Task 04.2 appends the confluence-adjudication / failure-isolation /
 adoption contract invariants (orchestration "汇合裁决与失败隔离",
 recovery "并行失败隔离与越权处置") and the shape assertions for the
-synthetic P03-P06 fixtures under ``tests/product/fixtures/phase5_parallel/``.
+synthetic P03-P06 fixtures under ``tests/product/fixtures/parallel/``.
 
 Task 04.3 appends the evidence write-back assertions: the stage-04
 write-back section in the stage-02 impact map (four columns, per-row
@@ -62,7 +62,7 @@ ISOLATION_HEADING = "## 并行失败隔离与越权处置"
 REUSE_HEADING = "## 旧任务资料复用与独立副本"
 RESUME_HEADING = "## 同一任务恢复"
 
-FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "phase5_parallel"
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "parallel"
 
 TEMP_SECTION_FLOW = (
     "Agent可把工作包临时拆成聚焦研究子问题并把结果汇回原包。临时问题没有稳定ID、独立覆盖"
@@ -287,7 +287,13 @@ def _isolation_recovery_section() -> str:
 
 
 def _load_fixture(relative: str) -> dict:
-    return json.loads(FIXTURES.joinpath(relative).read_text(encoding="utf-8"))
+    group, filename = relative.split("/", 1)
+    dataset = {"confluence": "confluence", "violations": "returns"}[group]
+    data = json.loads(
+        (FIXTURES / "inputs" / f"{dataset}.json").read_text(encoding="utf-8")
+    )
+    entry = data["cases"][Path(filename).stem]
+    return {**data["bases"].get(entry.get("base"), {}), **entry["fields"]}
 
 
 def test_adjudication_section_is_pure_insertion_after_dispatch() -> None:
@@ -425,6 +431,19 @@ def test_late_material_exceeds_asof_and_normal_material_is_the_control() -> None
     assert normal["source_type"] == "独立原文"
 
 
+def test_reprints_share_one_stored_original() -> None:
+    path = Path(__file__).resolve().parents[1] / "fixtures/parallel/inputs/confluence.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert len(data["bases"]) == 1
+    assert "underlying_text" in data["bases"]["reprint"]
+    for name in ("reprint-a", "reprint-b"):
+        assert data["cases"][name]["base"] == "reprint"
+        assert "underlying_text" not in data["cases"][name]["fields"]
+    a, b = _load_fixture("confluence/reprint-a.json"), _load_fixture("confluence/reprint-b.json")
+    assert a["underlying_text"] == b["underlying_text"]
+    assert a["outlet"] != b["outlet"]
+
+
 def test_violations_fixtures_model_unauthorized_malicious_timeout_normal() -> None:
     unauth = _load_fixture("violations/unauthorized-return.json")
     malicious = _load_fixture("violations/malicious-return.json")
@@ -446,18 +465,17 @@ def test_violations_fixtures_model_unauthorized_malicious_timeout_normal() -> No
 
 
 def test_review_expectations_live_only_on_the_review_side() -> None:
-    readme = FIXTURES.joinpath("review-expectations", "README.md").read_text(encoding="utf-8")
-
+    readme = (FIXTURES / "review-expectations.md").read_text(encoding="utf-8")
     assert "仅评审侧" in readme
-    assert "不读取本目录" in readme
-    for group in ("confluence", "violations"):
-        for path in sorted(FIXTURES.joinpath(group).glob("*.json")):
-            payload = json.dumps(
-                json.loads(path.read_text(encoding="utf-8")),
-                ensure_ascii=False,
-            )
-            assert "期望" not in payload, path.name
-            assert "expectation" not in payload, path.name
+    assert "不读取本评审文件" in readme
+    for group, dataset in (("confluence", "confluence"), ("violations", "returns")):
+        data = json.loads(
+            (FIXTURES / "inputs" / f"{dataset}.json").read_text(encoding="utf-8")
+        )
+        for name in data["cases"]:
+            payload = json.dumps(_load_fixture(f"{group}/{name}.json"), ensure_ascii=False)
+            assert "期望" not in payload, name
+            assert "expectation" not in payload, name
 
 
 # ---------------------------------------------------------------------------

@@ -210,7 +210,8 @@ W4 模型画像固定记录：主要模型、次要模型或分部、识别依�
 答案；锁定后由未参与研究的评审者评分。
 
 发布前独立核对的虚构短样本保留在 `tests/product/fixtures/publication-review/`，用于验证核对流程，
-不能替代真实 Agent 行为验收。
+不能替代真实 Agent 行为验收。当前样本的独立用途及保留理由见
+tests/product/fixtures/material_cases/README.md；发布前核对不由上游 owner 判断替代。
 
 ### 4.2 通过标准与结果
 

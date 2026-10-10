@@ -296,14 +296,28 @@ def build_contract_fixture(
     official_paths: list[Path] = []
     if official_fixture:
         source = (
-            Path(__file__).parents[1] / "fixtures" / "official_work_packages" / official_fixture
+            Path(__file__).parents[1]
+            / "fixtures"
+            / "official_work_packages"
+            / "valid"
+            / "WX-RND-QUALITY.md"
         )
         official = root / "references" / "work-packages" / "official"
         official.mkdir()
-        for fixture in sorted(source.glob("*.md")):
-            target = official / fixture.name
-            shutil.copy2(fixture, target)
-            official_paths.append(target)
+        target = official / source.name
+        shutil.copy2(source, target)
+        official_paths.append(target)
+        if official_fixture == "duplicate-id":
+            duplicate = official / "WX-RND-QUALITY-COPY.md"
+            duplicate.write_text(
+                source.read_text(encoding="utf-8").replace(
+                    "name: Research quality extension",
+                    "name: Research quality extension copy",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            official_paths.append(duplicate)
         official_ids = {
             "invalid-official-id": "NOT-A-WX-PACKAGE",
             "multiword-official-id": "WX-RND-QUALITY-ASSURANCE",

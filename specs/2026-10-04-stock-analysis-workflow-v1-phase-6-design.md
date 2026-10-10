@@ -390,8 +390,10 @@ authorized 遵守当前许可的保存、处理、引用范围，不新增付费
 
 2026-10-10 用户批准六期按已证范围限定验收，六批执行与工程收尾已结束。已交付规则由
 [公共资料标准](../skills/hetu-stock-analysis/references/material-coverage.md)及公司、经营、风险、市场
-四份细则和现有 owner 合同维护；行为输入与独立评审材料保留在
-`tests/product/fixtures/phase6_materials/`。规则、行为验证及真实内容取得分别判定。
+四份细则和现有 owner 合同维护；行为输入与独立评审材料位于 tests/product/fixtures/material_cases/。
+B01–B18 及增量变体继续有效，按 case／variant／stage 生成当次输入；
+评审依据单独保存。原 phase6_materials 布局按材料 README 的固定提交回源。
+规则、行为验证及真实内容取得分别判定。
 
 | 批次 | 已交付范围与限定 | 验收与修订记录 |
 |---|---|---|

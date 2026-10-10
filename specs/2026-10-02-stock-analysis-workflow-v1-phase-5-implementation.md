@@ -282,9 +282,9 @@ prompt＝`tests/product/skill/test_prompt_contract.py`。
 `test_first_verification_complete_and_fixups_recheck_direct_impact_only`）
 约束能力预检与独立核对入口。
 
-`tests/product/fixtures/phase5_parallel/` 包含十二份夹具；`review-expectations/README.md`
-仅评审侧，答案未注入 `confluence/` 或 `violations/`（由
-`test_review_expectations_live_only_on_the_review_side` 约束）。
+tests/product/fixtures/parallel/ 的两个输入 catalog 保留七个汇合材料和四类返回场景。
+转载正文只维护一份，各渠道、单位、时点和返回原值按场景恢复。
+review-expectations.md 仅供评审，不作为执行输入；历史十二文件布局从固定提交回源。
 
 ### 4.2 R1 已关闭：实际复用开关传递到首次派发与重派
 
