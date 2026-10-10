@@ -2,10 +2,8 @@
 
 ## 当前状态
 
-当前执行中计划：[产品测试材料全面清理](product-fixtures-cleanup/README.md)。
-[设计 v0.2](../2026-10-10-product-fixtures-cleanup-design.md) 已获用户批准，计划分为自动测试材料去重、
-场景归并与输入隔离、引用与工程交接三阶段；三阶段执行完成（01／02 已复评通过），停整体验收点，
-提交／推送／合入 main 未授权。
+当前没有待执行计划。产品测试材料清理三阶段已执行并评审通过；2026-10-11 用户授权
+提交工作区改动并删除已完成计划。现行结果见[产品测试材料清理设计及交付状态](../2026-10-10-product-fixtures-cleanup-design.md#6-交付状态)。
 
 六期已按用户批准的已证范围限定验收，正式全仓工程门禁与收尾交接已完成；
 2026-10-10 按用户授权删除六期路线图及六份编号计划，原文从本页的固定 Git 提交回溯。
@@ -18,7 +16,7 @@
 收口及阶段 05 本批汇总与复评成果保持有效；第 8 组性能数值未验收、五期整体未完成的事实
 保留，不安排新采样、配对或校准，不重复请求延期批准。
 
-本目录保留总索引及待审批的产品测试材料清理计划；已执行或停止执行的旧计划已清理。五期有效要求、实现行为、
+本目录只保留总索引；已执行或停止执行的计划已清理。五期有效要求、实现行为、
 证据与未完成边界统一见[五期实现](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
 详细验收与预算证据归入 `specs/validation/`，现行专项结论归入五期实现，不恢复五期旧计划。
 
@@ -128,6 +126,15 @@ git show d12415290feb20aa117af73443251c08e1bb5e48:specs/plans/stock-analysis-wor
 ```bash
 git ls-tree -r --name-only 4723a27dd7daf6fa45d4c4763da53bf8fd10986d -- specs/plans/stock-analysis-workflow-v1-phase-6/
 git show 4723a27dd7daf6fa45d4c4763da53bf8fd10986d:specs/plans/stock-analysis-workflow-v1-phase-6/README.md
+```
+
+2026-10-11 按用户授权删除 `product-fixtures-cleanup/` 中的路线图及 01–03 三份编号计划，
+共 4 份。删除前逐文件确认原字节保存在本地固定提交
+`c1ed5042bf7c65620fdc34c0a831fe88ca9017c8`；该提交也保存了 136 项处置表及三阶段执行记录。
+现行材料入口、复用边界与验证结果见[产品测试材料清理设计及交付状态](../2026-10-10-product-fixtures-cleanup-design.md#6-交付状态)。
+
+```bash
+git show c1ed5042bf7c65620fdc34c0a831fe88ca9017c8:specs/plans/product-fixtures-cleanup/README.md
 ```
 
 ## 新增计划约定
