@@ -2431,6 +2431,7 @@ def _check_w10_mapping(
     entry_statuses: dict[str, str],
     issues: list[dict[str, str]],
     warnings: list[dict[str, str]],
+    thematic: bool = False,
 ) -> None:
     relative_path = f"work-packages/{WORK_PACKAGES[-1]}.md"
     w10_text = (research_root / relative_path).read_text(encoding="utf-8")
@@ -2444,7 +2445,7 @@ def _check_w10_mapping(
         )
     rows = _find_table_rows(w10_text, W10_MAPPING_FIELDS)
     if not rows:
-        warnings.append(
+        (issues if thematic else warnings).append(
             _issue(
                 "trace.missing_w10_mapping",
                 relative_path,
@@ -2478,7 +2479,7 @@ def _check_w10_mapping(
         row_artifacts: set[str] = set()
         if len(row) != len(W10_MAPPING_FIELDS) or not all(row):
             row_errors.append("all five mapping cells must be non-empty")
-            warnings.append(
+            (issues if thematic else warnings).append(
                 _issue(
                     "trace.invalid_w10_mapping",
                     f"{relative_path}#row-{row_number}",
@@ -2493,6 +2494,12 @@ def _check_w10_mapping(
         adopted_claim = expected_status == "adopted"
         source_gaps: list[str] = []
         chapter_numbers, chapter_error = _parse_chapter_locator(chapter_cell)
+        if thematic:
+            # Thematic scope has no report.md; the first cell is a free-form
+            # delivery-range locator and the claim is verified against the
+            # owner/evidence texts below instead of report chapters.
+            chapter_error = None
+            chapter_numbers = []
         if chapter_error is not None:
             row_errors.append(chapter_error)
         if chapter_numbers:
@@ -2597,6 +2604,15 @@ def _check_w10_mapping(
                 "every listed owner work package must carry the row's evidence locator; "
                 f"missing={sorted(owners_without_locator)!r}"
             )
+        if thematic and owner_texts:
+            searchable = any(
+                claim_cell in owner_text for owner_text in owner_texts.values()
+            ) or claim_cell in evidence_text
+            if not searchable:
+                row_errors.append(
+                    "claim locator must be a searchable phrase in an owner work "
+                    "package or evidence.md (thematic scope has no report chapters)"
+                )
 
         if normalized_status not in W10_ADOPTION_VALUES:
             row_errors.append(f"adoption status must be controlled, got {status_cell!r}")
@@ -2636,7 +2652,7 @@ def _check_w10_mapping(
                 )
             )
         if row_errors:
-            warnings.append(
+            (issues if thematic else warnings).append(
                 _issue(
                     "trace.invalid_w10_mapping",
                     f"{relative_path}#row-{row_number}",
@@ -2973,7 +2989,8 @@ def _check_data_artifacts(
 
 
 def _check_lock_schema(
-    lock: dict[str, Any], lock_record: Path, issues: list[dict[str, str]]
+    lock: dict[str, Any], lock_record: Path, issues: list[dict[str, str]],
+    thematic: bool = False,
 ) -> None:
     missing = LOCK_REQUIRED_KEYS - set(lock)
     if missing:
@@ -3015,6 +3032,25 @@ def _check_lock_schema(
             continue
         if not isinstance(block, dict):
             raise ValueError(f"lock record field {key!r} must be an object")
+        if key == "report" and block.get("mode") == "thematic":
+            if not thematic:
+                issues.append(
+                    _issue(
+                        "lock.report_mode_mismatch",
+                        str(lock_record),
+                        "full scope requires a report path and hash, not a thematic report block",
+                    )
+                )
+            if set(block) != {"mode", "report_absent"} or block.get("report_absent") is not True:
+                issues.append(
+                    _issue(
+                        "lock.schema",
+                        str(lock_record),
+                        'thematic report block must be exactly {"mode": "thematic", '
+                        '"report_absent": true}',
+                    )
+                )
+            continue
         block_missing = required_fields - set(block)
         if block_missing:
             issues.append(
@@ -3266,12 +3302,35 @@ def _check_identity_metadata_mirrors(
             )
 
 
+THEMATIC_WORK_PACKAGES = (
+    "W0-task-framing",
+    "W1-subject-verification",
+    "W3-industry-competition",
+    "W4-business-governance",
+    "W9-thesis-counterevidence",
+    "W10-report-review",
+)
+
+
 def check_run(
     research_root: Path,
     delivery_message: Path,
     lock_record: Path,
+    scope: str = "full",
+    required_work_packages: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
-    """Mechanically verify one finished run; structure only, no verdicts."""
+    """Mechanically verify one finished run; structure only, no verdicts.
+
+    ``scope="thematic"`` verifies a thematic delivery run (no report.md per
+    its task card): required files come from ``required_work_packages``
+    (default :data:`THEMATIC_WORK_PACKAGES`) plus checkpoint/evidence/manifest,
+    a present report.md is an issue, and report-only checks are skipped while
+    manifest, lock, trace and identity checks stay in force. ``scope="full"``
+    (default) behaves exactly as before.
+    """
+    if scope not in ("full", "thematic"):
+        raise ValueError(f"unknown scope: {scope!r}")
+    thematic = scope == "thematic"
     if research_root.is_symlink() or not research_root.is_dir():
         raise OSError(f"research root must be a real directory: {research_root}")
     issues: list[dict[str, str]] = []
@@ -3288,7 +3347,7 @@ def check_run(
         if not isinstance(loaded_lock, dict):
             raise ValueError("lock record must be a JSON object")
         lock = loaded_lock
-        _check_lock_schema(lock, lock_record, issues)
+        _check_lock_schema(lock, lock_record, issues, thematic=thematic)
         _check_lock_auxiliary_paths(lock, issues)
         checks.append(
             _check(
@@ -3369,7 +3428,7 @@ def check_run(
             )
 
     report_block = lock.get("report")
-    if lock_present and isinstance(report_block, dict):
+    if lock_present and isinstance(report_block, dict) and report_block.get("mode") != "thematic":
         report_path = research_root / "report.md"
         locked_report_path = report_block.get("path")
         if _nonempty_string(locked_report_path) and Path(str(locked_report_path)).resolve(
@@ -3393,6 +3452,38 @@ def check_run(
                     "lock.report_hash_mismatch",
                     str(report_path),
                     "report hash differs from the lock record",
+                )
+            )
+    if thematic:
+        report_file = research_root / "report.md"
+        locked_report_mode = (
+            report_block.get("mode")
+            if isinstance(report_block, dict)
+            else None
+        )
+        if report_file.is_file():
+            issues.append(
+                _issue(
+                    "report.present_in_thematic",
+                    "report.md",
+                    "thematic scope forbids report.md; remove it or run with full scope",
+                )
+            )
+        if locked_report_mode != "thematic":
+            issues.append(
+                _issue(
+                    "lock.report_mode_mismatch",
+                    str(lock_record),
+                    'thematic scope requires lock report {"mode": "thematic", '
+                    '"report_absent": true}',
+                )
+            )
+        elif report_block.get("report_absent") is not True and report_file.is_file():
+            issues.append(
+                _issue(
+                    "lock.report_mode_mismatch",
+                    str(lock_record),
+                    "thematic lock must record report_absent=true",
                 )
             )
 
@@ -3455,6 +3546,17 @@ def check_run(
         if (research_root / relative).is_symlink()
         or not (research_root / relative).is_dir()
     ]
+    if thematic and "artifacts/scripts" in missing_directories:
+        # A thematic run with no created scripts records that fact in its owner
+        # files; an absent scripts directory is a structure note, not an error.
+        missing_directories.remove("artifacts/scripts")
+        warnings.append(
+            _issue(
+                "artifact.scripts_directory_absent",
+                "artifacts/scripts",
+                "thematic scope: scripts directory absent (no scripts created)",
+            )
+        )
     for relative in missing_directories:
         issues.append(
             _issue(
@@ -3465,13 +3567,26 @@ def check_run(
         )
     checks.append(_check("artifact.required_directories", not missing_directories))
 
-    required_files = [
-        "checkpoint.md",
-        "evidence.md",
-        "manifest.json",
-        "report.md",
-        *(f"work-packages/{name}.md" for name in WORK_PACKAGES),
-    ]
+    if thematic:
+        packages = required_work_packages or THEMATIC_WORK_PACKAGES
+        packages = tuple(dict.fromkeys((*packages, *WORK_PACKAGES[-2:])))
+        invalid = [name for name in packages if name not in WORK_PACKAGES]
+        if invalid:
+            raise ValueError(f"unknown work packages: {invalid!r}")
+        required_files = [
+            "checkpoint.md",
+            "evidence.md",
+            "manifest.json",
+            *(f"work-packages/{name}.md" for name in packages),
+        ]
+    else:
+        required_files = [
+            "checkpoint.md",
+            "evidence.md",
+            "manifest.json",
+            "report.md",
+            *(f"work-packages/{name}.md" for name in WORK_PACKAGES),
+        ]
     missing = [relative for relative in required_files if not (research_root / relative).is_file()]
     for relative in missing:
         issues.append(
@@ -3530,7 +3645,8 @@ def check_run(
                             warnings,
                         )
                 if (
-                    "checkpoint.md" not in missing
+                    not thematic
+                    and "checkpoint.md" not in missing
                     and "report.md" not in missing
                     and f"work-packages/{WORK_PACKAGES[1]}.md" not in missing
                 ):
@@ -3548,7 +3664,7 @@ def check_run(
             not any(issue["code"] == "artifact.unreadable_format" for issue in issues),
         )
     )
-    if "report.md" not in missing:
+    if not thematic and "report.md" not in missing:
         home_values = _check_report(research_root, lock.get("model_id"), issues)
         if manifest_data is not None:
             _check_phase4_quality(research_root, manifest_data, home_values, issues)
@@ -3593,7 +3709,7 @@ def check_run(
 
     if f"work-packages/{WORK_PACKAGES[-1]}.md" not in missing:
         _check_w10_mapping(
-            research_root, registered, entry_statuses, issues, warnings
+            research_root, registered, entry_statuses, issues, warnings, thematic=thematic
         )
     checks.append(
         _check(
@@ -3615,7 +3731,7 @@ def check_run(
         and entry.get("type") in ("derived", "script")
         and isinstance(entry.get("work_package"), str)
     }
-    if "report.md" not in missing and manifest_data is not None:
+    if not thematic and "report.md" not in missing and manifest_data is not None:
         _check_report_provenance(
             research_root, registered, entry_statuses, adopted_compute_owners, issues
         )
@@ -3636,7 +3752,7 @@ def check_run(
         )
     )
 
-    if "report.md" not in missing and manifest_data is not None:
+    if not thematic and "report.md" not in missing and manifest_data is not None:
         _check_execution_claim_records(research_root, registered, warnings)
 
     _check_data_artifacts(research_root, registered, issues)
@@ -3663,6 +3779,7 @@ def check_run(
     )
     return {
         "schema_version": SCHEMA_VERSION,
+        "scope": scope,
         "mechanical_status": mechanical_status,
         "message_input_status": message_input_status,
         "checks": checks,
@@ -3677,7 +3794,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--delivery-message", required=True)
     parser.add_argument("--lock-record", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--scope",
+        choices=("full", "thematic"),
+        default="full",
+        help="full (default) verifies a complete report run; thematic verifies a "
+        "thematic delivery run without report.md",
+    )
+    parser.add_argument(
+        "--required-work-packages",
+        default=None,
+        help="thematic scope only: comma-separated work-package ids to require "
+        f"(default: {','.join(name.split('-')[0] for name in THEMATIC_WORK_PACKAGES)})",
+    )
     arguments = parser.parse_args(argv)
+
+    required_packages: tuple[str, ...] | None = None
+    if arguments.required_work_packages:
+        if arguments.scope != "thematic":
+            print(
+                "--required-work-packages is only valid with --scope thematic",
+                file=sys.stderr,
+            )
+            return 2
+        required_packages = tuple(
+            name.strip() for name in arguments.required_work_packages.split(",") if name.strip()
+        )
 
     research_root = Path(arguments.research_root)
     delivery_message = Path(arguments.delivery_message)
@@ -3688,7 +3830,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         _validate_output_location(output, research_root, lock_record)
-        result = check_run(research_root, delivery_message, lock_record)
+        result = check_run(
+            research_root,
+            delivery_message,
+            lock_record,
+            scope=arguments.scope,
+            required_work_packages=required_packages,
+        )
     except (OSError, ValueError) as error:
         print(f"unreadable input: {error}", file=sys.stderr)
         return 2

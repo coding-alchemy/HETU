@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -23,6 +24,7 @@ from tests.product.skill.deterministic_tool_loader import load_script
 from tests.product.skill.phase2_run_fixture import (
     DEFAULT_RUN_ID,
     DERIVED_REL,
+    NO_SCRIPT_DECLARATION,
     NORMALIZED_REL,
     RAW_REL,
     WORK_PACKAGES,
@@ -32,6 +34,7 @@ from tests.product.skill.phase2_run_fixture import (
     _quality_summary_table,
     _required_items_table,
     build_valid_phase2_run,
+    research_tree_sha256,
     sha256_file,
 )
 
@@ -4486,3 +4489,247 @@ def test_failed_record_report_reference_depends_on_chapter(
     assert ("trace.report_reference_not_adopted" not in codes) == allowed
     expected_status = "PASS" if allowed else "FAIL"
     assert result["mechanical_status"] == expected_status, result["issues"]
+
+
+# ---------------------------------------------------------------------------
+# Thematic scope（阶段 06 起，artifact-contract.md「专题交付锁定」节）
+# ---------------------------------------------------------------------------
+
+
+def _build_thematic_run(root: Path) -> tuple[Path, Path, Path]:
+    """Build a valid thematic delivery run: no report.md, only W0/W1/W3/W4/
+    W9/W10 owner files, no scripts directory, thematic lock report block."""
+    research, delivery, lock_record = build_valid_phase2_run(root)
+    (research / "report.md").unlink()
+    for name in WORK_PACKAGES:
+        short = name.split("-", 1)[0]
+        if short in {"W2", "W5", "W6", "W7", "W8"}:
+            (research / "work-packages" / f"{name}.md").unlink()
+    shutil.rmtree(research / "artifacts/scripts")
+
+    # 专题形态映射表：章节列为交付范围定位，主张可在 owner 文件中检索。
+    w10 = research / "work-packages/W10-report-review.md"
+    w10.write_text(
+        "# W10 报告评审（合成·专题）\n\n"
+        "| 报告章节 | 关键主张定位 | owner 工作包 | 证据定位 | 采用状态 |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        f"| 专题交付·行业量价 | 合成占位：财务验证与经营质量。 | W3 | {RAW_REL} | adopted |\n\n"
+        + NO_SCRIPT_DECLARATION
+        + "\n",
+        encoding="utf-8",
+    )
+    w3 = research / "work-packages/W3-industry-competition.md"
+    w3.write_text(
+        w3.read_text(encoding="utf-8")
+        + "\n专题要点：合成占位：财务验证与经营质量。\n证据定位："
+        + RAW_REL
+        + "\n",
+        encoding="utf-8",
+    )
+    # evidence 引用的 DERIVED_REL 指向 W5 派生产物；专题保留 W5 产物文件本体。
+    # （文件保留，owner 文件移除即可。）manifest 同步移除 script 条目（文件已删）。
+    import json as _json
+
+    manifest_path = research / "manifest.json"
+    manifest_data = _json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_data["artifacts"] = [
+        entry
+        for entry in manifest_data["artifacts"]
+        if entry.get("type") != "script"
+    ]
+    manifest_path.write_text(
+        _json.dumps(manifest_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    lock = _json.loads(lock_record.read_text(encoding="utf-8"))
+    lock["report"] = {"mode": "thematic", "report_absent": True}
+    lock["research_root"]["tree_sha256"] = research_tree_sha256(research)
+    lock_record.write_text(
+        _json.dumps(lock, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return research, delivery, lock_record
+
+
+def _thematic_result(checker: Any, research: Path, delivery: Path, lock: Path) -> Any:
+    return checker.check_run(research, delivery, lock, scope="thematic")
+
+
+def test_thematic_scope_passes_valid_thematic_run(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+
+    result = _thematic_result(checker, research, delivery, lock)
+
+    assert result["scope"] == "thematic"
+    assert result["mechanical_status"] == "PASS", result["issues"]
+    assert result["issues"] == []
+    assert result["message_input_status"] == "locked"
+
+
+def test_thematic_scope_fails_when_report_present(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+    (research / "report.md").write_text("# 多余报告\n", encoding="utf-8")
+
+    result = _thematic_result(checker, research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "report.present_in_thematic" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_thematic_scope_fails_without_delivery_message(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+    delivery.unlink()
+
+    result = _thematic_result(checker, research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "message.not_checked" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_thematic_scope_fails_when_required_owner_missing(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+    (research / "work-packages/W10-report-review.md").unlink()
+
+    result = _thematic_result(checker, research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "missing.required_file" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_thematic_scope_flags_unbacked_adopted_claim(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+    w10 = research / "work-packages/W10-report-review.md"
+    w10.write_text(
+        w10.read_text(encoding="utf-8").replace(
+            RAW_REL, "artifacts/raw/source-a/不存在的引用.json", 1
+        ),
+        encoding="utf-8",
+    )
+    import json as _json
+
+    lock_data = _json.loads(lock.read_text(encoding="utf-8"))
+    lock_data["research_root"]["tree_sha256"] = research_tree_sha256(research)
+    lock.write_text(
+        _json.dumps(lock_data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    result = _thematic_result(checker, research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert codes & {
+        "trace.adopted_claim_missing_source",
+        "trace.report_claim_not_adopted",
+    }
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_thematic_scope_detects_post_lock_mutation(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+    (research / "work-packages/W9-thesis-counterevidence.md").write_text(
+        "锁定后被篡改\n", encoding="utf-8"
+    )
+
+    result = _thematic_result(checker, research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "lock.research_hash_mismatch" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_full_scope_still_requires_report_on_thematic_tree(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+
+    result = checker.check_run(research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "missing.required_file" in codes
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize(
+    "mutation", ["missing-table", "unsearchable-claim", "missing-owner-locator"]
+)
+def test_thematic_scope_rejects_missing_real_mapping(
+    checker: Any, tmp_path: Path, mutation: str
+) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+    w10 = research / "work-packages/W10-report-review.md"
+    if mutation == "missing-table":
+        w10.write_text("# W10\n" + NO_SCRIPT_DECLARATION, encoding="utf-8")
+    elif mutation == "unsearchable-claim":
+        w10.write_text(
+            w10.read_text(encoding="utf-8").replace(
+                "合成占位：财务验证与经营质量。", "任何 owner 或证据中均不存在的主张"
+            ),
+            encoding="utf-8",
+        )
+    else:
+        w3 = research / "work-packages/W3-industry-competition.md"
+        w3.write_text(w3.read_text(encoding="utf-8").replace(RAW_REL, ""), encoding="utf-8")
+    _edit_json(
+        lock,
+        lambda data: data["research_root"].__setitem__(
+            "tree_sha256", research_tree_sha256(research)
+        ),
+    )
+
+    result = _thematic_result(checker, research, delivery, lock)
+
+    expected = (
+        "trace.missing_w10_mapping"
+        if mutation == "missing-table"
+        else "trace.invalid_w10_mapping"
+    )
+    assert expected in {issue["code"] for issue in result["issues"]}
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize("omitted", ["W9-thesis-counterevidence", "W10-report-review"])
+def test_thematic_custom_packages_cannot_bypass_required_review(
+    checker: Any, tmp_path: Path, omitted: str
+) -> None:
+    research, delivery, lock = _build_thematic_run(tmp_path)
+    (research / "work-packages" / f"{omitted}.md").unlink()
+    _edit_json(
+        lock,
+        lambda data: data["research_root"].__setitem__(
+            "tree_sha256", research_tree_sha256(research)
+        ),
+    )
+
+    result = checker.check_run(
+        research,
+        delivery,
+        lock,
+        scope="thematic",
+        required_work_packages=tuple(
+            name for name in checker.THEMATIC_WORK_PACKAGES if name != omitted
+        ),
+    )
+
+    assert "missing.required_file" in {issue["code"] for issue in result["issues"]}
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_full_scope_rejects_thematic_lock_even_with_a_valid_report(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    _edit_json(
+        lock,
+        lambda data: data.__setitem__(
+            "report", {"mode": "thematic", "report_absent": True}
+        ),
+    )
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert result["mechanical_status"] == "FAIL", result
+    assert "lock.report_mode_mismatch" in {issue["code"] for issue in result["issues"]}

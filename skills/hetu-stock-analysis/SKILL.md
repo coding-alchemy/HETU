@@ -73,6 +73,7 @@ description: Analyze one China A-share stock with public or explicitly authorize
 - W1 唯一核验后首次建立正式研究产物，或恢复既有任务时，读取[检查点规则](references/checkpoint.md)。
 - W1 唯一核验后首次建立正式研究目录时读取[研究产物合同](references/artifact-contract.md)和[工作包结果结构](references/work-package-result.md)，按固定结构落盘目录、`manifest.json` 与各工作包独立文件。
 - W1 唯一核验后建立共通底线、请求深度和特殊状态必需项，W4 模型画像定稿后补充模型特有必需项，以及进入 W9、W10 汇总质量状态时，按需读取[研究质量规则](references/research-quality.md)。
+- W1 唯一核验后形成资料必需项时读取[资料覆盖与时效标准](references/material-coverage.md)；具体用途细则按问题加载。
 - W4 形成或修订公司经营模型时读取[公司经营模型规则](references/company-models.md)；W5–W7 选择或复核方法时消费 W4 最新模型画像，需要核对方法与模型边界时按需回读。
 - 需要确定性处理或来源失败分类时读取[工具目录](references/tool-catalog.md)；各深度在工作包选择具体来源时读取[来源合同](references/source-contracts.md)的适用条目。工具目录的六个确定性脚本已 `adopted`，另有阶段 04 机械助手 `source_adapter.py`（只解析显式保存输入，是否调用与是否采用由 Agent 决定）。
 - 当 Agent 已按来源合同明确选择 `cninfo-announcement-index`、`sina-financial-statements` 或 `tencent-quote-snapshot` 时，可读取工具目录并调用可选的 `source_fetch.py`；脚本失败只形成局部缺口，不改变 Agent 的来源选择、采用或后续判断责任。

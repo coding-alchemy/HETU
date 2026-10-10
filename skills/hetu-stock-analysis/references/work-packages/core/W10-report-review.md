@@ -180,7 +180,8 @@ skills/hetu-stock-analysis/scripts/check-run-artifacts.py --research-root <本�
 以及报告第 5–8 章明确写出已执行 canonical 复算、计算或确定性计算的声明，必须有对应 owner 的 adopted `derived` 或 `script` 产物支撑；没有时删除该声明并回访实际 owner，不得借用其他工作包的无关
 计算产物。W10 对各 owner 计算链的汇总、或正文中仅写“按 canonical 规则”，不构成已执行声明。报告首页、
 `manifest.run.data_mode`、checkpoint 和 W0–W10 中明示的数据模式只认 `public` 或 `authorized`，且必须
-逐字一致；不一致时停止发布并回访写入该值的 owner。
+逐字一致；不一致时停止发布并回访写入该值的 owner。首页质量字段、关键缺口与不能得出的结论须与
+实际 owner 当前必需项、U 引用及全部影响逐一对照一致；部分补齐不全局升级。
 同步后按实际影响处理：可恢复元数据自动修复；信息覆盖、来源可靠性或
 计算追溯等实质非阻断提示必须进入 checkpoint 和报告并收缩结论；文件名、等价表头或定位格式等
 纯格式提示只需保留在检查器输出或 checkpoint，不强制进入报告，也不导致失败。事实、安全或授权

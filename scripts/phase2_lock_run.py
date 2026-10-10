@@ -112,19 +112,39 @@ def lock_run(
     runtime_skill_id: str,
     runtime_skill_sha256: str,
     model_id: str,
+    report_mode: str = "full",
 ) -> Path:
-    """Copy the final message and write the lock record; never overwrite."""
+    """Copy the final message and write the lock record; never overwrite.
+
+    ``report_mode="thematic"`` seals a thematic delivery run whose task card
+    forbids report.md: the record carries
+    ``{"mode": "thematic", "report_absent": true}`` instead of a report file
+    entry and refuses to lock when report.md exists. All other inputs, the
+    tree hash and the message hash bindings stay unchanged. ``report_mode``
+    defaults to ``"full"``, which behaves exactly as before.
+    """
+    if report_mode not in ("full", "thematic"):
+        raise ValueError(f"unknown report mode: {report_mode!r}")
+    thematic_report = report_mode == "thematic"
     _validate_run_id(run_id)
     if ".." in batch_root.parts:
         raise ValueError("batch_root must not contain parent traversal")
     _require_directory(research_root, "research root")
+    report_path = research_root / "report.md"
+    if thematic_report:
+        if report_path.exists() or report_path.is_symlink():
+            raise OSError(
+                "thematic report mode forbids report.md in the research tree: "
+                f"{report_path}"
+            )
+    else:
+        _require_file(report_path, "report")
     for role, path in (
         ("request", request_path),
         ("delivery message", delivery_message_path),
         ("environment", environment_path),
         ("visible-before", visible_before_path),
         ("visible-after", visible_after_path),
-        ("report", research_root / "report.md"),
     ):
         _require_file(path, role)
     if not isinstance(runtime_skill_id, str) or not runtime_skill_id.strip():
@@ -146,7 +166,10 @@ def lock_run(
 
     request_entry = _entry(request_path)
     research_tree_hash = research_tree_sha256(research_root)
-    report_entry = _entry(research_root / "report.md")
+    if thematic_report:
+        report_entry: dict[str, object] = {"mode": "thematic", "report_absent": True}
+    else:
+        report_entry = _entry(report_path)
     message_sha = _sha256_file(delivery_message_path)
     environment_entry = _entry(environment_path)
     visible_before_entry = _entry(visible_before_path)
@@ -197,7 +220,10 @@ def lock_run(
         unchanged = (
             _sha256_file(request_path) == request_entry["sha256"]
             and research_tree_sha256(research_root) == research_tree_hash
-            and _sha256_file(research_root / "report.md") == report_entry["sha256"]
+            and (
+                thematic_report
+                or _sha256_file(research_root / "report.md") == report_entry["sha256"]
+            )
             and _sha256_file(delivery_message_path) == message_sha
             and _sha256_file(environment_path) == environment_entry["sha256"]
             and _sha256_file(visible_before_path) == visible_before_entry["sha256"]
@@ -250,6 +276,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-skill-id", required=True)
     parser.add_argument("--runtime-skill-sha256", required=True)
     parser.add_argument("--model-id", required=True)
+    parser.add_argument(
+        "--report-mode",
+        choices=("full", "thematic"),
+        default="full",
+        help="full (default) requires report.md in the research tree; thematic "
+        "seals a report-free thematic delivery run",
+    )
     arguments = parser.parse_args(argv)
     try:
         lock_record = lock_run(
@@ -264,6 +297,7 @@ def main(argv: list[str] | None = None) -> int:
             arguments.runtime_skill_id,
             arguments.runtime_skill_sha256,
             arguments.model_id,
+            report_mode=arguments.report_mode,
         )
     except (OSError, ValueError) as error:
         print(f"lock failed: {error}", file=sys.stderr)

@@ -162,10 +162,12 @@ def test_runtime_completion_rules_cover_observed_dual_model_failures() -> None:
             "风险扫描输入",
         ),
         "references/work-packages/core/W3-industry-competition.md": (
-            "本次运行",
             "候选集合",
-            "历史运行",
-            "不参与版本裁决",
+            "当前本地副本",
+            "原取得时间",
+            "每个具体指标",
+            "reuse_previous_task_data=false",
+            "不进入候选集合",
         ),
         "references/work-packages/core/W4-business-governance.md": (
             "附注标题层级",

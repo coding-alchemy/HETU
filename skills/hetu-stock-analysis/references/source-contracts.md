@@ -40,6 +40,8 @@
 `parse_error`（结构变化或无法解析）、`incomplete_pagination`（分页未闭合）、
 `out_of_asof`（内容晚于带时区 `as_of`，过滤而非失败）、`scope_mismatch`（主体、期间、范围、单位或用途与当前工作包不符）。
 
+九种技术状态不增加枚举。Agent 在失败记录中细分限流、连接／维护、权限／访问控制、工具不可用、结构变化、下载中断、加密、损坏、无文本层、版式错位、编码、页级漏读、分页／窗口不足、主体／期间／范围／单位／时点不符及过期／口径冲突。细分依据实际输出；解析退出 0 及文件存在都不能证明所需内容齐全。工具不后台换源、不裁决语义。
+
 阶段 04 起四个结构化域（公告及附件、财务报表、同业市场估值、交易状态与市场快照）提供最小来源适配器 `scripts/source_adapter.py`（机械助手，接口与边界见[工具目录](tool-catalog.md)）：输入为显式保存的原始响应与显式请求参数（`subject`、带时区 `as_of`、期间、范围、单位、用途、`disabled_sources`），输出固定信封 `{schema_version, adapter, domain, source_id, called, disabled, status, source_metadata, normalized, equivalence, raw_input_sha256}`。来源可用时 `called=true`、`disabled=false`、`status` 为上述九值闭集之一；来源被禁用（`disabled_sources` 含目标来源）时适配器在解析前短路，输出 `called=false`、`disabled=true`、`status=null`、`normalized=null`，不计入九种取数状态、不判为取数失败，是否改用替代由 Agent 决定。`equivalence` 只保留双方原值并做机械复算，不裁决采用；任一轴 `match=null`（保存响应未记录该轴或请求未提供）不构成该轴核验通过，不能单独支持「替代取得」标记，按未核验如实披露。来源元数据（身份、入口、采集时间、字段依据、许可标注五类要素，键名别名见工具目录）原样取自保存响应，适配器不生成、不补写；任一要素缺失、入口非 http(s) URL 或采集时间非法即拒绝该次适配调用（退出 1 失败信封）。`as_of` 判定使用全时刻精度（公告按毫秒时刻、快照按 `trade_date`＋可选 `trade_time`，时刻挂接来源时区——body 或 source_metadata 的 `timezone`，携带 `trade_time` 而未声明时区判 `parse_error`），同日 `as_of` 时刻之后的全部内容判 `out_of_asof`，不进入成功状态；同日无 `trade_time` 的快照时点不可证（`content_after_asof=null`），不能单独支持「替代取得」。主体与期间轴同样交叉核验 body 实际值（快照 `security` 按规范化代码、快照 `trade_date` 与财务报告期集合对照请求期间）：真实矛盾判 `scope_mismatch` 并保留全部原值，不可规范化的标识判 `match=null` 交 Agent 核验。行业需求与竞争域保持合同-only，不建适配器，适配器对该域正式拒绝。
 
 采用算法固定为四步：
@@ -103,6 +105,10 @@
 | 适配器 | 当 Agent 明示选择 `tencent-quote-snapshot` 时，`source_fetch.py` 保存单证券原始文本和机械字段；经 [source_adapter.py](tool-catalog.md) 处理主体、时点和标签复核（快照 body 必含 `trade_date`、`price`；交易快照晚于 `as_of`→`out_of_asof`） | 同左：经 `source_adapter.py` 解析；标签市值与价格×股本复算双值保留、不交换标签；禁用时经 `disabled_sources` 在解析前短路（`called=false`、`status=null`） |
 | 适用边界 | 官方单一状态字段难以稳定取得时，按[恢复规则](recovery.md)降级并收缩表述 | 组合证据可证明正常成交，不冒充交易所精确状态字段；停牌、风险警示结论只能收缩表述 |
 
+L0 上市／交易状态主张可由同一证券的官方列表、正式决定及后续变更组合证明，逐主张核对有效时点与查询覆盖，具体标准见[公司资料细则](material-company.md)。组合允许不代表本次已经取得；原历史响应和缺口保持原时点结论。快照成交仍不替代正式状态，不扩大 source_fetch 或 source_adapter 的来源／字段合同。
+
+价格／股本、融券及历史范围依[市场资料细则](material-market.md)逐用途核验。只有原许可和内容证明的组合可采用；public页面不自动授权数据集，门户转载不增加独立性，不扩source_fetch来源或adapter域。
+
 ### 行业需求与竞争
 
 | 字段 | 首选：SEMI、SIA、正式政策统计或 authorized 数据库 | 替代：同业年报、发行人年报及可追溯行业材料 |
@@ -121,6 +127,8 @@
 | 失败语义 | 受限或授权过期→`permission_denied`；不可得→`not_found` | 原文无法核验→`parse_error`；口径不符→`scope_mismatch` |
 | 适配器 | 不建（合同-only；`source_adapter.py` 对该域正式拒绝） | 同左 |
 | 适用边界 | 协会全球口径不等于中国设备资本开支，更不等于公司份额 | 方向与相对证据不证明精确公司份额；发行人自述市占率不可升级为独立验证；媒体转引只作背景 |
+
+细分价格／库存／产能及精确份额依[经营资料细则](material-business.md)逐用途取证。行业保持 contract-only；具名来源、入口可达或方向性替代不代表精确统计已取得，也不扩大适配器域或正式组合。来源升级只针对获证用途与当前许可范围。
 
 ### 财务报表
 
@@ -163,6 +171,8 @@
 ## 合同范围外的披露缺口
 
 以下缺口不因本合同存在而被替代或掩盖：**未披露订单**（在手合同、订单金额无公开口径）保持披露缺口，合同负债、备产存货等间接指标不得表述为订单验证；单日涨跌归因与全天资金流收盘终值不建设正式来源合同或适配器；精确公司份额在无合法等价来源时必须保持 `未取得`，不以行业方向或同业披露冒充。
+
+风险原件按[风险资料细则](material-risk.md)逐实体、产品、法域及存续用途核验。新内容只证明其实际用途，计数存根、抽样和API可用不升级整个临床来源或自动采集许可；仍未取得的原文及许可缺口保持。
 
 ## 切换与错误语义
 
