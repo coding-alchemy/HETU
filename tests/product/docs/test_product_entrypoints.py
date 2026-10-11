@@ -135,10 +135,9 @@ def test_readme_states_skill_helper_role_split() -> None:
     assert "可选" in readme or "optional" in readme.lower()
 
 
-def test_readme_describes_legacy_only_as_removed_history() -> None:
+def test_readme_does_not_advertise_legacy_commands() -> None:
     readme = _read(README)
     # The Phase-1 legacy surface is removed history, never an available group.
-    assert "legacy 兼容面已退场" in readme
     assert "三期 C3" not in readme
     assert "hetu-stock legacy`：开发者专用的只读历史命令面" not in readme
     assert "只暴露三个顶层组" not in readme
@@ -150,18 +149,6 @@ def test_readme_states_helper_unavailable_continuation() -> None:
     # public research continues with host equivalents when helper unavailable
     assert "公开" in readme
     assert "等价" in readme or "宿主" in readme
-
-
-def test_readme_states_authorized_failure_semantics() -> None:
-    readme = _read(README)
-    # The spec claim: authorized failure blocks only related data, stays
-    # authorized until an explicit user decision, and never persists a
-    # resolved-secret list. Assert the three distinctive contiguous phrases
-    # the README actually uses in its 授权失败语义 section, so the test fails
-    # if that paragraph is deleted or watered down.
-    assert "只阻塞与该来源相关的数据" in readme
-    assert "运行保持 authorized 状态，直到用户做出显式决定" in readme
-    assert "从不持久化已解析的 secret 列表" in readme
 
 
 def _assert_phase2_host_statuses(text: str, where: str) -> None:
@@ -234,8 +221,7 @@ def test_usage_guide_states_helper_unavailable_continuation() -> None:
 
 def test_usage_guide_states_authorized_failure_semantics() -> None:
     usage = _read(USAGE)
-    # Same three-part spec claim as README; assert the distinctive contiguous
-    # phrases the usage guide actually uses in its authorized 模式 section.
+    # Detailed authorized-failure semantics belong in the usage guide.
     assert "只阻塞与该来源相关的数据" in usage
     assert "运行保持 authorized 状态，直到用户做出显式决定" in usage
     assert "系统从不持久化已解析的 secret 列表" in usage
@@ -255,17 +241,9 @@ def test_usage_guide_does_not_claim_cli_validates_research_semantics() -> None:
     assert "请求规范化、状态迁移校验、证据元数据检查、门禁评估与报告校验" not in usage
 
 
-def test_readme_documents_explicit_host_evidence_entry() -> None:
-    readme = _read(README)
-    # 显式选定证据的检查入口只在设置 HETU_HOST_EVIDENCE 时追加，且任何通过
-    # 都不构成宿主组合的正式支持认证
-    assert "HETU_HOST_EVIDENCE" in readme
-    assert "--host-evidence" in readme
-    assert "不构成任何宿主／模型组合的正式支持认证" in readme
-
-
 def test_usage_guide_documents_explicit_host_evidence_entry() -> None:
     usage = _read(USAGE)
+    assert "HETU_HOST_EVIDENCE" in usage
     assert "--host-evidence" in usage
     assert "host-support-record.json" in usage
     assert "未执行" in usage

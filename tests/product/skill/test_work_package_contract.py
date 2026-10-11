@@ -10,6 +10,7 @@ from hetu_stock.skill.work_packages import (
     validate_phase2_frontmatter,
     validate_work_package_contract,
 )
+from tests.product.skill import contract_fixtures
 from tests.product.skill.contract_fixtures import build_contract_fixture
 
 
@@ -250,6 +251,26 @@ def test_invalid_official_extension_fixture_is_rejected(
         validate_work_package_contract(
             root, manifest_files=manifest_files, expected_official_count=expected_count
         )
+
+
+@pytest.mark.parametrize(
+    "variant,message,count",
+    [
+        ("unregistered", "catalog", 1),
+        ("uncovered", "manifest", 1),
+        ("duplicate-id", "duplicate", 2),
+    ],
+)
+def test_negative_packages_need_only_the_valid_original(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str, message: str, count: int
+) -> None:
+    source = Path(contract_fixtures.__file__).parents[1] / "fixtures/official_work_packages/valid"
+    product = tmp_path / "product"
+    shutil.copytree(source, product / "fixtures/official_work_packages/valid")
+    monkeypatch.setattr(contract_fixtures, "__file__", str(product / "skill/contract_fixtures.py"))
+    root, manifest = build_contract_fixture(tmp_path / "run", official_fixture=variant)
+    with pytest.raises(ValueError, match=message):
+        validate_work_package_contract(root, manifest_files=manifest, expected_official_count=count)
 
 
 @pytest.mark.parametrize(

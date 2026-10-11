@@ -154,7 +154,7 @@ parse_error, incomplete_pagination, out_of_asof, scope_mismatch
 
 2026-10-08 用户决定：下列八类详细取得路径保留为长期需求，**本期不做实现，也不继续本期补取**。
 本节是后续选源参考，不表示来源已接入、许可已取得或缺口已关闭。现有资料在原用途与时点内继续
-有效，未满足内容及其结论限制继续保留；需求归属见[唯一长期需求清单 §1.1.1](../../specs/stock-analysis-workflow-v1-requirements.md#111-第-04-批八类真实资料的长期后续)。
+有效，未满足内容及其结论限制继续保留；需求归属见[长期需求 §2.2](../../specs/stock-analysis-workflow-v1-requirements.md#22-经营竞争与贸易资料)。
 
 ### 9.1 产品价格：可比多期原表与报价口径
 

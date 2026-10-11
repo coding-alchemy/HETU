@@ -59,9 +59,9 @@
 细则、证据和未完成标准见对应章节。
 
 长期需求于 2026-10-03 归并整理后，本文提及的长期 §2.7／§3.9、§3.7、§9.1 为整理前编号：
-现行性能要求见[长期 §2.2](stock-analysis-workflow-v1-requirements.md#22-性能复用收益与预算实测校准未验收已停止投入)，
+现行性能要求见[长期需求第 5 章](stock-analysis-workflow-v1-requirements.md#5-已停止投入的性能要求)，
 G2 专项记录见[本文 §7.2](#phase5-depth-model-source)，
-完整认证门槛见[长期 §3.1](stock-analysis-workflow-v1-requirements.md#31-完整样本矩阵与可靠性p0)。
+完整认证门槛见[长期需求 §3.2](stock-analysis-workflow-v1-requirements.md#32-完整研究认证与宿主支持)。
 本次只更新编号对照，不改变本文要求、批准、验收结果或停止点。
 
 | 五期条款 | 现行章节 | 已有证据与保留缺口 |
@@ -282,9 +282,9 @@ prompt＝`tests/product/skill/test_prompt_contract.py`。
 `test_first_verification_complete_and_fixups_recheck_direct_impact_only`）
 约束能力预检与独立核对入口。
 
-`tests/product/fixtures/phase5_parallel/` 包含十二份夹具；`review-expectations/README.md`
-仅评审侧，答案未注入 `confluence/` 或 `violations/`（由
-`test_review_expectations_live_only_on_the_review_side` 约束）。
+tests/product/fixtures/parallel/ 的两个输入 catalog 保留七个汇合材料和四类返回场景。
+转载正文只维护一份，各渠道、单位、时点和返回原值按场景恢复。
+review-expectations.md 仅供评审，不作为执行输入；历史十二文件布局从固定提交回源。
 
 ### 4.2 R1 已关闭：实际复用开关传递到首次派发与重派
 

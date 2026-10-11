@@ -1,0 +1,99 @@
+{
+  "bases": {
+    "reprint": {
+      "source_type": "转载",
+      "underlying_text_id": "synth-q3-revenue-2025",
+      "underlying_text": "合成集团2025年前三季度营业收入为120000万元，同比增长12%。",
+      "metric": "2025年前三季度营业收入",
+      "value": "120000",
+      "unit": "万元",
+      "event_date": "2025-10-28"
+    }
+  },
+  "cases": {
+    "independent-original": {
+      "fields": {
+        "material_id": "independent-original",
+        "origin": "合成集团2025年第三季度报告（独立原文定位，非转载）",
+        "source_type": "独立原文",
+        "underlying_text_id": "synth-q3-original-2025",
+        "metric": "2025年前三季度营业收入",
+        "value": "121500",
+        "unit": "万元",
+        "event_date": "2025-10-28",
+        "published_at": "2025-10-28T18:00:00+08:00",
+        "note": "合成受控材料：与同源转载不同值的独立原文，返回更晚（fixture，主体虚构，无事实内容）"
+      }
+    },
+    "late-material": {
+      "fields": {
+        "material_id": "late-material",
+        "outlet": "合成公告速递",
+        "source_type": "转载",
+        "metric": "2025年全年营业收入预告",
+        "value": "168000",
+        "unit": "万元",
+        "event_date": "2026-01-20",
+        "published_at": "2026-01-20T09:30:00+08:00",
+        "note": "合成受控材料：事件与发布均晚于 as_of=2025-12-31（fixture，主体虚构，无事实内容）"
+      }
+    },
+    "metric-wan": {
+      "fields": {
+        "material_id": "metric-wan",
+        "outlet": "合成行业周报",
+        "source_type": "转载",
+        "metric": "2025年前三季度归母净利润",
+        "value": "8600",
+        "unit": "万元",
+        "event_date": "2025-10-30",
+        "published_at": "2025-10-31T08:00:00+08:00",
+        "note": "合成受控材料：单位冲突对的一方（万元口径，fixture，主体虚构，无事实内容）"
+      }
+    },
+    "metric-yi": {
+      "fields": {
+        "material_id": "metric-yi",
+        "outlet": "合成研究简报",
+        "source_type": "转载",
+        "metric": "2025年前三季度归母净利润",
+        "value": "0.86",
+        "unit": "亿元",
+        "event_date": "2025-10-30",
+        "published_at": "2025-10-30T20:10:00+08:00",
+        "note": "合成受控材料：单位冲突对的另一方（亿元口径，与万元方同一指标，fixture，主体虚构，无事实内容）"
+      }
+    },
+    "normal-material": {
+      "fields": {
+        "material_id": "normal-material",
+        "outlet": "合成集团公告原文",
+        "source_type": "独立原文",
+        "metric": "2025年前三季度经营现金流净额",
+        "value": "15300",
+        "unit": "万元",
+        "event_date": "2025-11-10",
+        "published_at": "2025-11-10T16:00:00+08:00",
+        "note": "合成受控材料：时点内、单一来源、口径一致的正常对照材料（fixture，主体虚构，无事实内容）"
+      }
+    },
+    "reprint-a": {
+      "base": "reprint",
+      "fields": {
+        "material_id": "reprint-a",
+        "outlet": "合成财经快讯A",
+        "published_at": "2025-10-28T09:05:00+08:00",
+        "note": "合成受控材料：同源转载A（fixture，主体虚构，无事实内容）"
+      }
+    },
+    "reprint-b": {
+      "base": "reprint",
+      "fields": {
+        "material_id": "reprint-b",
+        "outlet": "合成证券日报B",
+        "published_at": "2025-10-28T11:40:00+08:00",
+        "note": "合成受控材料：同源转载B，与转载A同一底层文本、不同转载渠道（fixture，主体虚构，无事实内容）"
+      }
+    }
+  }
+}
