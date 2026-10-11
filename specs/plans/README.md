@@ -2,11 +2,14 @@
 
 ## 当前状态
 
-当前没有待执行计划。六期已按用户批准的已证范围限定验收，正式全仓工程门禁与收尾交接已完成；
+当前没有待执行计划。产品测试材料清理三阶段已执行并评审通过，执行计划已按授权清理。
+后续维护遵循[测试材料复用与维护方法论](../../docs/engineering/test-fixtures-methodology.md)。
+
+六期已按用户批准的已证范围限定验收，正式全仓工程门禁与收尾交接已完成；
 2026-10-10 按用户授权删除六期路线图及六份编号计划，原文从本页的固定 Git 提交回溯。
 
 第 02 批限定接受、第 04／05／06 批后置决定及全部使用限制继续有效。未取得资料保留在
-[长期需求 §1.1.1–§1.1.3](../stock-analysis-workflow-v1-requirements.md#111-第-04-批八类真实资料的长期后续)，
+[长期需求资料清单](../stock-analysis-workflow-v1-requirements.md#2-资料取得与来源工程)，
 清理不将取得目标改判完成、不启动新的实现或研究；推送／合入 main 未授权未执行。
 
 用户于 2026-10-02 决定不再投入五期性能验收，并批准清理已执行完的计划。第 5–7 组限定
@@ -35,7 +38,7 @@
 | 扩展与计量工具 | 实现、组内修复及四项阻断均已关闭；[扩展管理](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-extensions)、[计量工具](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-metering) |
 | 第 5–7 组验收 | 第 5 组限定接受、第 6 组原五运行限定闭合、第 7 组本批 4/5＝80% 限定认证；[批准例外与支持边界](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status) |
 | 预算与性能 | N7 默认及获批 X1／X4 已执行，额度用尽；三条性能线、全流程取样与实测校准未完成；[停止点](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-closeout) |
-| 六期资料完整性与证据闭合 | 已证范围获限定验收、工程收尾完成；[已交付范围与证据入口](../2026-10-04-stock-analysis-workflow-v1-phase-6-design.md#112-交付状态与证据入口)，剩余取得要求仍在长期清单 |
+| 六期资料完整性与证据闭合 | 已证范围获限定验收、工程收尾完成；[已交付范围与证据入口](../2026-10-04-stock-analysis-workflow-v1-phase-6-implementation.md#6-交付与验收结果)，剩余取得要求仍在长期清单 |
 
 ## 历史与未启动范围
 
@@ -115,14 +118,25 @@ git show d12415290feb20aa117af73443251c08e1bb5e48:specs/plans/stock-analysis-wor
 `4723a27dd7daf6fa45d4c4763da53bf8fd10986d`。本轮清理只移除已结束的执行安排、旧报批、
 提交示例及重复记录；未勾选的取得目标仍按实际未满足状态转长期，不登记为取得通过。
 
-六期现行需求、用途与验收标准分别见[六期需求](../2026-10-04-stock-analysis-workflow-v1-phase-6-requirements.md)
-与[六期设计及交付状态](../2026-10-04-stock-analysis-workflow-v1-phase-6-design.md#112-交付状态与证据入口)；
+六期现行行为、用途与验收范围统一见[六期实现](../2026-10-04-stock-analysis-workflow-v1-phase-6-implementation.md)；
 后置要求仍在长期清单。各批验收、原件、失败、修订及锁定产物保留；验收记录中的原计划路径
 和章节号指清理前版本，可按以下方式回源，不作为工作区待执行入口：
 
 ```bash
 git ls-tree -r --name-only 4723a27dd7daf6fa45d4c4763da53bf8fd10986d -- specs/plans/stock-analysis-workflow-v1-phase-6/
 git show 4723a27dd7daf6fa45d4c4763da53bf8fd10986d:specs/plans/stock-analysis-workflow-v1-phase-6/README.md
+```
+
+2026-10-11 按用户授权删除 `product-fixtures-cleanup/` 中的路线图及 01–03 三份编号计划，
+共 4 份。删除前逐文件确认原字节保存在本地固定提交
+`c1ed5042bf7c65620fdc34c0a831fe88ca9017c8`；该提交也保存了 136 项处置表及三阶段执行记录。
+当前材料入口见[合成场景材料](../../tests/product/fixtures/material_cases/README.md)，
+后续维护遵循[测试材料复用与维护方法论](../../docs/engineering/test-fixtures-methodology.md)。
+原设计及交付结果保存在 `b5a23c8ac6803a76225811ddbc897d5ff5deb124`，原文按以下路径回源。
+
+```bash
+git show c1ed5042bf7c65620fdc34c0a831fe88ca9017c8:specs/plans/product-fixtures-cleanup/README.md
+git show b5a23c8ac6803a76225811ddbc897d5ff5deb124:specs/2026-10-10-product-fixtures-cleanup-design.md
 ```
 
 ## 新增计划约定

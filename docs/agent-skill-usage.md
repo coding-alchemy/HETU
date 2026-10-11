@@ -112,7 +112,7 @@ Skill 只支持单只 A 股，即 `subject.type=security`。`industry`、`sector
 研究支持的证据范围按批验收记录判定：完整研究的获证类别为五期限定的
 ZCode×GLM-5.3-Flash×standard×public（quick／deep 及其他宿主组合不在该认证内，已有
 原时点质量成果按原范围复用）；六期各批交付的是资料规则、行为验证与限定真实内容
-（已交付范围见[六期设计 §11.2](../specs/2026-10-04-stock-analysis-workflow-v1-phase-6-design.md#112-交付状态与证据入口)），其中六期行为
+（已交付范围见[六期实现 §6](../specs/2026-10-04-stock-analysis-workflow-v1-phase-6-implementation.md#6-交付与验收结果)），其中六期行为
 验证在 ZCode 会话模型（GLM-5.3）下离线执行，不扩大上述研究支持范围；`authorized` 模式
 的取数与保存支持按各批实际许可证据分别判定，不因规则存在而视为已获支持。
 
