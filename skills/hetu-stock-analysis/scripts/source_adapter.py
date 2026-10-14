@@ -255,6 +255,22 @@ def _explicit_page_number(page: dict[str, Any]) -> bool:
     return isinstance(number, int) and not isinstance(number, bool)
 
 
+def _cninfo_announcement_rows(page: dict[str, Any]) -> list[Any]:
+    if "announcements" not in page:
+        raise ValueError("missing announcements")
+    rows = page["announcements"]
+    if isinstance(rows, list):
+        return rows
+    if (
+        rows is None
+        and type(page.get("totalAnnouncement")) is int
+        and page["totalAnnouncement"] == 0
+        and page.get("hasMore") is False
+    ):
+        return []
+    raise ValueError("invalid announcements")
+
+
 def _cninfo_pagination_closed(pages: list[Any]) -> bool:
     """Close saved cninfo pagination without trusting ``pageNum``/``totalpages``.
 
@@ -266,8 +282,13 @@ def _cninfo_pagination_closed(pages: list[Any]) -> bool:
     page numbers — every page carrying an explicit integer ``pageNum`` (the
     synthetic payload shape) or, when none does, the saved page order itself
     (the i-th saved page is request page i) — and no open tail signal
-    (``hasMore`` true on the final page). The stage-03 tool keeps its own
-    stricter ``pageNum``-based rule; this judgment is adapter-owned.
+    (``hasMore`` true on the final page). Row counting goes through
+    ``_cninfo_announcement_rows`` so the evidenced empty-window shape
+    (``announcements`` null with ``totalAnnouncement`` 0 and ``hasMore``
+    false, per the real saved response fixture) counts as zero rows without
+    mutating the saved body; any other null/missing shape stays a ValueError.
+    The stage-03 tool keeps its own stricter ``pageNum``-based rule; this
+    judgment is adapter-owned.
     """
     if not pages:
         return False
@@ -285,7 +306,7 @@ def _cninfo_pagination_closed(pages: list[Any]) -> bool:
     totals = {page["totalAnnouncement"] for page in pages}
     if len(totals) > 1:
         return False
-    returned = sum(len(page["announcements"]) for page in pages)
+    returned = sum(len(_cninfo_announcement_rows(page)) for page in pages)
     return returned == totals.pop() and final_page.get("hasMore") is not True
 
 
@@ -295,7 +316,16 @@ def _normalize_announcements(
     pages = body.get("pages")
     if not isinstance(pages, list):
         raise ValueError("announcements body must contain a pages list")
-    index = announcement_index.normalize_announcement_pages(pages, as_of=as_of)
+    # Tolerate the evidenced cninfo empty-window shape on a copy only: the
+    # saved body keeps its original ``announcements: null`` bytes and the
+    # stage-03 normalizer keeps its strict list-only schema.
+    normalized_pages = [
+        dict(page, announcements=_cninfo_announcement_rows(page))
+        if isinstance(page, dict)
+        else page
+        for page in pages
+    ]
+    index = announcement_index.normalize_announcement_pages(normalized_pages, as_of=as_of)
     # The stage-03 tool can only close pagination on body ``pageNum``, which
     # real cninfo responses do not carry; the adapter re-judges completeness
     # on totalAnnouncement/hasMore plus the request page order.

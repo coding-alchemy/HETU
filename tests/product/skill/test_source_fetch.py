@@ -497,6 +497,65 @@ def test_cninfo_fetch_resolves_org_id_and_closes_pagination(fetcher: Any) -> Non
     assert result["response"] == {"status_code": 200}
 
 
+def test_cninfo_real_empty_window_closes_with_null_announcements_kept(
+    fetcher: Any,
+) -> None:
+    # Real saved evidence (2026-08-24, cninfo hisAnnouncement/query): a
+    # genuinely empty window returns announcements=null with
+    # totalAnnouncement=0 and hasMore=false. The fetcher must close on that
+    # page and preserve the null bytes verbatim in the saved body.
+    empty_page_payload = {
+        "classifiedAnnouncements": None,
+        "totalSecurities": 0,
+        "totalAnnouncement": 0,
+        "totalRecordNum": 0,
+        "announcements": None,
+        "categoryList": None,
+        "hasMore": False,
+        "totalpages": 0,
+    }
+    empty_page = _http(
+        fetcher,
+        empty_page_payload,
+        url="https://www.cninfo.com.cn/new/hisAnnouncement/query",
+    )
+    transport = FakeTransport([_cninfo_identity(fetcher), empty_page])
+
+    result = fetcher.fetch_saved_response(
+        _cninfo_request(), transport=transport, now=NOW
+    )
+
+    assert [call[0] for call in transport.calls] == ["GET", "POST"]
+    assert result["body"]["pages"] == [empty_page_payload]
+    assert result["body"]["pages"][0]["announcements"] is None
+    assert result["response"] == {"status_code": 200}
+
+
+@pytest.mark.parametrize(
+    "page_payload",
+    [
+        {"totalAnnouncement": 0, "hasMore": False},
+        {"announcements": None, "hasMore": False},
+        {"announcements": None, "totalAnnouncement": 5, "hasMore": False},
+        {"announcements": None, "totalAnnouncement": 0, "hasMore": True},
+    ],
+)
+def test_cninfo_null_tolerance_stays_parse_error_outside_the_evidenced_window(
+    fetcher: Any, page_payload: dict[str, object]
+) -> None:
+    bad_page = _http(
+        fetcher,
+        page_payload,
+        url="https://www.cninfo.com.cn/new/hisAnnouncement/query",
+    )
+    transport = FakeTransport([_cninfo_identity(fetcher), bad_page])
+
+    with pytest.raises(fetcher.SourceFetchError) as caught:
+        fetcher.fetch_saved_response(_cninfo_request(), transport=transport, now=NOW)
+
+    assert caught.value.status == "parse_error"
+
+
 def test_cninfo_rejects_invalid_window_and_stops_on_page_or_byte_limit(
     fetcher: Any,
 ) -> None:

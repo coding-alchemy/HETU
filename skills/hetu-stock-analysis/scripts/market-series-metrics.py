@@ -224,12 +224,258 @@ def _calculate_market_series_metrics(
     }
 
 
+def _ma_value(prices: list[Decimal], length: int) -> Decimal | None:
+    if len(prices) < length:
+        return None
+    return sum(prices[-length:], Decimal(0)) / Decimal(length)
+
+
+def _volume_ratio_value(current: Decimal, previous: list[Decimal]) -> Decimal | None:
+    if len(previous) != 5:
+        return None
+    average = sum(previous, Decimal(0)) / Decimal(5)
+    return current / average if average != 0 else None
+
+
+def _volatility_value(prices: list[Decimal]) -> Decimal | None:
+    if len(prices) < 21:
+        return None
+    sample = prices[-21:]
+    changes = [(right / left).ln() for left, right in zip(sample, sample[1:], strict=False)]
+    mean = sum(changes, Decimal(0)) / Decimal(20)
+    variance = sum(((value - mean) ** 2 for value in changes), Decimal(0)) / Decimal(19)
+    return variance.sqrt() * Decimal(252).sqrt() * Decimal(100)
+
+
+def _positive_drawdown(prices: list[Decimal]) -> Decimal:
+    peak = prices[0]
+    worst = Decimal(0)
+    for value in prices:
+        peak = max(peak, value)
+        worst = max(worst, (peak - value) / peak * Decimal(100))
+    return worst
+
+
+def calculate_ohlcv_metrics(payload: dict[str, object]) -> dict[str, object]:
+    """Compute explicit OHLCV daily indicators and window statistics.
+
+    The caller supplies an already-verified daily series with explicit units,
+    warmup rows and gap declarations; the tool computes fixed Decimal
+    indicators (MA5/10/20/60, single-day change/amplitude vs an evidenced
+    reference close, turnover against the day's float shares, prior-five-day
+    volume ratio, 20-day annualized log-return volatility) plus the
+    display/focus window return and drawdown. Unavailable inputs yield null
+    values with per-row reasons instead of dropping other computable data;
+    the tool never selects a source, never fills missing trading days and
+    never interprets a metric as a trading signal.
+    """
+    with decimal.localcontext(_DECIMAL_CONTEXT):
+        return _calculate_ohlcv_metrics(payload)
+
+
+def _calculate_ohlcv_metrics(payload: dict[str, object]) -> dict[str, object]:
+    fields = {
+        "subject",
+        "timezone",
+        "as_of",
+        "input_hash",
+        "adjustment",
+        "adjustment_basis",
+        "display_start",
+        "focus_start",
+        "units",
+        "bars",
+        "gaps",
+    }
+    if not fields <= payload.keys() or payload.keys() - fields - {"source"}:
+        raise ValueError("invalid OHLCV fields")
+    for name in ("subject", "timezone", "adjustment", "adjustment_basis"):
+        _required_text(payload, name)
+    _required_input_hash(payload)
+    zone = _resolve_timezone(str(payload["timezone"]))
+    dates = {}
+    for name in ("as_of", "display_start", "focus_start"):
+        dates[name] = _aware_datetime(payload[name], name=name)
+        _require_zone_offset(dates[name], zone, name=name)
+    if not dates["display_start"] <= dates["focus_start"] <= dates["as_of"]:
+        raise ValueError("invalid display/focus/as_of order")
+    units = {"price": "CNY/share", "volume": "share", "amount": "CNY", "float_shares": "share"}
+    if payload["units"] != units:
+        raise ValueError("OHLCV units must be normalized explicitly")
+    raw_bars = payload["bars"]
+    bar_fields = {
+        "timestamp",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "amount",
+        "reference_close",
+        "float_shares",
+    }
+    if not isinstance(raw_bars, list) or not raw_bars:
+        raise ValueError("bars must be a non-empty list")
+    for row in raw_bars:
+        if not isinstance(row, dict) or set(row) != bar_fields:
+            raise ValueError("invalid OHLCV bar fields")
+    records = _bars([{"timestamp": row["timestamp"], "close": row["close"]} for row in raw_bars])
+
+    def quantity(value: object) -> Decimal:
+        if isinstance(value, bool):
+            raise ValueError("quantity must not be boolean")
+        result = Decimal(str(value))
+        if not result.is_finite() or result < 0:
+            raise ValueError("quantity must be finite and nonnegative")
+        return result
+
+    prepared = []
+    for index, (raw, record) in enumerate(zip(raw_bars, records, strict=True)):
+        _require_zone_offset(record["moment"], zone, name=f"bars[{index}]")
+        if record["moment"] > dates["as_of"]:
+            raise ValueError("unfinished/future bar")
+        row = {name: _close(raw[name], where=name) for name in ("open", "high", "low", "close")}
+        if (
+            not row["low"]
+            <= min(row["open"], row["close"])
+            <= max(row["open"], row["close"])
+            <= row["high"]
+        ):
+            raise ValueError("invalid OHLC relationship")
+        row.update({name: quantity(raw[name]) for name in ("volume", "amount")})
+        for name in ("reference_close", "float_shares"):
+            row[name] = None if raw[name] is None else _close(raw[name], where=name)
+        row.update(timestamp=raw["timestamp"], moment=record["moment"])
+        prepared.append(row)
+    raw_gaps = payload["gaps"]
+    if not isinstance(raw_gaps, list):
+        raise ValueError("gaps must be a list")
+    parsed_gaps = []
+    for gap in raw_gaps:
+        if not isinstance(gap, dict) or set(gap) != {"start", "end", "kind", "evidence"}:
+            raise ValueError("invalid gap fields")
+        if gap["kind"] not in ("missing", "suspension", "price_break"):
+            raise ValueError("invalid gap kind")
+        if not isinstance(gap["evidence"], str) or not gap["evidence"].strip():
+            raise ValueError("gap evidence is required")
+        start = _aware_datetime(gap["start"], name="gap.start")
+        end = _aware_datetime(gap["end"], name="gap.end")
+        _require_zone_offset(start, zone, name="gap.start")
+        _require_zone_offset(end, zone, name="gap.end")
+        if start > end or end > dates["as_of"]:
+            raise ValueError("invalid gap interval")
+        parsed_gaps.append((start, end, gap["kind"]))
+
+    def interrupted(start: datetime, end: datetime) -> bool:
+        return any(
+            kind != "suspension" and start < right and left <= end
+            for left, right, kind in parsed_gaps
+        )
+
+    daily = []
+    for index, row in enumerate(prepared):
+        if row["moment"] < dates["display_start"]:
+            continue
+        result = {
+            name: row[name] if row[name] is None else _decimal_text(row[name])
+            for name in sorted(bar_fields - {"timestamp"})
+        }
+        result["timestamp"] = row["timestamp"]
+        unavailable = {}
+        ma = {}
+        for length in (5, 10, 20, 60):
+            sample = prepared[max(0, index + 1 - length) : index + 1]
+            blocked = interrupted(sample[0]["moment"], row["moment"])
+            value = None if blocked else _ma_value([item["close"] for item in sample], length)
+            ma[str(length)] = None if value is None else _decimal_text(value)
+            if value is None:
+                unavailable[f"ma_{length}"] = "price_gap" if blocked else "insufficient_history"
+        result["ma"] = ma
+        reference = row["reference_close"]
+        for name, value in (
+            (
+                "change_percent",
+                None if reference is None else (row["close"] / reference - 1) * 100,
+            ),
+            (
+                "amplitude_percent",
+                None if reference is None else (row["high"] - row["low"]) / reference * 100,
+            ),
+            (
+                "turnover_percent",
+                None
+                if row["float_shares"] is None
+                else row["volume"] / row["float_shares"] * 100,
+            ),
+        ):
+            result[name] = None if value is None else _decimal_text(value)
+            if value is None:
+                unavailable[name] = "missing_input"
+        for name, count in (("volume_ratio_5", 6), ("volatility_20_annual_percent", 21)):
+            sample = prepared[max(0, index + 1 - count) : index + 1]
+            blocked = interrupted(sample[0]["moment"], row["moment"])
+            if blocked:
+                value = None
+            elif name == "volume_ratio_5":
+                value = _volume_ratio_value(
+                    row["volume"], [item["volume"] for item in sample[:-1]]
+                )
+            else:
+                value = _volatility_value([item["close"] for item in sample])
+            result[name] = None if value is None else _decimal_text(value)
+            if value is None:
+                unavailable[name] = "data_gap" if blocked else "insufficient_or_zero_input"
+        result["unavailable"] = unavailable
+        daily.append(result)
+    windows = {}
+    for name, start in (("full", dates["display_start"]), ("recent", dates["focus_start"])):
+        sample = [row for row in prepared if row["moment"] >= start]
+        if not sample:
+            raise ValueError(f"no bars in {name} window")
+        prices = [row["close"] for row in sample]
+        blocked = interrupted(sample[0]["moment"], sample[-1]["moment"])
+        windows[name] = {
+            "effective_start": sample[0]["timestamp"],
+            "effective_end": sample[-1]["timestamp"],
+            "return_percent": None
+            if blocked
+            else _decimal_text((prices[-1] / prices[0] - 1) * 100),
+            "max_drawdown_percent": None
+            if blocked
+            else _decimal_text(_positive_drawdown(prices)),
+            "reason": "price_gap" if blocked else None,
+        }
+    return {
+        **{
+            name: payload[name]
+            for name in (
+                "subject",
+                "as_of",
+                "timezone",
+                "adjustment",
+                "adjustment_basis",
+                "input_hash",
+                "units",
+            )
+        },
+        "daily": daily,
+        "windows": windows,
+        "gaps": raw_gaps,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compute the deterministic market series metrics."
     )
     parser.add_argument("--input", required=True, help="series input JSON path")
     parser.add_argument("--output", required=True, help="envelope JSON path to create")
+    parser.add_argument(
+        "--operation",
+        choices=("close-series", "ohlcv"),
+        default="close-series",
+        help="metric contract to compute (default: close-series)",
+    )
     args = parser.parse_args(argv)
 
     input_path = Path(args.input)
@@ -244,12 +490,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"input file not found: {input_path}", file=sys.stderr)
         return 2
 
+    transform = (
+        calculate_ohlcv_metrics if args.operation == "ohlcv" else calculate_market_series_metrics
+    )
     try:
         _artifact_io.run_transform(
             tool_name="market_series_metrics",
             input_path=input_path,
             output_path=output_path,
-            transform=calculate_market_series_metrics,
+            transform=transform,
         )
     except _artifact_io.OutputConflictError as error:
         print(f"{type(error).__name__}: {error}", file=sys.stderr)

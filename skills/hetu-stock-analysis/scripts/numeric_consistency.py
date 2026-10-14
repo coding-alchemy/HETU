@@ -241,6 +241,125 @@ def _decimal_text(value: Decimal) -> str:
     return format(value, "f")
 
 
+def _new_decimal(value: Decimal | str | int, *, name: str) -> Decimal:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must not be a boolean")
+    return _decimal(value, name=name)
+
+
+def _new_pair(first: str, second: str) -> None:
+    _require_matching_units(
+        _unit(first, name="first"),
+        _unit(second, name="second"),
+        first_name="first",
+        second_name="second",
+    )
+
+
+def period_change(
+    *,
+    current: Decimal | str | int,
+    current_unit: str,
+    previous: Decimal | str | int,
+    previous_unit: str,
+) -> dict[str, str | None]:
+    _new_pair(current_unit, previous_unit)
+    now = _new_decimal(current, name="current")
+    before = _new_decimal(previous, name="previous")
+    with decimal.localcontext(_DECIMAL_CONTEXT):
+        delta = now - before
+        return {
+            "delta": _decimal_text(delta),
+            "growth_percent": _decimal_text(delta / before * 100) if before > 0 else None,
+            "reason": None if before > 0 else "nonpositive_base",
+        }
+
+
+def ratio_percent(
+    *,
+    numerator: Decimal | str | int,
+    numerator_unit: str,
+    denominator: Decimal | str | int,
+    denominator_unit: str,
+) -> dict[str, str | None]:
+    _new_pair(numerator_unit, denominator_unit)
+    top = _new_decimal(numerator, name="numerator")
+    bottom = _new_decimal(denominator, name="denominator")
+    with decimal.localcontext(_DECIMAL_CONTEXT):
+        return {
+            "value": _decimal_text(top / bottom * 100) if bottom != 0 else None,
+            "reason": None if bottom != 0 else "zero_denominator",
+        }
+
+
+def _flow_average(
+    *,
+    flow: Decimal | str | int,
+    flow_unit: str,
+    opening: Decimal | str | int,
+    opening_unit: str,
+    closing: Decimal | str | int,
+    closing_unit: str,
+) -> tuple[Decimal, Decimal]:
+    _new_pair(flow_unit, opening_unit)
+    _new_pair(flow_unit, closing_unit)
+    value = _new_decimal(flow, name="flow")
+    start = _new_decimal(opening, name="opening")
+    end = _new_decimal(closing, name="closing")
+    with decimal.localcontext(_DECIMAL_CONTEXT):
+        return value, (start + end) / 2
+
+
+def average_balance_return_percent(
+    *,
+    flow: Decimal | str | int,
+    flow_unit: str,
+    opening: Decimal | str | int,
+    opening_unit: str,
+    closing: Decimal | str | int,
+    closing_unit: str,
+) -> dict[str, str | None]:
+    value, average = _flow_average(
+        flow=flow,
+        flow_unit=flow_unit,
+        opening=opening,
+        opening_unit=opening_unit,
+        closing=closing,
+        closing_unit=closing_unit,
+    )
+    with decimal.localcontext(_DECIMAL_CONTEXT):
+        return {
+            "value": _decimal_text(value / average * 100) if average != 0 else None,
+            "reason": "zero_denominator"
+            if average == 0
+            else ("negative_average_balance" if average < 0 else None),
+        }
+
+
+def turnover_ratio(
+    *,
+    flow: Decimal | str | int,
+    flow_unit: str,
+    opening: Decimal | str | int,
+    opening_unit: str,
+    closing: Decimal | str | int,
+    closing_unit: str,
+) -> dict[str, str | None]:
+    value, average = _flow_average(
+        flow=flow,
+        flow_unit=flow_unit,
+        opening=opening,
+        opening_unit=opening_unit,
+        closing=closing,
+        closing_unit=closing_unit,
+    )
+    with decimal.localcontext(_DECIMAL_CONTEXT):
+        return {
+            "value": _decimal_text(value / average) if average > 0 else None,
+            "reason": None if average > 0 else "nonpositive_average_balance",
+        }
+
+
 _OPERATION_PARAMS: dict[str, tuple[str, ...]] = {
     "gross_margin_percent": ("revenue", "revenue_unit", "cost", "cost_unit"),
     "debt_ratio_percent": ("liabilities", "liabilities_unit", "assets", "assets_unit"),
@@ -264,6 +383,24 @@ _OPERATION_PARAMS: dict[str, tuple[str, ...]] = {
         "price_unit",
     ),
     "compare_metric": ("metric", "unit", "claimed", "recomputed", "tolerance"),
+    "period_change": ("current", "current_unit", "previous", "previous_unit"),
+    "ratio_percent": ("numerator", "numerator_unit", "denominator", "denominator_unit"),
+    "average_balance_return_percent": (
+        "flow",
+        "flow_unit",
+        "opening",
+        "opening_unit",
+        "closing",
+        "closing_unit",
+    ),
+    "turnover_ratio": (
+        "flow",
+        "flow_unit",
+        "opening",
+        "opening_unit",
+        "closing",
+        "closing_unit",
+    ),
 }
 
 
@@ -397,6 +534,18 @@ _OPERATIONS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "price_to_book_ratio": _price_to_book_result,
     "dividend_yield_percent": _dividend_yield_result,
     "compare_metric": _compare_metric_result,
+    "period_change": lambda p: period_change(
+        **{k: p[k] for k in _OPERATION_PARAMS["period_change"]}
+    ),
+    "ratio_percent": lambda p: ratio_percent(
+        **{k: p[k] for k in _OPERATION_PARAMS["ratio_percent"]}
+    ),
+    "average_balance_return_percent": lambda p: average_balance_return_percent(
+        **{k: p[k] for k in _OPERATION_PARAMS["average_balance_return_percent"]}
+    ),
+    "turnover_ratio": lambda p: turnover_ratio(
+        **{k: p[k] for k in _OPERATION_PARAMS["turnover_ratio"]}
+    ),
 }
 
 

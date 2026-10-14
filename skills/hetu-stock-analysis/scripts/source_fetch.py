@@ -334,6 +334,22 @@ def _success(
     }
 
 
+def _cninfo_announcement_rows(page: dict[str, Any]) -> list[Any]:
+    if "announcements" not in page:
+        raise ValueError("missing announcements")
+    rows = page["announcements"]
+    if isinstance(rows, list):
+        return rows
+    if (
+        rows is None
+        and type(page.get("totalAnnouncement")) is int
+        and page["totalAnnouncement"] == 0
+        and page.get("hasMore") is False
+    ):
+        return []
+    raise ValueError("invalid announcements")
+
+
 def _fetch_cninfo(
     request: FetchRequest, transport: Transport, captured_at: datetime
 ) -> dict[str, object]:
@@ -392,9 +408,12 @@ def _fetch_cninfo(
         if total_bytes > MAX_RESPONSE_BYTES:
             raise SourceFetchError("parse_error", "cninfo pages exceed byte limit")
         page_payload = _json_object(page_result, "cninfo page")
+        try:
+            page_rows = _cninfo_announcement_rows(page_payload)
+        except ValueError as error:
+            raise SourceFetchError("parse_error", f"cninfo page: {error}") from error
         if (
-            not isinstance(page_payload.get("announcements"), list)
-            or not isinstance(page_payload.get("totalAnnouncement"), int)
+            not isinstance(page_payload.get("totalAnnouncement"), int)
             or isinstance(page_payload.get("totalAnnouncement"), bool)
             or not isinstance(page_payload.get("hasMore"), bool)
         ):
@@ -407,7 +426,7 @@ def _fetch_cninfo(
         explicit_page = page_payload.get("pageNum")
         if explicit_page is not None and explicit_page != page_number:
             raise SourceFetchError("parse_error", "cninfo page sequence is invalid")
-        for announcement in page_payload["announcements"]:
+        for announcement in page_rows:
             fingerprint = json.dumps(
                 announcement,
                 ensure_ascii=False,
@@ -421,7 +440,7 @@ def _fetch_cninfo(
             seen_announcements.add(fingerprint)
         pages.append(page_payload)
         if page_payload["hasMore"] is False:
-            returned_count = sum(len(page["announcements"]) for page in pages)
+            returned_count = sum(len(_cninfo_announcement_rows(page)) for page in pages)
             if returned_count != expected_total:
                 raise SourceFetchError(
                     "parse_error", "cninfo pagination closure count is inconsistent"

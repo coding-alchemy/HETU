@@ -417,6 +417,76 @@ def test_closed_empty_index_maps_to_not_found(adapter: Any) -> None:
     assert envelope["normalized"]["page_complete"] is True
 
 
+def test_null_empty_cninfo_index_keeps_raw_response(adapter: Any) -> None:
+    pages = [{"totalAnnouncement": 0, "hasMore": False, "announcements": None}]
+    payload = _saved_payload({"pages": pages})
+    envelope = _adapt(adapter, DOMAIN_ANNOUNCEMENTS, payload)
+    assert envelope["status"] == "not_found"
+    assert envelope["normalized"]["announcements"] == []
+    assert envelope["normalized"]["page_complete"] is True
+    assert payload["body"]["pages"][0]["announcements"] is None
+
+
+def test_real_null_empty_window_fixture_adapts_to_not_found(adapter: Any) -> None:
+    fixture = _fixture("cninfo-empty-window.json")
+    payload = _saved_payload({"pages": fixture["pages"]})
+
+    envelope = _adapt(adapter, DOMAIN_ANNOUNCEMENTS, payload)
+
+    assert envelope["status"] == "not_found"
+    assert envelope["normalized"]["announcements"] == []
+    assert envelope["normalized"]["page_complete"] is True
+    assert payload["body"]["pages"][0]["announcements"] is None
+
+
+@pytest.mark.parametrize(
+    "page",
+    [
+        {"totalAnnouncement": 0, "hasMore": False},
+        {"announcements": None, "hasMore": False},
+        {"announcements": None, "totalAnnouncement": 3, "hasMore": False},
+        {"announcements": None, "totalAnnouncement": 0},
+        {"announcements": None, "totalAnnouncement": False, "hasMore": False},
+        {"announcements": None, "totalAnnouncement": 0, "hasMore": True},
+        {"announcements": None, "totalAnnouncement": 0, "hasMore": None},
+    ],
+)
+def test_null_tolerance_never_opens_beyond_the_evidenced_window(
+    adapter: Any, page: dict[str, Any]
+) -> None:
+    payload = _saved_payload({"pages": [page]})
+
+    envelope = _adapt(adapter, DOMAIN_ANNOUNCEMENTS, payload)
+
+    assert envelope["status"] == "parse_error"
+    assert envelope["normalized"] is None
+
+
+def test_cross_page_total_conflict_is_not_an_empty_window(adapter: Any) -> None:
+    pages = [
+        {
+            "pageNum": 1,
+            "totalAnnouncement": 10,
+            "hasMore": False,
+            "announcements": [
+                {
+                    "announcementTitle": "合成样例：前页有记录（非真实披露）",
+                    "announcementTime": 1781503500000,
+                    "adjunctUrl": "finalpage/2026-06/synthetic-cninfo-b1.pdf",
+                }
+            ],
+        },
+        {"totalAnnouncement": 0, "hasMore": False, "announcements": None},
+    ]
+    payload = _saved_payload({"pages": pages})
+
+    envelope = _adapt(adapter, DOMAIN_ANNOUNCEMENTS, payload)
+
+    assert envelope["status"] != "not_found" or envelope["normalized"] is None
+    if envelope["normalized"] is not None:
+        assert envelope["normalized"]["page_complete"] is False
+
+
 def test_http_429_maps_to_rate_limited(adapter: Any) -> None:
     payload = _saved_payload(
         _announcements_body(), response={"status_code": 429}

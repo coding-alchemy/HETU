@@ -1,0 +1,26 @@
+{
+  "pages": [
+    {
+      "classifiedAnnouncements": null,
+      "totalSecurities": 0,
+      "totalAnnouncement": 0,
+      "totalRecordNum": 0,
+      "announcements": null,
+      "categoryList": null,
+      "hasMore": false,
+      "totalpages": 0
+    }
+  ],
+  "as_of": "2026-08-24T01:30:52+08:00",
+  "provenance": {
+    "kind": "已查证真实响应（逐字节复制，非从生产实现反生成）",
+    "endpoint": "https://www.cninfo.com.cn/new/hisAnnouncement/query",
+    "source_id": "cninfo-announcement-index",
+    "original_locator": ".hetu/research/002371.SZ-20260824T013052+0800/artifacts/raw/cninfo-announcement-index/announcement-index-p1-attempt1--cninfo-announcement-index--20260824T013052+0800--c2a890bb.json",
+    "original_sha256": "c2a890bbf3a6a53ab02ddc6c1794bf1c72ba45799fe9f59dcc5ba2cc18467114",
+    "captured_at": "2026-08-24T01:30:52+08:00",
+    "subject": "002371.SZ",
+    "corroborating_locator": ".hetu/research/百济神州-688235.SH-deep-20260905T173900+0800/artifacts/raw/cninfo-announcement-index/cninfo-hisann-688235-20260701-20260901-p3--20260905T180500+0800.json",
+    "note": "真实空窗页：announcements=null 且 totalAnnouncement=0 且 hasMore=false。同形状另见宝钢股份 cninfo-fulltext-search p2/p3（前页有记录后翻页报总数 0 的真实跨页行为，按矛盾处理不得当作空窗放行）。"
+  }
+}

@@ -82,7 +82,8 @@ def _valid_current_documents() -> dict[str, str]:
         "skills/hetu-stock-analysis/references/rules.md": "# Rules\n",
         "CHANGELOG.md": (
             "# Changelog\n\n"
-            "## V0.2 (unreleased)\n\nCurrent Agent workflow.\n\n"
+            "## V0.3 (unreleased)\n\nCurrent Agent workflow.\n\n"
+            "## V0.2\n\n`hetu-stock report render` was supported.\n\n"
             "## V0.1\n\n`hetu-stock report render` was supported.\n"
         ),
     }
@@ -354,14 +355,14 @@ def test_document_checker_rejects_bare_command_in_inline_code(tmp_path: Path) ->
     assert "run resume" in completed.stdout
 
 
-def test_changelog_v02_failure_uses_original_line_number(tmp_path: Path) -> None:
+def test_changelog_v03_failure_uses_original_line_number(tmp_path: Path) -> None:
     files = _valid_current_documents()
     files["CHANGELOG.md"] = (
         "# Changelog\n"
         "\n"
         "Release history.\n"
         "\n"
-        "## V0.2 (unreleased)\n"
+        "## V0.3 (unreleased)\n"
         "\n"
         "```bash\n"
         "run init\n"

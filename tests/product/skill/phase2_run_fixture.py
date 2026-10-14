@@ -28,6 +28,29 @@ CHAPTERS = (
     "最终边界",
 )
 
+QUICK_CHAPTERS = (
+    "任务与时点",
+    "主要数据与客观变化",
+    "行情与技术指标",
+    "财务报表与指标",
+    "业务与经营构成",
+    "股东与持股变动",
+    "重大公告与事件",
+    "市场比率与计算口径",
+    "数据来源、缺口与交付边界",
+)
+
+QUICK_CONTENT_ROWS = (
+    "Q01 主体与基础状态",
+    "Q02 行情与技术指标",
+    "Q03 三张财务表",
+    "Q04 财务指标与变化",
+    "Q05 业务与经营构成",
+    "Q06 大股东与持股变动",
+    "Q07 重大公告与事件",
+    "Q08 市场比率与资料边界",
+)
+
 WORK_PACKAGES = (
     "W0-task-framing",
     "W1-subject-verification",
@@ -39,6 +62,17 @@ WORK_PACKAGES = (
     "W7-valuation-expectations",
     "W8-market-signals",
     "W9-thesis-counterevidence",
+    "W10-report-review",
+)
+
+QUICK_WORK_PACKAGES = (
+    "W0-task-framing",
+    "W1-subject-verification",
+    "W2-incremental-events",
+    "W4-business-governance",
+    "W5-financial-validation",
+    "W7-valuation-expectations",
+    "W8-market-signals",
     "W10-report-review",
 )
 
@@ -180,14 +214,17 @@ def _report_text(
     information_completeness: str,
     analysis_validity: str,
     company_model: str,
+    report_profile: str | None = None,
 ) -> str:
+    quick = report_profile == "quick-data"
+    chapters = QUICK_CHAPTERS if quick else CHAPTERS
     limited = information_completeness == "不完整" or analysis_validity == "受限"
     gap_row = "合成关键缺口（W5）" if limited else "无（合成 fixture）"
     conclusion_row = "合成受限结论" if limited else "无（合成 fixture）"
     lines = [
         "# 合成研究报告（fixture，无研究意义）",
         "",
-        f"## 1. {CHAPTERS[0]}",
+        f"## 1. {chapters[0]}",
         "",
         "| 字段 | 规则 |",
         "| --- | --- |",
@@ -210,10 +247,16 @@ def _report_text(
         "重要声明：合成内容，无研究意义。",
         "",
     ]
-    for number, title in enumerate(CHAPTERS[1:], start=2):
+    for number, title in enumerate(chapters[1:], start=2):
         lines.append(f"## {number}. {title}")
         lines.append("")
-        if title == "核心发现":
+        if quick and title == "主要数据与客观变化":
+            lines.append("| 内容项 | 数据或客观变化 | 期间 | 正文定位 |")
+            lines.append("| --- | --- | --- | --- |")
+            for row in QUICK_CONTENT_ROWS:
+                lines.append(f"| {row} | 合成客观变化 | 2026 上半年 | 合成定位 |")
+            lines.append("")
+        elif not quick and title == "核心发现":
             lines.append("| 维度 | 状态 | 核心发现 | 用户可读证据 | 正文定位 |")
             lines.append("| --- | --- | --- | --- | --- |")
             for row in (
@@ -276,15 +319,26 @@ def _report_text(
     return "\n".join(lines)
 
 
-def _w10_text(quality_summary: str) -> str:
+def _w10_text(quality_summary: str, *, quick: bool = False) -> str:
+    mapping_rows = (
+        (
+            "| 1. 任务与时点 | 重要声明：合成内容，无研究意义。 | W0 | E1 | adopted |\n"
+            "| 4. 财务报表与指标 | 合成占位：财务报表与指标。 | W5 | C1 | adopted |\n"
+        )
+        if quick
+        else (
+            "| 1. 任务与时点 | 重要声明：合成内容，无研究意义。 | W0 | E1 | adopted |\n"
+            "| 5. 财务验证与经营质量 | 合成占位：财务验证与经营质量。 | W5 | C1 | adopted |\n"
+        )
+    )
     return (
         "# W10 报告评审（合成）\n\n"
         + quality_summary
         + "\n报告映射表：\n\n"
         "| 报告章节 | 关键主张定位 | owner 工作包 | 证据定位 | 采用状态 |\n"
         "| --- | --- | --- | --- | --- |\n"
-        "| 1. 任务与时点 | 重要声明：合成内容，无研究意义。 | W0 | E1 | adopted |\n"
-        "| 5. 财务验证与经营质量 | 合成占位：财务验证与经营质量。 | W5 | C1 | adopted |\n\n"
+        + mapping_rows
+        + "\n"
         + NO_SCRIPT_DECLARATION
         + "\n"
     )
@@ -296,6 +350,7 @@ def _manifest(
     *,
     run_id: str,
     requested_depth: str,
+    report_profile: str | None = None,
 ) -> dict[str, object]:
     raw_rel = RAW_REL
     normalized_rel = NORMALIZED_REL
@@ -305,23 +360,26 @@ def _manifest(
     normalized_sha = sha256_file(research_root / normalized_rel)
     derived_sha = sha256_file(research_root / derived_rel)
     created = "2026-06-30T19:05:00+08:00"
+    run_block: dict[str, object] = {
+        "run_id": run_id,
+        "requested_security": "000001.SZ",
+        "verified_security": "000001.SZ",
+        "as_of": "2026-06-30T18:00:00+08:00",
+        "data_mode": "public",
+        "requested_depth": requested_depth,
+        "model": {
+            "id": "合成模型标识（fixture）",
+            "reasoning_depth": "未暴露",
+            "reported_by": "host",
+        },
+        "runtime_skill": {"version": "synthetic", "sha256": "0" * 64},
+        "created_at": created,
+    }
+    if report_profile is not None:
+        run_block["report_profile"] = report_profile
     return {
         "schema_version": "1.0",
-        "run": {
-            "run_id": run_id,
-            "requested_security": "000001.SZ",
-            "verified_security": "000001.SZ",
-            "as_of": "2026-06-30T18:00:00+08:00",
-            "data_mode": "public",
-            "requested_depth": requested_depth,
-            "model": {
-                "id": "合成模型标识（fixture）",
-                "reasoning_depth": "未暴露",
-                "reported_by": "host",
-            },
-            "runtime_skill": {"version": "synthetic", "sha256": "0" * 64},
-            "created_at": created,
-        },
+        "run": run_block,
         "artifacts": [
             {
                 "path": raw_rel,
@@ -392,17 +450,22 @@ def _manifest(
 def build_valid_phase2_run(
     root: Path,
     *,
-    run_id: str = DEFAULT_RUN_ID,
+    run_id: str | None = None,
     requested_depth: str = "standard",
     actual_depth: str | None = None,
     information_completeness: str = "完整",
     analysis_validity: str = "有效",
     company_model: str = "合成经营模型（fixture）",
+    report_profile: str | None = None,
 ) -> tuple[Path, Path, Path]:
     """Return (research_root, delivery_message, lock_record) for a valid
     synthetic run laid out under ``root``."""
+    if run_id is None:
+        run_id = f"合成公司-000001.SZ-{requested_depth}-20260630T190000+0800"
     if actual_depth is None:
         actual_depth = requested_depth
+    quick = report_profile == "quick-data"
+    packages = QUICK_WORK_PACKAGES if quick else WORK_PACKAGES
     incomplete = information_completeness == "不完整"
     restricted = analysis_validity == "受限"
     quality_summary = _quality_summary_table(
@@ -453,13 +516,18 @@ def build_valid_phase2_run(
             information_completeness=information_completeness,
             analysis_validity=analysis_validity,
             company_model=company_model,
+            report_profile=report_profile,
         ),
         encoding="utf-8",
     )
 
-    required_item_owners = ("W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8")
-    method_owners = ("W5", "W6", "W7")
-    for name in WORK_PACKAGES:
+    required_item_owners = (
+        ("W1", "W2", "W4", "W5", "W7", "W8")
+        if quick
+        else ("W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8")
+    )
+    method_owners = ("W5", "W7") if quick else ("W5", "W6", "W7")
+    for name in packages:
         package_id = name.split("-", 1)[0]
         text = f"# {name}（合成）\n\n合成占位内容。\n\n"
         if name == "W0-task-framing":
@@ -485,7 +553,7 @@ def build_valid_phase2_run(
             text += NO_SCRIPT_DECLARATION + "\n"
         (research / "work-packages" / f"{name}.md").write_text(text, encoding="utf-8")
     (research / "work-packages/W10-report-review.md").write_text(
-        _w10_text(quality_summary), encoding="utf-8"
+        _w10_text(quality_summary, quick=quick), encoding="utf-8"
     )
 
     manifest = _manifest(
@@ -493,6 +561,7 @@ def build_valid_phase2_run(
         sha256_file(script_rel),
         run_id=run_id,
         requested_depth=requested_depth,
+        report_profile=report_profile,
     )
     (research / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8"

@@ -11,7 +11,7 @@ CHANGELOG) and assert mechanically that:
   Skill owns the workflow, ``skill``/``helper`` role split with ``legacy``
   described only as removed history, helper-unavailable continuation,
   authorized-failure semantics, host statuses, a single current unreleased
-  V0.2 entry, and the retained V0.1 internal baseline in CHANGELOG).
+  V0.3 entry, and the retained V0.2 / V0.1 historical baselines in CHANGELOG).
 
 Command-style matches use backtick- or ``hetu-stock``-prefixed patterns so a
 legitimate substring like ``legacy run show`` does not false-positive on
@@ -251,25 +251,25 @@ def test_usage_guide_documents_explicit_host_evidence_entry() -> None:
     assert "不构成宿主正式支持认证" in usage
 
 
-def test_changelog_records_current_unreleased_v02_and_v01_baseline() -> None:
+def test_changelog_records_current_unreleased_v03_and_historical_baselines() -> None:
     text = _read(CHANGELOG)
+    assert text.count("## V0.3（未正式发布）") == 1
     assert text.count("## V0.2（未正式发布）") == 1
     assert "## V0.1（内部基线，未正式发布）" in text
     # Only implemented, delivered functionality belongs in the changelog.
-    assert "V0.3" not in text
     assert "后续规划" not in text
     assert "二期加固负责" not in text
     assert "长期需求负责" not in text
     # Released claims stay bounded: no release, no host certification.
-    v02_start = text.index("## V0.2（未正式发布）")
-    v02_section = text[v02_start:]
-    next_header = re.search(r"\n## V0\.", v02_section[1:])
-    v02_body = (
-        v02_section if next_header is None else v02_section[: next_header.start() + 1]
+    v03_start = text.index("## V0.3（未正式发布）")
+    v03_section = text[v03_start:]
+    next_header = re.search(r"\n## V0\.", v03_section[1:])
+    v03_body = (
+        v03_section if next_header is None else v03_section[: next_header.start() + 1]
     )
-    assert not re.search(r"(?:Codex|OpenCode|Claude Code)[^。\n]{0,24}`?PASS`?", v02_body)
-    assert "已通过正式宿主认证" not in v02_body
-    assert "正式宿主支持认证仍为 `UNVERIFIED`" in v02_body
+    assert not re.search(r"(?:Codex|OpenCode|Claude Code)[^。\n]{0,24}`?PASS`?", v03_body)
+    assert "已通过正式宿主认证" not in v03_body
+    assert "不扩大正式宿主认证范围" in v03_body
 
 
 def test_install_script_uses_new_helper_wording() -> None:

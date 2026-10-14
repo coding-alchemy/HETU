@@ -1,0 +1,11 @@
+{
+  "synthetic": true,
+  "subject": "青禾证券",
+  "operation": "regulatory_capital",
+  "period": "2026Q1",
+  "attempted_at": "2026-06-30T11:00:00+08:00",
+  "status": "failed",
+  "http_status": 403,
+  "data": null,
+  "message": "离线模拟失败信封；未发生真实联网调用"
+}

@@ -4733,3 +4733,231 @@ def test_full_scope_rejects_thematic_lock_even_with_a_valid_report(
 
     assert result["mechanical_status"] == "FAIL", result
     assert "lock.report_mode_mismatch" in {issue["code"] for issue in result["issues"]}
+
+
+@pytest.mark.parametrize(
+    "xml",
+    [
+        '<svg xmlns="http://www.w3.org/2000/svg"><script/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg" onload="x"/>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="url(https://example.invalid/x)"/></svg>',
+        '<!DOCTYPE svg [<!ENTITY x "bad">]><svg xmlns="http://www.w3.org/2000/svg"/>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject><div/></foreignObject></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><a xlink:href="https://example.invalid"/></svg>',
+        '<svg xmlns="http://www.w3.org/2000/svg"><text style="fill:red">x</text></svg>',
+        'not xml at all',
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect width="-1" height="1"/></svg>',
+    ],
+)
+def test_market_svg_rejects_executable_or_external_content(checker: Any, xml: str) -> None:
+    with pytest.raises(ValueError):
+        checker._validate_market_svg(xml)
+
+
+def _relock(research: Path, lock_record: Path) -> None:
+    lock = json.loads(lock_record.read_text(encoding="utf-8"))
+    lock["research_root"]["tree_sha256"] = research_tree_sha256(research)
+    report = research / "report.md"
+    if report.is_file():
+        lock["report"]["sha256"] = hashlib.sha256(report.read_bytes()).hexdigest()
+    lock_record.write_text(
+        json.dumps(lock, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _register_w8_chart_svg(
+    research: Path,
+    manifest_path: Path,
+    *,
+    svg_text: str | None = None,
+    status: str = "adopted",
+) -> str:
+    from tests.product.skill.deterministic_tool_loader import load_script as _load
+
+    metrics = _load("market-series-metrics.py").calculate_ohlcv_metrics(
+        __import__(
+            "tests.product.skill.test_market_series_metrics_tool",
+            fromlist=["_ohlcv_payload"],
+        )._ohlcv_payload()
+    )
+    chart = _load("market-series-chart.py")
+    svg = svg_text if svg_text is not None else chart.render_market_svg(metrics)
+    svg_dir = research / "artifacts/derived/W8-market-signals"
+    svg_dir.mkdir(parents=True, exist_ok=True)
+    envelope_dir = research / "artifacts/derived/W8-market-signals"
+    envelope_dir.mkdir(parents=True, exist_ok=True)
+    normalized_rel = NORMALIZED_REL
+    normalized_sha = _sha(research / normalized_rel)
+    input_hash8 = hashlib.sha256(
+        (research / normalized_rel).read_bytes()
+    ).hexdigest()[:8]
+    svg_name = f"market-chart--{input_hash8}--calc-v1.0.svg"
+    (svg_dir / svg_name).write_text(svg, encoding="utf-8")
+    envelope_name = f"market-chart-envelope--{input_hash8}--calc-v1.0.json"
+    (envelope_dir / envelope_name).write_text(
+        json.dumps(
+            {"svg_file": svg_name, "width": 1200, "height": 640},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["artifacts"].extend(
+        [
+            {
+                "path": f"artifacts/derived/W8-market-signals/{envelope_name}",
+                "type": "derived",
+                "media_format": "json",
+                "work_package": "W8",
+                "sha256": _sha(envelope_dir / envelope_name),
+                "source_id": None,
+                "period_or_asof": "2026-06-08",
+                "created_at": "2026-06-30T19:20:00+08:00",
+                "schema_version": "1.0",
+                "inputs": [
+                    {"path": normalized_rel, "sha256": normalized_sha}
+                ],
+                "status": status,
+            },
+            {
+                "path": f"artifacts/derived/W8-market-signals/{svg_name}",
+                "type": "derived",
+                "media_format": "svg",
+                "work_package": "W8",
+                "sha256": _sha(svg_dir / svg_name),
+                "source_id": None,
+                "period_or_asof": "2026-06-08",
+                "created_at": "2026-06-30T19:20:00+08:00",
+                "schema_version": "1.0",
+                "inputs": [
+                    {
+                        "path": f"artifacts/derived/W8-market-signals/{envelope_name}",
+                        "sha256": _sha(envelope_dir / envelope_name),
+                    }
+                ],
+                "status": status,
+            },
+        ]
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return f"artifacts/derived/W8-market-signals/{svg_name}"
+
+
+def _sha(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_valid_w8_chart_svg_passes_and_is_citable(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    svg_rel = _register_w8_chart_svg(research, research / "manifest.json")
+    report = research / "report.md"
+    report.write_text(
+        report.read_text(encoding="utf-8").replace(
+            "## 8. 市场状态与近期信号",
+            f"## 8. 市场状态与近期信号\n\n图：`{svg_rel}`。",
+            1,
+        ),
+        encoding="utf-8",
+    )
+    _relock(research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    assert result["mechanical_status"] == "PASS", result
+
+
+def test_scripted_svg_artifact_fails_readability(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    malicious = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="640">'
+        '<script>alert(1)</script></svg>\n'
+    )
+    svg_rel = _register_w8_chart_svg(
+        research, research / "manifest.json", svg_text=malicious
+    )
+    _relock(research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert "artifact.unreadable_format" in codes
+    assert any(issue["path"] == svg_rel for issue in result["issues"])
+    assert result["mechanical_status"] == "FAIL"
+
+
+def test_svg_outside_w8_owner_is_rejected(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    svg_rel = _register_w8_chart_svg(research, research / "manifest.json")
+    wrong_dir = research / "artifacts/derived/W5-financial-validation"
+    wrong_dir.mkdir(parents=True, exist_ok=True)
+    (research / svg_rel).rename(wrong_dir / Path(svg_rel).name)
+    _edit_json(
+        research / "manifest.json",
+        lambda data: data["artifacts"][-1].__setitem__(
+            "path",
+            f"artifacts/derived/W5-financial-validation/{Path(svg_rel).name}",
+        ),
+    )
+    _relock(research, lock)
+
+    result = checker.check_run(research, delivery, lock)
+
+    codes = {issue["code"] for issue in result["issues"]}
+    assert any(code.startswith("manifest.") for code in codes)
+    assert result["mechanical_status"] == "FAIL"
+
+
+@pytest.mark.parametrize(
+    ("status", "impact", "expected_code"),
+    [
+        ("有", "满足：已披露构成呈现，利润金额未披露", None),
+        ("未披露", "满足：已披露构成呈现", "quality.invalid_required_item"),
+        ("未取得", "满足：已经说明缺口", "quality.invalid_required_item"),
+        ("未取得", "未满足：缺少必需财务输入", "quality.summary_mismatch"),
+    ],
+)
+def test_scope_required_item_contract(
+    checker: Any, tmp_path: Path, status: str, impact: str, expected_code: str | None
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, requested_depth="quick", report_profile="quick-data"
+    )
+    table = (
+        "| 必需项 | 要求来源 | 状态 | 证据或查询范围 | 对结论的影响 |\n"
+        "| --- | --- | --- | --- | --- |\n"
+        f"| 已披露业务分项呈现 | Q05 | {status} | E1，合成正式披露 | {impact} |\n"
+    )
+    _rewrite_package(
+        research, "W5-financial-validation.md",
+        lambda text: text.replace(_required_items_table("quick"), table, 1),
+    )
+    result, codes = _phase4_result(checker, research, delivery, lock)
+    if expected_code is None:
+        assert result["mechanical_status"] == "PASS", result
+    else:
+        assert result["mechanical_status"] == "FAIL", result
+        assert expected_code in codes
+
+
+def test_scope_event_monitor_keeps_existing_headers(checker: Any, tmp_path: Path) -> None:
+    research, delivery, lock = build_valid_phase2_run(
+        tmp_path, requested_depth="standard", report_profile="research"
+    )
+    path = research / "report.md"
+    text = path.read_text(encoding="utf-8")
+    old = "| 指标 | 口径 | 阈值 | 窗口 | 一期 | 合成来源 | 复查 | 2026-07-01 |"
+    new = (
+        "| 审批进展 | 不适用：事件状态无分母 | 受理转批准或终止 "
+        "| 截止后下一次正式公告 | 不适用：事件非连续数值 "
+        "| 合成监管原文 | 核对批准范围并回访经营假设 | 下次公告时 |"
+    )
+    assert old in text
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+    result, _ = _phase4_result(checker, research, delivery, lock)
+    assert result["mechanical_status"] == "PASS", result
