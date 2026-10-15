@@ -2,13 +2,13 @@
 
 ## 当前状态
 
-六个具名工具均为 `adopted`，随 canonical Skill 的 `scripts/` 目录分发，可按本目录的接口与边界调用。前五个 JSON 工具沿用阶段 03 的 RED→GREEN、取证哈希锁定、离线字节重放、拒绝边界和全量门禁；`pdf_text_extract.py` 以 v1.4 的稳定文本、页面失败和拒绝边界测试放行。共享信封模块 `_artifact_io.py` 不是独立工具，只为五个 JSON 工具提供确定性的读取、SHA-256 和规范 JSON 写入。
+七个具名工具均为 `adopted`，随 canonical Skill 的 `scripts/` 目录分发，可按本目录的接口与边界调用。前五个 JSON 工具沿用阶段 03 的 RED→GREEN、取证哈希锁定、离线字节重放、拒绝边界和全量门禁；`pdf_text_extract.py` 以 v1.4 的稳定文本、页面失败和拒绝边界测试放行；`market-series-chart.py` 以阶段 02-E 的双输出合同、SVG 安全封闭与字节重放测试放行。共享信封模块 `_artifact_io.py` 不是独立工具，只为 JSON 工具提供确定性的读取、SHA-256 和规范 JSON 写入。
 
-除六个具名分析工具、封闭采集脚本 `source_fetch.py`、阶段 04 机械助手 `source_adapter.py`、阶段 05 机械检查器 `check-run-artifacts.py` 与共享信封模块 `_artifact_io.py` 外，`scripts/` 内不得存在任何其他文件。只有 `source_fetch.py` 可按下述封闭接口联网；历史聚合脚本、一次性补采或最终报告拼接脚本仍禁止接入和联网。封闭文件集由 `tests/product/skill/test_deterministic_tool_io.py` 的严格相等断言保证。
+除七个具名分析工具、封闭采集脚本 `source_fetch.py`、阶段 04 机械助手 `source_adapter.py`、阶段 05 机械检查器 `check-run-artifacts.py` 与共享信封模块 `_artifact_io.py` 外，`scripts/` 内不得存在任何其他文件。只有 `source_fetch.py` 可按下述封闭接口联网；历史聚合脚本、一次性补采或最终报告拼接脚本仍禁止接入和联网。封闭文件集由 `tests/product/skill/test_deterministic_tool_io.py` 的严格相等断言保证。
 
 ## 共享信封与退出码
 
-五个 JSON 工具与阶段 04 机械助手 `source_adapter.py` 统一通过 `_artifact_io.run_transform` 写确定性 JSON 信封（排序键、紧凑分隔符、UTF-8、结尾换行）；PDF 文本工具使用下文单独定义的稳定文本格式：
+五个 JSON 工具与阶段 04 机械助手 `source_adapter.py` 统一通过 `_artifact_io.run_transform` 写确定性 JSON 信封（排序键、紧凑分隔符、UTF-8、结尾换行）；PDF 文本工具使用下文单独定义的稳定文本格式；`market-series-chart.py` 同样使用该 JSON 信封，并在 transform 内额外独占创建一个 SVG 副产物（信封失败或退出非 0 时清理半成品 SVG，不留下可被误认为成功的图形）：
 
 - 成功信封：`schema_version`（`"1.0"`）、`tool`、`input_sha256`（输入文件字节 SHA-256）、`status`（`"success"`）、`source`（输入中 `source` 块的原样透传，无则 `null`）、`source_provided`（布尔）、`result`。
 - 失败信封：`schema_version`、`tool`、`input_sha256`、`status`（`"failed"`）、`error_type`、`error_message`、`source`、`source_provided`；不含 `result`，不含执行时间等非确定字段。
@@ -77,9 +77,9 @@
 - 状态：`adopted`
 - 文件路径：`skills/hetu-stock-analysis/scripts/numeric_consistency.py`
 - 用途：对显式给出的数值执行确定性 Decimal 计算，暴露冲突主张的双方值、差异和容差结果。
-- 输入 Schema：CLI `--operation OP --input IN --output OUT`，输入为该操作的显式参数 JSON：`gross_margin_percent`(revenue, revenue_unit, cost, cost_unit)、`debt_ratio_percent`(liabilities, liabilities_unit, assets, assets_unit)、`market_cap_values`(price, price_unit, total_shares, total_shares_unit, float_shares, float_shares_unit)、`price_earnings_ratio`(market_cap, market_cap_unit, attributable_profit, attributable_profit_unit)、`price_to_book_ratio`(market_cap, market_cap_unit, attributable_equity, attributable_equity_unit)、`dividend_yield_percent`(dividend_per_share, dividend_per_share_unit, price, price_unit)、`compare_metric`(metric, unit, claimed, recomputed, tolerance)——每个数值参数都必须携带显式单位（非空字符串）；参与同一次相减或相除比较的输入单位必须一致，单位不一致即拒绝且不做任何换算；可选 `source` 块。缺参数（含缺任一单位）或出现未声明参数即拒绝。
-- 输出 Schema：算术操作输出 `value`（或 `total_market_cap` 与 `float_market_cap`）加上 `input_units`（逐输入单位回显）与 `result_unit`（`%`、复合单位或 `ratio`）；`compare_metric` 输出 `metric`、`unit`、`claimed`、`recomputed`、`tolerance`、`consistent`、`absolute_difference`。全部数值为 Decimal 字符串，不是 float。
-- 失败异常：非有限数、零分母、负容差、非法参数名、单位缺失或同次比较单位不一致抛 `ValueError`（退出 1）；未知操作名或参数错误退出 2。
+- 输入 Schema：CLI `--operation OP --input IN --output OUT`，输入为该操作的显式参数 JSON：`gross_margin_percent`(revenue, revenue_unit, cost, cost_unit)、`debt_ratio_percent`(liabilities, liabilities_unit, assets, assets_unit)、`market_cap_values`(price, price_unit, total_shares, total_shares_unit, float_shares, float_shares_unit)、`price_earnings_ratio`(market_cap, market_cap_unit, attributable_profit, attributable_profit_unit)、`price_to_book_ratio`(market_cap, market_cap_unit, attributable_equity, attributable_equity_unit)、`dividend_yield_percent`(dividend_per_share, dividend_per_share_unit, price, price_unit)、`compare_metric`(metric, unit, claimed, recomputed, tolerance)、`period_change`(current, current_unit, previous, previous_unit)、`ratio_percent`(numerator, numerator_unit, denominator, denominator_unit)、`average_balance_return_percent`(flow, flow_unit, opening, opening_unit, closing, closing_unit)、`turnover_ratio`(flow, flow_unit, opening, opening_unit, closing, closing_unit)——每个数值参数都必须携带显式单位（非空字符串）；参与同一次相减或相除比较的输入单位必须一致，单位不一致即拒绝且不做任何换算；可选 `source` 块。缺参数（含缺任一单位）或出现未声明参数即拒绝。
+- 输出 Schema：算术操作输出 `value`（或 `total_market_cap` 与 `float_market_cap`）加上 `input_units`（逐输入单位回显）与 `result_unit`（`%`、复合单位或 `ratio`）；`compare_metric` 输出 `metric`、`unit`、`claimed`、`recomputed`、`tolerance`、`consistent`、`absolute_difference`。阶段 02-D 四操作输出边界而非结论：`period_change` 输出 `delta`、`growth_percent`、`reason`（基期非正时 `growth_percent=null` 且 `reason="nonpositive_base"`，仍保留差额）；`ratio_percent` 输出 `value`、`reason`（零分母 `value=null`、`reason="zero_denominator"`）；`average_balance_return_percent` 与 `turnover_ratio` 以 `(opening+closing)/2` 为平均余额，分别输出 `value`、`reason`（平均余额为零、为负或不适用时 `value=null` 并给出 `zero_denominator`／`negative_average_balance`／`nonpositive_average_balance`；`turnover_ratio` 不自行年化）。全部数值为 Decimal 字符串，不是 float。
+- 失败异常：非有限数、布尔数值、零分母（旧操作语义）、负容差、非法参数名、单位缺失或同次比较单位不一致抛 `ValueError`（退出 1）；数学上不可计算按上一条以 `null`＋`reason` 落在成功信封内，不抹掉其他成功结果；未知操作名或参数错误退出 2。
 - 是否可离线重放：是。
 - 禁止边界：保留双方原值和差异，不自动交换标签、不自动改写来源值；不选择来源、不决定换源、不裁决冲突、不生成报告结论、不生成交易信号。
 - 实际测试文件：`tests/product/skill/test_numeric_consistency_tool.py`、`tests/product/skill/test_tool_cli_contract.py`、`tests/product/skill/test_deterministic_tool_io.py`。
@@ -118,13 +118,26 @@
 
 - 状态：`adopted`
 - 文件路径：`skills/hetu-stock-analysis/scripts/market-series-metrics.py`
-- 用途：从已保存、显式给出复权口径/时区/`as_of`/窗口的收盘价序列计算窗口收益率、简单均线、窗口高低和最大回撤（按窗口内逐点历史峰值）。
-- 输入 Schema：JSON 对象 `{"subject": 非空字符串, "adjustment": 非空字符串, "timezone": 可解析 IANA 时区, "as_of": 带时区 ISO-8601, "input_hash": 小写十六进制 8–64 位（上游 normalized 产物哈希）, "window": 正整数, "bars": [{"timestamp": 带时区 ISO-8601, "close": 正有限十进制数}]}`；bars 严格升序、不晚于 `as_of`（恰为 `as_of` 的 bar 保留）、`window` 不得超过 bar 数；声明时区必须可解析且与 `as_of` 及每个 bar 时间戳的实际偏移一致；可选 `source` 块。CLI 参数：`--input`、`--output`。
-- 输出 Schema：固定十一个字段 `{"return_percent", "simple_moving_average", "window_high", "window_low", "max_drawdown_percent", "effective_start", "effective_end", "adjustment", "timezone", "window", "input_hash"}`；数值为 Decimal 字符串；复权口径与时区原样透传；`input_hash` 原样回显；无任何信号字段。
-- 失败异常：缺/多字段（含缺 `input_hash`）、naive 时间、不可解析时区、时间偏移与声明时区矛盾、重复或逆序时间、晚于 `as_of` 的 bar、窗口越界、非正或非有限价格、`input_hash` 非法抛 `ValueError`（退出 1）；参数/输入缺失/输出冲突退出 2。
+- 用途：两种封闭操作。`--operation close-series`（默认）从已保存、显式给出复权口径/时区/`as_of`/窗口的收盘价序列计算窗口收益率、简单均线、窗口高低和最大回撤（按窗口内逐点历史峰值）；`--operation ohlcv` 从已核验的完整日 OHLCV 序列（含预热行与缺口声明）计算逐日 MA5/10/20/60、单日涨跌幅/振幅（对显式参考收盘）、换手率（对当日流通股本）、量能比（对前五日均量）与 20 日年化对数收益波动率，以及 full（display_start 起）/recent（focus_start 起）两窗口的区间收益与最大回撤。
+- 输入 Schema：close-series 为 JSON 对象 `{"subject": 非空字符串, "adjustment": 非空字符串, "timezone": 可解析 IANA 时区, "as_of": 带时区 ISO-8601, "input_hash": 小写十六进制 8–64 位（上游 normalized 产物哈希）, "window": 正整数, "bars": [{"timestamp": 带时区 ISO-8601, "close": 正有限十进制数}]}`；bars 严格升序、不晚于 `as_of`（恰为 `as_of` 的 bar 保留）、`window` 不得超过 bar 数；声明时区必须可解析且与 `as_of` 及每个 bar 时间戳的实际偏移一致；可选 `source` 块。
+- 输入 Schema（ohlcv 操作）：JSON 对象顶层封闭键集 `{subject, timezone, as_of, input_hash, adjustment, adjustment_basis, display_start, focus_start, units, bars, gaps}`（可选 `source`）；`units` 必须逐项等于 `{"price":"CNY/share","volume":"share","amount":"CNY","float_shares":"share"}`；`display_start ≤ focus_start ≤ as_of` 且三者与全部 bar/gap 时间戳的偏移一致；每根 bar 封闭为 `{timestamp, open, high, low, close, volume, amount, reference_close, float_shares}`，OHLC 须满足 `low ≤ min(open,close) ≤ max(open,close) ≤ high`，量额为有限非负数，参考收盘与股本为 null 或正有限数；`gaps` 每项封闭为 `{start, end, kind, evidence}`，`kind ∈ {missing, suspension, price_break}` 且 evidence 非空、区间不晚于 `as_of`。
+- 输出 Schema：close-series 为固定十一个字段 `{"return_percent", "simple_moving_average", "window_high", "window_low", "max_drawdown_percent", "effective_start", "effective_end", "adjustment", "timezone", "window", "input_hash"}`。ohlcv 为 `{subject, as_of, timezone, adjustment, adjustment_basis, input_hash, units, daily, windows, gaps}`：`daily` 只含 `display_start` 起的展示行（预热行只参与指标），每行回显原始 OHLCV 字段并附 `ma{5,10,20,60}`、`change_percent`、`amplitude_percent`、`turnover_percent`、`volume_ratio_5`、`volatility_20_annual_percent` 与 `unavailable` 原因映射（`missing_input`／`insufficient_history`／`insufficient_or_zero_input`，或样本被非停牌缺口跨过时的 `price_gap`／`data_gap`——有据停牌不阻断滚动指标）；`windows.full/recent` 给实际起止、区间收益与回撤，不可比较窗口给 `null`＋`reason="price_gap"`。数值均为 Decimal 字符串；口径与时区原样透传；`input_hash` 原样回显；无任何信号字段。
+- 失败异常：缺/多字段（含缺 `input_hash`）、naive 时间、不可解析时区、时间偏移与声明时区矛盾、重复或逆序时间、晚于 `as_of` 的 bar、窗口越界、非正或非有限价格、`input_hash` 非法、ohlcv 的单位/键集/OHLC 关系/缺口声明违规抛 `ValueError`（退出 1）；参数/输入缺失/输出冲突退出 2。ohlcv 中窗口内无 bar、单点不可算指标以 `null`＋原因落在成功信封内，不删除其他可计算数据。
 - 是否可离线重放：是。
-- 禁止边界：不生成交易信号，任何指标不得被解释为买卖建议；不选择来源、不决定换源、不裁决冲突、不生成报告结论。
+- 禁止边界：不生成交易信号，任何指标不得被解释为买卖建议；不填缺交易日、不把停牌当成数据缺失以外的事实；不选择来源、不决定换源、不裁决冲突、不生成报告结论。
 - 实际测试文件：`tests/product/skill/test_market_series_metrics_tool.py`、`tests/product/skill/test_tool_cli_contract.py`、`tests/product/skill/test_deterministic_tool_io.py`。
+
+### market-series-chart.py
+
+- 状态：`adopted`
+- 文件路径：`skills/hetu-stock-analysis/scripts/market-series-chart.py`
+- 用途：把一份已保存的 `market-series-metrics.py --operation ohlcv` 成功结果渲染为固定几何的 K 线/均线/成交量 SVG；只消费结果对象，不重新取数或计算指标。
+- 输入 Schema：CLI `--input IN --output RESULT.json --svg-output CHART.svg`，三个路径必须互异；`--input` 为 Agent 从成功信封显式提取的 `result` 对象（含 `daily`、`gaps`、六项元数据 `subject/as_of/timezone/adjustment/adjustment_basis/input_hash` 与逐项相等的 `units`）；失败信封、空 `daily`、错单位、逆序或晚于 `as_of` 的时间、非法 OHLC、非法缺口在创建任何 SVG 前拒绝。
+- 输出 Schema：RESULT 为标准成功信封，`result = {"svg_file": CHART 文件名, "width": 1200, "height": 640, "input_hash": 原样回显}`；CHART 为 1200×640 固定坐标的 SVG——价格带、成交量带、MA5/10/20/60 折线（数据缺口断线、历史不足不画线、不填 0）、标题（主体｜复权口径｜as_of）、中文轴标、日期刻度与口径脚注；全部动态文本经 XML 转义，颜色为固定 `#` 六位十六进制。
+- 失败异常：输入非法抛 `ValueError`（退出 1，失败信封落盘，已创建的半成品 SVG 清理）；路径相同、输出已存在（含并发创建）退出 2，既有文件保持原样。
+- 是否可离线重放：是（同一保存输入产生字节相同的信封与 SVG）。
+- 禁止边界：不联网、不选择来源、不解释图形为交易信号；不内嵌 script、事件属性、外部 href/资源、DTD/实体或可执行内容；图形与颜色由脚本固定，输入只能改变数据与转义后文本。
+- 实际测试文件：`tests/product/skill/test_market_series_chart_tool.py`、`tests/product/skill/test_tool_cli_contract.py`、`tests/product/skill/test_deterministic_tool_io.py`。
 
 ## 阶段 04 机械助手
 

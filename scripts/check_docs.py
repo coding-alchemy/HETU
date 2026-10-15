@@ -27,7 +27,7 @@ _PREFIXED_OBSOLETE_COMMAND = re.compile(
 _CODE_OBSOLETE_COMMAND = re.compile(
     r"\b(?:hetu-stock\s+)?(?:run\s+(?:init|submit|resume)|report\s+render)\b"
 )
-_CURRENT_RELEASE_TITLE = re.compile(r"^v0\.2\b", re.IGNORECASE)
+_CURRENT_RELEASE_TITLE = re.compile(r"^v0\.3\b", re.IGNORECASE)
 _HISTORICAL_EXAMPLE_PREFIXES = (
     "legacy example",
     "historical example",
@@ -284,7 +284,7 @@ def _obsolete_failures(
         )
         current = _current_release(changelog_document)
         if current is None:
-            return (("CHANGELOG.md: missing current V0.2 section",), len(scoped))
+            return (("CHANGELOG.md: missing current V0.3 section",), len(scoped))
         scoped.append((changelog, current))
 
     scoped.extend(

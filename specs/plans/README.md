@@ -2,7 +2,19 @@
 
 ## 当前状态
 
-当前没有待执行计划。产品测试材料清理三阶段已执行并评审通过，执行计划已按授权清理。
+当前没有待执行计划。七期“分层优化与 Quick／Standard 能力补全”已按最新批准范围验收完成；
+2026-10-14 按用户授权清理本批路线图及三份阶段计划，原文回源见[清理记录](#standard-scope-closeout)。
+
+三档分级与后续工作流/Quick/Standard补全现统一归为已完成的七期；需求、设计、实现、
+能力及验收边界只由[七期实现：分层优化与能力补全](../2026-10-12-stock-analysis-workflow-v1-phase-7-implementation.md)维护。
+Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2026-10-14修正后的正式披露核对范围。
+
+两次执行的历史批准、计划与证据分别保留，不维护两套现行规格。原三档6份文档见
+[旧回源归档](../../.hetu/validation/depth-tiers/closeout-v0.3-20261012/README.md)，
+后续需求/设计与合并前规范见[本次合并回源](../../.hetu/validation/standard-scope-adjustment/consolidation-20261014/README.md)。
+后续四份计划的清理回源仍见[历史记录](#standard-scope-closeout)。归档不是待执行计划，不触发研究重跑。
+
+产品测试材料清理三阶段已执行并评审通过，执行计划已按授权清理。
 后续维护遵循[测试材料复用与维护方法论](../../docs/engineering/test-fixtures-methodology.md)。
 
 六期已按用户批准的已证范围限定验收，正式全仓工程门禁与收尾交接已完成；
@@ -16,7 +28,7 @@
 收口及阶段 05 本批汇总与复评成果保持有效；第 8 组性能数值未验收、五期整体未完成的事实
 保留，不安排新采样、配对或校准，不重复请求延期批准。
 
-本目录只保留总索引；已执行或停止执行的计划已清理。五期有效要求、实现行为、
+本目录仅保留总索引；已执行或停止执行的计划已清理。五期有效要求、实现行为、
 证据与未完成边界统一见[五期实现](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
 详细验收与预算证据归入 `specs/validation/`，现行专项结论归入五期实现，不恢复五期旧计划。
 
@@ -39,6 +51,7 @@
 | 第 5–7 组验收 | 第 5 组限定接受、第 6 组原五运行限定闭合、第 7 组本批 4/5＝80% 限定认证；[批准例外与支持边界](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status) |
 | 预算与性能 | N7 默认及获批 X1／X4 已执行，额度用尽；三条性能线、全流程取样与实测校准未完成；[停止点](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-closeout) |
 | 六期资料完整性与证据闭合 | 已证范围获限定验收、工程收尾完成；[已交付范围与证据入口](../2026-10-04-stock-analysis-workflow-v1-phase-6-implementation.md#6-交付与验收结果)，剩余取得要求仍在长期清单 |
+| 七期分层优化与能力补全 | Q01–Q08／S01–S08及完整Standard交付按批准范围验收；[七期实现](../2026-10-12-stock-analysis-workflow-v1-phase-7-implementation.md#13-当前完成边界)维护需求、设计、实现与证据，Deep仅整理 |
 
 ## 历史与未启动范围
 
@@ -138,6 +151,21 @@ git show 4723a27dd7daf6fa45d4c4763da53bf8fd10986d:specs/plans/stock-analysis-wor
 git show c1ed5042bf7c65620fdc34c0a831fe88ca9017c8:specs/plans/product-fixtures-cleanup/README.md
 git show b5a23c8ac6803a76225811ddbc897d5ff5deb124:specs/2026-10-10-product-fixtures-cleanup-design.md
 ```
+
+<a id="standard-scope-closeout"></a>
+
+### Quick／Standard 能力补全计划清理
+
+2026-10-14 按用户授权删除 `standard-scope-adjustment/` 的 `README.md` 及
+`2026-10-13-01-rules-and-contracts.md`、`2026-10-13-02-isolated-materials.md`、
+`2026-10-13-03-behavior-and-closeout.md`，共四份。删除前逐份确认完成状态，并将未提交原字节
+保存到[可恢复归档](../../.hetu/validation/standard-scope-adjustment/closeout-20261014/README.md)，
+逐份 SHA-256 与归档解压内容一致。归档仅作历史回源，不作为待执行计划。
+
+当前结果见[总验收报告](../../.hetu/validation/standard-scope-adjustment/report.md)及
+[修订四独立锁后评分](../../.hetu/validation/standard-scope-adjustment/standard-review/revisions/revision-04/scoring.md)；
+原验收记录中的计划路径和章节号指清理前版本，可从归档回源。研究树、锁、旧失败、
+预算及限定接受记录保留，不因本次清理失效或重跑。
 
 ## 新增计划约定
 

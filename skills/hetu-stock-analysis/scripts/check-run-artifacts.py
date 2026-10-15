@@ -5,8 +5,10 @@ verifies structure only: required files (W0-W10, checkpoint, evidence,
 manifest, report), manifest JSON parse + closed schema (top-level run block, non-empty
 artifacts, per-entry closed key set, types, statuses, failure reasons and
 script metadata) + entry path safety + entry/input hashes, the fixed
-twelve-chapter report order with the first-chapter fixed home-metadata
-fields (incl. ``分析模型``) and the chapter-2 fixed core-findings rows all
+chapter order selected by ``manifest.run.report_profile`` (``quick-data``:
+nine quick chapters with the Q01-Q08 content rows; ``research``/absent: the
+twelve research chapters) with the first-chapter fixed home-metadata
+fields (incl. ``分析模型``) and the chapter-2 fixed rows all
 required as real Markdown table rows, the W10 report-mapping table and its
 report → owner → evidence → manifest structural chain, script registration, ownership
 restricted to W0-W10 directories and per-work-package no-script
@@ -41,9 +43,11 @@ import re
 import sys
 from contextlib import suppress
 from datetime import datetime
+from decimal import Decimal
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
+from xml.etree import ElementTree as ET
 
 SCHEMA_VERSION = "1.0"
 
@@ -75,6 +79,60 @@ WORK_PACKAGES = (
     "W9-thesis-counterevidence",
     "W10-report-review",
 )
+
+QUICK_WORK_PACKAGES = (
+    "W0-task-framing",
+    "W1-subject-verification",
+    "W2-incremental-events",
+    "W4-business-governance",
+    "W5-financial-validation",
+    "W7-valuation-expectations",
+    "W8-market-signals",
+    "W10-report-review",
+)
+QUICK_CHAPTERS = (
+    "任务与时点",
+    "主要数据与客观变化",
+    "行情与技术指标",
+    "财务报表与指标",
+    "业务与经营构成",
+    "股东与持股变动",
+    "重大公告与事件",
+    "市场比率与计算口径",
+    "数据来源、缺口与交付边界",
+)
+QUICK_CONTENT_HEADER = ("内容项", "数据或客观变化", "期间", "正文定位")
+QUICK_CONTENT_ROWS = (
+    "Q01 主体与基础状态",
+    "Q02 行情与技术指标",
+    "Q03 三张财务表",
+    "Q04 财务指标与变化",
+    "Q05 业务与经营构成",
+    "Q06 大股东与持股变动",
+    "Q07 重大公告与事件",
+    "Q08 市场比率与资料边界",
+)
+
+
+def _report_profile(manifest: dict[str, object]) -> str:
+    run = manifest.get("run")
+    if not isinstance(run, dict) or "report_profile" not in run:
+        return "legacy"
+    profile = run["report_profile"]
+    expected = {"quick-data": "quick", "research": "standard"}
+    if not isinstance(profile, str) or profile not in expected:
+        raise ValueError("invalid report_profile")
+    if run.get("requested_depth") != expected[profile]:
+        raise ValueError("report_profile conflicts with requested_depth")
+    return profile
+
+
+def _profile_chapters(profile: str) -> tuple[str, ...]:
+    return QUICK_CHAPTERS if profile == "quick-data" else CHAPTERS
+
+
+def _profile_packages(profile: str) -> tuple[str, ...]:
+    return QUICK_WORK_PACKAGES if profile == "quick-data" else WORK_PACKAGES
 
 W10_MAPPING_FIELDS = (
     "报告章节",
@@ -163,7 +221,7 @@ MANIFEST_INPUT_KEYS = frozenset({"path", "sha256"})
 # Phase-5 stage-03 conditional run fields: absent means "not recorded"
 # (old runs stay valid and are never back-filled).
 MANIFEST_RUN_CONDITIONAL_KEYS = frozenset(
-    {"task_id", "parent_task_id", "reuse_previous_task_data", "extensions"}
+    {"task_id", "parent_task_id", "reuse_previous_task_data", "extensions", "report_profile"}
 )
 # Phase-5 stage-06 conditional run field: entries recording third-party work
 # packages actually loaded this run.  Identities come only from this explicit
@@ -819,8 +877,17 @@ def _artifact_name_problem(
         return ("issue", "filename extension must match media_format")
     if entry_type == "normalized" and media_format not in {"json", "csv"}:
         return ("issue", "normalized media_format must be json or csv")
-    if entry_type == "derived" and media_format != "json":
-        return ("issue", "derived media_format must be json")
+    if entry_type == "derived" and media_format not in {"json", "svg"}:
+        return ("issue", "derived media_format must be json or the market-chart svg")
+    if (
+        entry_type == "derived"
+        and media_format == "svg"
+        and parts[2] != "W8-market-signals"
+    ):
+        return (
+            "issue",
+            "svg derived artifacts are only supported under artifacts/derived/W8-market-signals",
+        )
     if relative.suffix.lower() != f".{media_format.lower()}":
         return ("issue", "filename extension must match media_format")
     stem_parts = relative.name[: -len(relative.suffix)].split("--")
@@ -931,6 +998,65 @@ def _is_failed_canonical_tool_envelope(envelope: dict[str, Any]) -> bool:
     )
 
 
+def _validate_market_svg(text: str) -> None:
+    if re.search(r"<!\s*(DOCTYPE|ENTITY)\b", text, flags=re.IGNORECASE):
+        raise ValueError("SVG declarations/entities are forbidden")
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError as error:
+        raise ValueError("invalid SVG XML") from error
+    namespace = "{http://www.w3.org/2000/svg}"
+    if root.tag != f"{namespace}svg":
+        raise ValueError("SVG root/namespace is required")
+    allowed_tags = {f"{namespace}{name}" for name in ("svg", "line", "rect", "polyline", "text")}
+    allowed_attrs = {
+        "x",
+        "y",
+        "x1",
+        "y1",
+        "x2",
+        "y2",
+        "width",
+        "height",
+        "viewBox",
+        "points",
+        "fill",
+        "stroke",
+        "class",
+    }
+    for element in root.iter():
+        if element.tag not in allowed_tags or set(element.attrib) - allowed_attrs:
+            raise ValueError("unsupported SVG element/attribute")
+        for key, value in element.attrib.items():
+            if key in {"fill", "stroke"}:
+                if value != "none" and re.fullmatch(r"#[0-9a-fA-F]{6}", value) is None:
+                    raise ValueError("invalid SVG color/resource")
+            elif key == "class":
+                if re.fullmatch(r"[a-z][a-z0-9-]*", value) is None:
+                    raise ValueError("invalid SVG class")
+            else:
+                parts = value.replace(",", " ").split()
+                valid_count = (
+                    len(parts) == 4
+                    if key == "viewBox"
+                    else (
+                        len(parts) >= 4 and len(parts) % 2 == 0
+                        if key == "points"
+                        else len(parts) == 1
+                    )
+                )
+                if not valid_count:
+                    raise ValueError("invalid SVG numeric attribute")
+                try:
+                    numbers = [Decimal(part) for part in parts]
+                except ArithmeticError as error:
+                    raise ValueError("invalid SVG number") from error
+                if any(not number.is_finite() for number in numbers):
+                    raise ValueError("nonfinite SVG coordinate")
+                if key in {"width", "height"} and numbers[0] < 0:
+                    raise ValueError("negative SVG dimension")
+
+
 def _check_artifact_readability(
     target_path: Path,
     relative_text: str,
@@ -939,7 +1065,7 @@ def _check_artifact_readability(
 ) -> None:
     if (
         not isinstance(media_format, str)
-        or media_format not in {"json", "csv", "md", "txt", "py"}
+        or media_format not in {"json", "csv", "md", "txt", "py", "svg"}
         or not target_path.is_file()
     ):
         return
@@ -951,7 +1077,9 @@ def _check_artifact_readability(
             list(csv.reader(io.StringIO(text), strict=True))
         elif media_format == "py":
             compile(text, relative_text, "exec")
-    except (UnicodeError, json.JSONDecodeError, csv.Error, SyntaxError) as error:
+        elif media_format == "svg":
+            _validate_market_svg(text)
+    except (UnicodeError, json.JSONDecodeError, csv.Error, SyntaxError, ValueError) as error:
         issues.append(
             _issue(
                 "artifact.unreadable_format",
@@ -1019,6 +1147,17 @@ def _check_manifest(
                 "manifest.json#run.reuse_previous_task_data",
                 "run.reuse_previous_task_data must be a boolean when recorded",
             )
+        if "report_profile" in run_block:
+            try:
+                _report_profile(manifest)
+            except ValueError as error:
+                issues.append(
+                    _issue(
+                        "manifest.invalid_report_profile",
+                        "manifest.json#run.report_profile",
+                        f"run.report_profile is invalid: {error}",
+                    )
+                )
         for key in (
             "run_id",
             "requested_security",
@@ -1652,9 +1791,11 @@ def _check_report(
     research_root: Path,
     expected_model_id: object,
     issues: list[dict[str, str]],
+    report_profile: str = "legacy",
 ) -> dict[str, str]:
     report_path = research_root / "report.md"
     raw_text = report_path.read_text(encoding="utf-8")
+    chapters = _profile_chapters(report_profile)
     if _has_visible_raw_html(raw_text):
         issues.append(
             _issue(
@@ -1668,14 +1809,14 @@ def _check_report(
     for line in text.splitlines():
         if line.startswith("## "):
             found.append(line[3:])
-    expected = [f"{i}. {title}" for i, title in enumerate(CHAPTERS, start=1)]
+    expected = [f"{i}. {title}" for i, title in enumerate(chapters, start=1)]
     if found != expected:
         issues.append(
             _issue(
                 "report.chapter_order",
                 "report.md",
-                "twelve fixed chapters must appear exactly once in order "
-                f"(expected {expected!r}, found {found!r})",
+                "the fixed chapters of this report profile must appear exactly "
+                f"once in order (expected {expected!r}, found {found!r})",
             )
         )
     sections = _report_sections(text)
@@ -1716,34 +1857,55 @@ def _check_report(
                 )
             )
     second_chapter = sections.get(2, "")
-    core_rows = _find_table_rows(second_chapter, REPORT_CORE_HEADER)
-    core_labels = {
-        row[0] for row in (core_rows or []) if len(row) == len(REPORT_CORE_HEADER) and all(row)
-    }
-    for row in CORE_FINDING_ROWS:
-        if row not in core_labels:
-            issues.append(
-                _issue(
-                    "report.missing_core_row",
-                    "report.md",
-                    f"chapter 2 must carry the fixed core-findings row {row!r} as a table row",
+    if report_profile == "quick-data":
+        quick_rows = _find_table_rows(second_chapter, QUICK_CONTENT_HEADER)
+        quick_labels = {
+            row[0]
+            for row in (quick_rows or [])
+            if len(row) == len(QUICK_CONTENT_HEADER) and all(row)
+        }
+        for row in QUICK_CONTENT_ROWS:
+            if row not in quick_labels:
+                issues.append(
+                    _issue(
+                        "report.missing_core_row",
+                        "report.md",
+                        "chapter 2 must carry the fixed quick content row "
+                        f"{row!r} as a table row",
+                    )
                 )
-            )
-    for chapter, header in REPORT_FIXED_TABLE_HEADERS.items():
-        contract_table_status = _has_valid_contract_table(
-            sections_with_code.get(chapter, ""),
-            header,
-            REPORT_FIXED_TABLE_ALIASES.get(chapter),
-        )
-        if contract_table_status is False:
-            issues.append(
-                _issue(
-                    "report.missing_fixed_table",
-                    "report.md",
-                    f"chapter {chapter} has a contract table but does not carry all "
-                    f"minimum fields {header!r} with a non-empty row",
+    else:
+        core_rows = _find_table_rows(second_chapter, REPORT_CORE_HEADER)
+        core_labels = {
+            row[0]
+            for row in (core_rows or [])
+            if len(row) == len(REPORT_CORE_HEADER) and all(row)
+        }
+        for row in CORE_FINDING_ROWS:
+            if row not in core_labels:
+                issues.append(
+                    _issue(
+                        "report.missing_core_row",
+                        "report.md",
+                        f"chapter 2 must carry the fixed core-findings row {row!r} as a table row",
+                    )
                 )
+    if report_profile != "quick-data":
+        for chapter, header in REPORT_FIXED_TABLE_HEADERS.items():
+            contract_table_status = _has_valid_contract_table(
+                sections_with_code.get(chapter, ""),
+                header,
+                REPORT_FIXED_TABLE_ALIASES.get(chapter),
             )
+            if contract_table_status is False:
+                issues.append(
+                    _issue(
+                        "report.missing_fixed_table",
+                        "report.md",
+                        f"chapter {chapter} has a contract table but does not carry all "
+                        f"minimum fields {header!r} with a non-empty row",
+                    )
+                )
     return home_values
 
 
@@ -2269,18 +2431,6 @@ def _evidence_block_artifacts(
     return (resolved or None), exact
 
 
-def _evidence_ref_resolves(
-    reference: str,
-    evidence_text: str,
-    registered: set[str],
-    seen: set[str] | None = None,
-) -> bool:
-    resolved, _ = _evidence_ref_artifacts(
-        reference, evidence_text, registered, seen=seen
-    )
-    return resolved is not None
-
-
 def _fragment_block(
     fragment: str, evidence_text: str
 ) -> tuple[str, set[str]] | None:
@@ -2334,11 +2484,6 @@ def _fragment_artifacts(
     )
 
 
-def _fragment_resolves(fragment: str, evidence_text: str, registered: set[str]) -> bool:
-    resolved, _ = _fragment_artifacts(fragment, evidence_text, registered)
-    return resolved is not None
-
-
 def _owner_carries_locator(
     owner_text: str,
     evidence_refs: set[str],
@@ -2365,23 +2510,25 @@ def _owner_carries_locator(
     return any(f"evidence.md#{fragment}" in owner_text for fragment in fragments)
 
 
-def _parse_chapter_locator(cell: str) -> tuple[list[int], str | None]:
+def _parse_chapter_locator(
+    cell: str, chapters: tuple[str, ...] = CHAPTERS
+) -> tuple[list[int], str | None]:
     stripped = cell.strip()
     titled = re.fullmatch(r"(\d+)\.\s*(.+)", stripped)
     if titled is not None:
         number = int(titled.group(1))
-        if not 1 <= number <= len(CHAPTERS):
-            return [], "report chapter number must be between 1 and 12"
-        if titled.group(2).strip() != CHAPTERS[number - 1]:
+        if not 1 <= number <= len(chapters):
+            return [], f"report chapter number must be between 1 and {len(chapters)}"
+        if titled.group(2).strip() != chapters[number - 1]:
             return [number], "report chapter title does not match the fixed title"
         return [number], None
     chinese = re.fullmatch(r"第\s*(\d+)\s*章(?:\s*[：:.-]?\s*(.+))?", stripped)
     if chinese is not None:
         number = int(chinese.group(1))
-        if not 1 <= number <= len(CHAPTERS):
-            return [], "report chapter number must be between 1 and 12"
+        if not 1 <= number <= len(chapters):
+            return [], f"report chapter number must be between 1 and {len(chapters)}"
         title = chinese.group(2)
-        if title is not None and title.strip() != CHAPTERS[number - 1]:
+        if title is not None and title.strip() != chapters[number - 1]:
             return [number], "report chapter title does not match the fixed title"
         return [number], None
     range_match = re.fullmatch(
@@ -2389,15 +2536,17 @@ def _parse_chapter_locator(cell: str) -> tuple[list[int], str | None]:
     )
     if range_match is not None:
         start, end = (int(range_match.group(1)), int(range_match.group(2)))
-        if not 1 <= start <= end <= len(CHAPTERS):
-            return [], "report chapter range must be ascending within 1-12"
+        if not 1 <= start <= end <= len(chapters):
+            return [], f"report chapter range must be ascending within 1-{len(chapters)}"
         return list(range(start, end + 1)), None
     single = re.fullmatch(r"(\d+)", stripped)
     if single is not None:
         number = int(single.group(1))
-        if 1 <= number <= len(CHAPTERS):
+        if 1 <= number <= len(chapters):
             return [number], None
-    return [], "report chapter must identify a chapter number or range within 1-12"
+    return [], (
+        f"report chapter must identify a chapter number or range within 1-{len(chapters)}"
+    )
 
 
 def _parse_owner_locator(cell: str) -> tuple[set[str], list[str]]:
@@ -2432,6 +2581,7 @@ def _check_w10_mapping(
     issues: list[dict[str, str]],
     warnings: list[dict[str, str]],
     thematic: bool = False,
+    chapters: tuple[str, ...] = CHAPTERS,
 ) -> None:
     relative_path = f"work-packages/{WORK_PACKAGES[-1]}.md"
     w10_text = (research_root / relative_path).read_text(encoding="utf-8")
@@ -2493,7 +2643,7 @@ def _check_w10_mapping(
         expected_status = W10_TO_MANIFEST_STATUS.get(normalized_status)
         adopted_claim = expected_status == "adopted"
         source_gaps: list[str] = []
-        chapter_numbers, chapter_error = _parse_chapter_locator(chapter_cell)
+        chapter_numbers, chapter_error = _parse_chapter_locator(chapter_cell, chapters=chapters)
         if thematic:
             # Thematic scope has no report.md; the first cell is a free-form
             # delivery-range locator and the claim is verified against the
@@ -2504,7 +2654,7 @@ def _check_w10_mapping(
             row_errors.append(chapter_error)
         if chapter_numbers:
             chapter_texts = [report_sections.get(number, "") for number in chapter_numbers]
-            chapter_titles = {CHAPTERS[number - 1] for number in chapter_numbers}
+            chapter_titles = {chapters[number - 1] for number in chapter_numbers}
             if claim_cell == chapter_cell or claim_cell in chapter_titles:
                 row_errors.append(
                     "claim locator must be report prose, not only the chapter title"
@@ -2680,11 +2830,12 @@ def _check_report_provenance(
     entry_statuses: dict[str, str],
     adopted_compute_owners: set[str],
     issues: list[dict[str, str]],
+    report_profile: str = "legacy",
 ) -> None:
     """Explicit provenance checks for the delivered report: cited evidence must
     exist, report data may only reference adopted artifacts, failed records may
-    only be cited as execution/failure records inside the chapter-11
-    coverage/gap disclosure, and recomputation claims must be backed by adopted
+    only be cited as execution/failure records inside the coverage/gap
+    disclosure chapter, and recomputation claims must be backed by adopted
     derived/script artifacts. Structure only."""
     report_path = research_root / "report.md"
     if not report_path.is_file():
@@ -2723,12 +2874,13 @@ def _check_report_provenance(
 
     # Per-occurrence provenance by chapter. Failed records (envelopes/log
     # files, no usable result by contract) may only be cited as execution/
-    # failure records inside chapter 11 (数据覆盖、缺口、冲突与来源), the fixed
-    # process/gap disclosure chapter — table or prose. Anywhere else, business
-    # or boundary prose included, a failed reference would position the record
-    # as backing facts or computation inputs, so it is blocked regardless of
-    # table position. Superseded/not_adopted artifacts stay blocked everywhere.
-    process_disclosure_chapter = 11
+    # failure records inside the fixed process/gap disclosure chapter
+    # (chapter 11 for research profiles, chapter 9 for quick-data) — table
+    # or prose. Anywhere else, business or boundary prose included, a failed
+    # reference would position the record as backing facts or computation
+    # inputs, so it is blocked regardless of table position.
+    # Superseded/not_adopted artifacts stay blocked everywhere.
+    process_disclosure_chapter = 9 if report_profile == "quick-data" else 11
     sections = _report_sections(report_text)
     section_spans = [(number, text) for number, text in sorted(sections.items())]
     first_heading = report_text.find("\n## ")
@@ -2785,7 +2937,12 @@ def _check_report_provenance(
                     )
                 )
 
-    for number, owner in ((5, "W5"), (6, "W6"), (7, "W7"), (8, "W8")):
+    compute_owner_chapters = (
+        {3: "W8", 4: "W5", 8: "W7"}
+        if report_profile == "quick-data"
+        else {5: "W5", 6: "W6", 7: "W7", 8: "W8"}
+    )
+    for number, owner in compute_owner_chapters.items():
         chapter = sections.get(number, "")
         if not CANONICAL_EXECUTION_CLAIM_RE.search(chapter):
             continue
@@ -3567,6 +3724,12 @@ def check_run(
         )
     checks.append(_check("artifact.required_directories", not missing_directories))
 
+    # The report profile selects this run's file/chapter contract; thematic
+    # scope always keeps the original branches. An unreadable manifest keeps
+    # the legacy contract and is reported by the manifest checks below; an
+    # invalid profile value is recorded as manifest.invalid_report_profile
+    # by _check_manifest.
+    report_profile = "legacy"
     if thematic:
         packages = required_work_packages or THEMATIC_WORK_PACKAGES
         packages = tuple(dict.fromkeys((*packages, *WORK_PACKAGES[-2:])))
@@ -3580,12 +3743,16 @@ def check_run(
             *(f"work-packages/{name}.md" for name in packages),
         ]
     else:
+        pre_manifest = _load_json_object(research_root / "manifest.json")
+        if pre_manifest is not None:
+            with suppress(ValueError):
+                report_profile = _report_profile(pre_manifest)
         required_files = [
             "checkpoint.md",
             "evidence.md",
             "manifest.json",
             "report.md",
-            *(f"work-packages/{name}.md" for name in WORK_PACKAGES),
+            *(f"work-packages/{name}.md" for name in _profile_packages(report_profile)),
         ]
     missing = [relative for relative in required_files if not (research_root / relative).is_file()]
     for relative in missing:
@@ -3665,7 +3832,9 @@ def check_run(
         )
     )
     if not thematic and "report.md" not in missing:
-        home_values = _check_report(research_root, lock.get("model_id"), issues)
+        home_values = _check_report(
+            research_root, lock.get("model_id"), issues, report_profile=report_profile
+        )
         if manifest_data is not None:
             _check_phase4_quality(research_root, manifest_data, home_values, issues)
             _check_data_mode_mirrors(research_root, manifest_data, home_values, issues)
@@ -3709,7 +3878,13 @@ def check_run(
 
     if f"work-packages/{WORK_PACKAGES[-1]}.md" not in missing:
         _check_w10_mapping(
-            research_root, registered, entry_statuses, issues, warnings, thematic=thematic
+            research_root,
+            registered,
+            entry_statuses,
+            issues,
+            warnings,
+            thematic=thematic,
+            chapters=_profile_chapters(report_profile),
         )
     checks.append(
         _check(
@@ -3733,7 +3908,12 @@ def check_run(
     }
     if not thematic and "report.md" not in missing and manifest_data is not None:
         _check_report_provenance(
-            research_root, registered, entry_statuses, adopted_compute_owners, issues
+            research_root,
+            registered,
+            entry_statuses,
+            adopted_compute_owners,
+            issues,
+            report_profile=report_profile,
         )
     checks.append(
         _check(

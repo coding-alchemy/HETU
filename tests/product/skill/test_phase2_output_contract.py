@@ -238,15 +238,15 @@ def test_tool_catalog_carries_the_closed_boundary_phrases() -> None:
 def test_report_guidance_carries_full_tier_coverage_contract() -> None:
     text = read("references/report-guidance.md")
     for phrase in (
-        "`quick`：主体与交易状态",
-        "`standard`：在 `quick` 基础上覆盖控制关系",
+        "`quick`：Q01 主体与基础状态",
+        "`standard`：完整继承 quick 的数据",
         "`deep`：在 `standard` 基础上覆盖更长历史",
-        "跨 ≥4 个报告期（含最新季报）的多指标财务主表",
-        "至少 1 组估值倍数与 1 组三情景表",
-        "带日期或公告定位",
-        "优先绑定监控或失效条件",
-        "阈值、窗口与复查动作",
-        "行为基线在 G2 首次建立",
+        "重要问题覆盖",
+        "三年三表＋最新已披露中期／季度及必要同期",
+        "基准／乐观／悲观三情景",
+        "规定窗口和持续事项完整核对",
+        "不因未达旧条数拒绝",
+        "旧条数全部满足但缺核心问题时不得通过",
     ):
         assert phrase in text
 
@@ -593,3 +593,14 @@ def test_work_package_report_ownership_is_explicit(
     text = path.read_text(encoding="utf-8")
     assert ownership in text
     assert f"work-packages/{path.name}" in text
+
+
+def test_quantity_replacement_scopes_to_quick_and_standard() -> None:
+    """C06 数量替代仅在新 quick/standard 生效；deep 保留原 G1 数量下界（01 §2）。"""
+    coverage = (ROOT / "references/material-coverage.md").read_text(encoding="utf-8")
+    guidance = (ROOT / "references/report-guidance.md").read_text(encoding="utf-8")
+    for text in (coverage, guidance):
+        assert "仅在新 quick／standard 生效" in text or "仅适用于新 quick／standard" in text
+        assert "deep 不适用" in text
+        for threshold in ("≥8", "≥5", "≥4", "≥3", "≥6"):
+            assert threshold in text

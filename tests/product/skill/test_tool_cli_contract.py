@@ -1,11 +1,13 @@
-"""Unified CLI contract checks across the five deterministic skill scripts.
+"""Unified CLI contract checks across the six deterministic skill scripts.
 
 Each tool keeps the same file-based contract: ``--input``/``--output`` (plus
 tool-specific arguments), exit 0 with a success envelope on disk for a legal
 input, exit 1 with a failure envelope for unparseable or rejected input, exit 2
 for argument errors or a missing input file, and refusal with exit 2 when the
-output file already exists. The market series tool is exercised through real
-subprocess calls here as well; its dedicated CLI RED lives in its own module.
+output file already exists. The market series tools are exercised through real
+subprocess calls here as well; their dedicated CLI REDs live in their own
+modules. The chart tool additionally requires a ``--svg-output`` sidecar path,
+derived here as the ``.svg`` sibling of the envelope output.
 """
 
 from __future__ import annotations
@@ -20,6 +22,9 @@ from typing import Any, NamedTuple
 
 import pytest
 
+from tests.product.skill.deterministic_tool_loader import load_script
+from tests.product.skill.test_market_series_metrics_tool import _ohlcv_payload
+
 SCRIPTS_DIR = (
     Path(__file__).resolve().parents[3] / "skills/hetu-stock-analysis/scripts"
 )
@@ -33,6 +38,7 @@ class ToolCase(NamedTuple):
     tool: str
     extra_args: tuple[str, ...]
     valid_input: dict[str, Any]
+    svg_output: bool = False
 
 
 FINANCIAL_STATEMENTS_INPUT = {
@@ -131,6 +137,18 @@ TOOL_CASES = [
         extra_args=(),
         valid_input=MARKET_SERIES_METRICS_INPUT,
     ),
+    ToolCase(
+        id="market_series_chart",
+        script="market-series-chart.py",
+        tool="market_series_chart",
+        extra_args=(),
+        # The chart consumes the successful ohlcv metrics result itself, so the
+        # unified replay runs the same saved-result shape as a real W8 chain.
+        valid_input=load_script("market-series-metrics.py").calculate_ohlcv_metrics(
+            _ohlcv_payload()
+        ),
+        svg_output=True,
+    ),
 ]
 
 # 阶段 07.1b：统一的 CLI 合同层语义非法输入缺口。每个工具给出一个“JSON 可解析但
@@ -185,6 +203,25 @@ SEMANTIC_INVALID_INPUTS = {
             {"timestamp": "2024-06-07T15:00:00+08:00", "close": "0"},
         ],
     },
+    "market_series_chart": {
+        # An empty daily list is a rejected metrics result: the chart must fail
+        # closed instead of drawing an empty chart.
+        "daily": [],
+        "windows": {},
+        "gaps": [],
+        "subject": "600519.SH",
+        "as_of": "2024-06-07T15:00:00+08:00",
+        "timezone": "Asia/Shanghai",
+        "adjustment": "qfq",
+        "adjustment_basis": "synthetic",
+        "input_hash": "a1b2c3d4e5f6a7b8",
+        "units": {
+            "price": "CNY/share",
+            "volume": "share",
+            "amount": "CNY",
+            "float_shares": "share",
+        },
+    },
 }
 
 CASES_BY_ID = {case.id: case for case in TOOL_CASES}
@@ -200,6 +237,10 @@ def _run_script(
         command.extend(["--input", str(input_path)])
     if output_path is not None:
         command.extend(["--output", str(output_path)])
+        if case.svg_output:
+            command.extend(
+                ["--svg-output", str(output_path.with_suffix(".svg"))]
+            )
     return subprocess.run(
         command,
         capture_output=True,

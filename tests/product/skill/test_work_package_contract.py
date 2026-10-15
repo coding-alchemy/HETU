@@ -3,6 +3,7 @@ import shutil
 from pathlib import Path
 
 import pytest
+import yaml
 
 from hetu_stock.skill.package import SkillValidationError
 from hetu_stock.skill.work_packages import (
@@ -16,6 +17,19 @@ from tests.product.skill.contract_fixtures import build_contract_fixture
 
 def test_core_id_set_is_stable() -> None:
     assert CORE_WORK_PACKAGE_IDS == tuple(f"W{index}" for index in range(11))  # noqa: SIM300
+
+
+def test_quick_common_dependencies_keep_research_conditions() -> None:
+    root = Path("skills/hetu-stock-analysis/references/work-packages/core")
+    for filename, expected_start, expected_final in (
+        ("W7-valuation-expectations.md", ["W1"], ["W5", "W8"]),
+        ("W10-report-review.md", ["W1"], ["W0", "W1", "W2", "W4", "W5", "W7", "W8"]),
+    ):
+        text = (root / filename).read_text(encoding="utf-8")
+        metadata = yaml.safe_load(text.split("---", 2)[1])
+        assert metadata["start_requires"] == expected_start
+        assert metadata["finalize_requires"] == expected_final
+        assert "standard/deep" in text
 
 
 @pytest.mark.parametrize(

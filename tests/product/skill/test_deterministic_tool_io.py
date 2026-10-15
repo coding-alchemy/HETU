@@ -20,7 +20,8 @@ SCRIPTS_DIR = Path("skills/hetu-stock-analysis/scripts")
 # filenames. The set below must equal the on-disk ``*.py`` filenames exactly
 # (strict equality, enforced since Task 5 when the five tools landed). Stage 04
 # added ``source_adapter.py`` (mechanical helper) and stage 05 adds
-# ``check-run-artifacts.py``; the whitelist grows with those stages only.
+# ``check-run-artifacts.py``; the whitelist grows with those stages only. The
+# depth-tiers batch adds ``market-series-chart.py``.
 APPROVED_SCRIPTS = frozenset(
     {
         "_artifact_io.py",
@@ -30,6 +31,7 @@ APPROVED_SCRIPTS = frozenset(
         "pdf_text_extract.py",
         "financial-ratio-series.py",
         "market-series-metrics.py",
+        "market-series-chart.py",
         "source_adapter.py",
         "source_fetch.py",
         "check-run-artifacts.py",

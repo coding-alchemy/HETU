@@ -705,3 +705,229 @@ def test_cli_missing_parameter_exits_1_with_failure_envelope(tmp_path: Path) -> 
     envelope = _decimal_envelope(output_path)
     assert envelope["status"] == "failed"
     assert "cost" in envelope["error_message"]
+
+
+def test_new_period_change_and_average_balance() -> None:
+    assert numeric.period_change(
+        current="120",
+        current_unit="CNY",
+        previous="100",
+        previous_unit="CNY",
+    ) == {"delta": "20", "growth_percent": "20.0", "reason": None}
+    assert numeric.average_balance_return_percent(
+        flow="20",
+        flow_unit="CNY",
+        opening="80",
+        opening_unit="CNY",
+        closing="120",
+        closing_unit="CNY",
+    ) == {"value": "20.0", "reason": None}
+    assert numeric.turnover_ratio(
+        flow="200",
+        flow_unit="CNY",
+        opening="80",
+        opening_unit="CNY",
+        closing="120",
+        closing_unit="CNY",
+    ) == {"value": "2", "reason": None}
+
+
+def test_new_operations_keep_uncomputable_values_local() -> None:
+    assert numeric.period_change(
+        current="10", current_unit="CNY", previous="-10", previous_unit="CNY"
+    ) == {
+        "delta": "20",
+        "growth_percent": None,
+        "reason": "nonpositive_base",
+    }
+    assert numeric.ratio_percent(
+        numerator="10", numerator_unit="CNY", denominator="0", denominator_unit="CNY"
+    ) == {
+        "value": None,
+        "reason": "zero_denominator",
+    }
+    with pytest.raises(ValueError):
+        numeric.ratio_percent(
+            numerator="10", numerator_unit="CNY", denominator="10", denominator_unit="USD"
+        )
+    assert (
+        numeric.ratio_percent(
+            numerator="10", numerator_unit="CNY", denominator="100", denominator_unit="CNY"
+        )["value"]
+        == "10.0"
+    )
+
+
+def test_new_operations_negative_average_balance_reasons() -> None:
+    assert numeric.average_balance_return_percent(
+        flow="20",
+        flow_unit="CNY",
+        opening="-10",
+        opening_unit="CNY",
+        closing="-20",
+        closing_unit="CNY",
+    )["reason"] == "negative_average_balance"
+    assert numeric.turnover_ratio(
+        flow="20",
+        flow_unit="CNY",
+        opening="-10",
+        opening_unit="CNY",
+        closing="-20",
+        closing_unit="CNY",
+    ) == {"value": None, "reason": "nonpositive_average_balance"}
+    assert numeric.turnover_ratio(
+        flow="20",
+        flow_unit="CNY",
+        opening="0",
+        opening_unit="CNY",
+        closing="0",
+        closing_unit="CNY",
+    ) == {"value": None, "reason": "nonpositive_average_balance"}
+
+
+def test_new_operations_reject_non_finite_and_boolean_values() -> None:
+    with pytest.raises(ValueError):
+        numeric.period_change(
+            current="NaN", current_unit="CNY", previous="10", previous_unit="CNY"
+        )
+    with pytest.raises(ValueError):
+        numeric.turnover_ratio(
+            flow=True,
+            flow_unit="CNY",
+            opening="10",
+            opening_unit="CNY",
+            closing="10",
+            closing_unit="CNY",
+        )
+
+
+def test_new_operations_are_independent_of_ambient_decimal_context() -> None:
+    with decimal.localcontext(decimal.Context(prec=2)):
+        result = numeric.period_change(
+            current="100000001",
+            current_unit="CNY",
+            previous="100000000",
+            previous_unit="CNY",
+        )
+    assert result["delta"] == "1"
+    assert result["growth_percent"] == "0.00000100"
+
+
+@pytest.mark.parametrize(
+    ("operation", "params"),
+    [
+        (
+            "period_change",
+            {
+                "current": "120",
+                "current_unit": "CNY",
+                "previous": "100",
+                "previous_unit": "CNY",
+            },
+        ),
+        (
+            "ratio_percent",
+            {
+                "numerator": "10",
+                "numerator_unit": "CNY",
+                "denominator": "100",
+                "denominator_unit": "CNY",
+            },
+        ),
+        (
+            "average_balance_return_percent",
+            {
+                "flow": "20",
+                "flow_unit": "CNY",
+                "opening": "80",
+                "opening_unit": "CNY",
+                "closing": "120",
+                "closing_unit": "CNY",
+            },
+        ),
+        (
+            "turnover_ratio",
+            {
+                "flow": "200",
+                "flow_unit": "CNY",
+                "opening": "80",
+                "opening_unit": "CNY",
+                "closing": "120",
+                "closing_unit": "CNY",
+            },
+        ),
+    ],
+)
+def test_cli_new_operations_return_success_envelopes(
+    tmp_path: Path, operation: str, params: dict[str, str]
+) -> None:
+    input_path = _write_json(tmp_path / "input.json", params)
+    output_path = tmp_path / f"{operation}-envelope.json"
+
+    completed = _run_cli(
+        "--operation", operation,
+        "--input", str(input_path),
+        "--output", str(output_path),
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    envelope = _decimal_envelope(output_path)
+    assert envelope["status"] == "success"
+    assert envelope["tool"] == "numeric_consistency"
+
+
+@pytest.mark.parametrize(
+    ("operation", "params", "fragment"),
+    [
+        (
+            "period_change",
+            {
+                "current": "10",
+                "current_unit": "CNY",
+                "previous": "10",
+                "previous_unit": "USD",
+            },
+            "must match",
+        ),
+        (
+            "ratio_percent",
+            {
+                "numerator": "10",
+                "numerator_unit": "CNY",
+            },
+            "missing parameter",
+        ),
+        (
+            "turnover_ratio",
+            {
+                "flow": "1",
+                "flow_unit": "CNY",
+                "opening": "1",
+                "opening_unit": "CNY",
+                "closing": "1",
+                "closing_unit": "CNY",
+                "extra": "x",
+            },
+            "unexpected parameter",
+        ),
+    ],
+)
+def test_cli_new_operations_failures_exit_1(
+    tmp_path: Path,
+    operation: str,
+    params: dict[str, str],
+    fragment: str,
+) -> None:
+    input_path = _write_json(tmp_path / "input.json", params)
+    output_path = tmp_path / f"{operation}-failure.json"
+
+    completed = _run_cli(
+        "--operation", operation,
+        "--input", str(input_path),
+        "--output", str(output_path),
+    )
+
+    assert completed.returncode == 1
+    envelope = _decimal_envelope(output_path)
+    assert envelope["status"] == "failed"
+    assert fragment in envelope["error_message"]

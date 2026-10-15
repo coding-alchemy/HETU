@@ -48,7 +48,7 @@ Agent 撰写内容使用 UTF-8 Markdown；规则化层级数据使用 UTF-8 JSON
 
 - 原始材料：`<dataset>--<source-id>--<captured-at>--<hash8>.<ext>`，存入 `artifacts/raw/<source-id>/`。
 - 标准化产物：`<dataset>--<source-id>--<period-or-asof>--schema-v<version>.<json|csv>`，存入 `artifacts/normalized/<work-package-id>/`。
-- 派生产物：`<calculation-or-check>--<input-hash8>--calc-v<version>.json`，存入 `artifacts/derived/<work-package-id>/`。
+- 派生产物：`<calculation-or-check>--<input-hash8>--calc-v<version>.json`，存入 `artifacts/derived/<work-package-id>/`；唯一例外是 `market-series-chart.py` 生成的市场图形——扩展名 `.svg`、只允许出现在 `derived/W8-market-signals/`，其 manifest `inputs` 必须指向实际已登记的 OHLCV 指标产物（指标产物再回到原行情），不接受没有输入链的同名文件。
 - 中间脚本：`<purpose>--<work-package-id>--<created-at>--<hash8>.<ext>`，存入 `artifacts/scripts/<work-package-id>/`。
 
 不同来源、期间、Schema、口径或尝试必须形成不同文件；重试不得静默覆盖，相同内容可以复用哈希但仍记录本次尝试。`source-id`、数据集名、Schema 版本和计算版本来自受控清单，不得同名异义。标准化和派生数据保留原始输入定位、主体、期间或基准日、范围、单位、来源时间、获取时间和 `as_of` 判断。命名模板用于提高可读性；manifest 中的完整路径、类型、版本、输入关系和 SHA-256 才是机械身份依据，等价但未满足模板的文件名只记录 warning，不否定内容质量。
@@ -119,6 +119,14 @@ Agent 撰写内容使用 UTF-8 Markdown；规则化层级数据使用 UTF-8 JSON
 
 - `run` 条件字段：`task_id`（同一请求的稳定标识）、`parent_task_id`（存在跨任务继承时记录）、
   `reuse_previous_task_data`（布尔，实际复用开关）。出现即校验类型与格式；不出现不判失败。
+- `run` 条件字段 `report_profile`（三档分级起）：选择本次运行的报告检查合同，仅允许
+  `quick-data`（直接请求 quick 的九章事实报告，必需文件为 W0/W1/W2/W4/W5/W7/W8 及共享文件，
+  W3/W6/W9 缺席允许）或 `research`（standard 十二章研究报告，必需 W0–W10）；值必须与
+  `requested_depth` 一致（quick-data 对应 quick，research 对应 standard），非法值或矛盾组合
+  记 `manifest.invalid_report_profile`，不静默回退旧合同。缺字段表示沿用既有十二章合同，
+  不回填；该字段只选择文件与展示检查规则，不记录覆盖状态、不裁决深度，也不以时间、版本或
+  哈希推断旧结果失效。请求 standard 后实际降为 quick 仍填 `research` 并在报告披露实际深度；
+  新 deep 不启用新 profile。
 - 条件键 `"provenance": { … }`：条目材料复制自来源任务时记录，五子键齐全且均为非空字符串
   （`source_task_id`、`source_artifact`、`original_source`、`original_acquired_at`、`copied_at`；
   两个时间字段为带时区 ISO 8601）；值不含秘密，`source_artifact` 为来源任务内可核对的相对定位，

@@ -7,15 +7,15 @@ Agent 根据依赖、证据、工具与用户关注点按需读取、自由编�
 | --- | --- | --- | --- | --- |
 | W0 | 任务界定与约束 | required | 每次研究都适用 | [W0](core/W0-task-framing.md) |
 | W1 | 证券与发行人核验 | required | 每次研究都适用 | [W1](core/W1-subject-verification.md) |
-| W2 | 增量披露与重大事件 | required | 每次研究都适用 | [W2](core/W2-incremental-events.md) |
-| W3 | 行业与竞争环境 | required | 每次研究都适用 | [W3](core/W3-industry-competition.md) |
-| W4 | 业务、治理与资本配置 | required | 每次研究都适用 | [W4](core/W4-business-governance.md) |
-| W5 | 财务验证 | required | 每次研究都适用 | [W5](core/W5-financial-validation.md) |
-| W6 | 预测与情景 | required | 每次研究都适用，允许在严格条件下标记包级不适用 | [W6](core/W6-forecast-scenarios.md) |
-| W7 | 估值与隐含预期 | required | 每次研究都适用 | [W7](core/W7-valuation-expectations.md) |
-| W8 | 市场状态与近期信号 | required | 每次研究都适用 | [W8](core/W8-market-signals.md) |
-| W9 | 论点、反证与监控 | required | 每次研究都适用 | [W9](core/W9-thesis-counterevidence.md) |
-| W10 | 报告与发布自检 | required | 每次研究都适用 | [W10](core/W10-report-review.md) |
+| W2 | 增量披露与重大事件 | required | 每次研究都适用；quick 仅列事件事实 | [W2](core/W2-incremental-events.md) |
+| W3 | 行业与竞争环境 | required | standard/deep 研究档适用；直接请求 quick 不开展独立行业研究 | [W3](core/W3-industry-competition.md) |
+| W4 | 业务、治理与资本配置 | required | 每次研究都适用；quick 交付披露事实与内部模型适配 | [W4](core/W4-business-governance.md) |
+| W5 | 财务验证 | required | 每次研究都适用；quick 交付完整三表、分项、指标与客观变化 | [W5](core/W5-financial-validation.md) |
+| W6 | 预测与情景 | required | standard/deep 适用，允许在严格条件下标记包级不适用；直接请求 quick 不执行 | [W6](core/W6-forecast-scenarios.md) |
+| W7 | 估值与隐含预期 | required | 每次研究都适用；quick 只计算客观比率，standard/deep 追加 W6 原依赖 | [W7](core/W7-valuation-expectations.md) |
+| W8 | 市场状态与近期信号 | required | 每次研究都适用；quick 交付连续行情、指标与图表 | [W8](core/W8-market-signals.md) |
+| W9 | 论点、反证与监控 | required | standard/deep 研究档适用；直接请求 quick 不执行 | [W9](core/W9-thesis-counterevidence.md) |
+| W10 | 报告与发布自检 | required | 每次研究都适用；quick 直接汇总事实 owner，不要求 W9 | [W10](core/W10-report-review.md) |
 
 ## 官方扩展协议
 
