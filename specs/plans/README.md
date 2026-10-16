@@ -17,6 +17,18 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 产品测试材料清理三阶段已执行并评审通过，执行计划已按授权清理。
 后续维护遵循[测试材料复用与维护方法论](../../docs/engineering/test-fixtures-methodology.md)。
 
+量化研究平台一期已按原批准范围验收通过（2026-10-16）；现行行为、真实两榜、网页／导出证据、评审修复和能力限制统一见[一期实现与验收](../2026-10-17-quant-research-platform-phase-1-implementation.md)。2026-10-17 按用户要求清理一期路线图及 01–05 五份已执行计划，原文已先行保存带 SHA256 清单的可恢复本地归档，见该文件第 7 节。策略真实数值条件测试仍未完成，经济有效性尚未评价；253 个晚起始代码的指定前置缺口已离线核实为上市前期间，不再作为待核实项。
+
+二、三期设计仍待批准，未创建其计划。本次清理不授权后续实现、收费调用、股票分析或重跑；既有结果对原时点继续有效。产品测试材料清理三阶段也已执行并评审通过，已按授权清理计划；后续维护遵循[测试材料复用与维护方法论](../../docs/engineering/test-fixtures-methodology.md)。
+
+| 阶段 | 设计与现行入口 | 计划状态 |
+| --- | --- | --- |
+| 量化一期 | [一期设计](../2026-10-13-quant-research-platform-phase-1-design.md)、[实现与验收](../2026-10-17-quant-research-platform-phase-1-implementation.md) | 已执行并清理；现行能力限制保留 |
+| 量化二期 | [可信回测与独立验证](../2026-10-13-quant-research-platform-phase-2-design.md) | 设计待批准；之后编写独立路线图与编号计划 |
+| 量化三期 | [工作台与策略复用](../2026-10-13-quant-research-platform-phase-3-design.md) | 设计待批准；之后编写独立路线图与编号计划 |
+
+共享要求见[量化总方案](../2026-10-13-quant-research-platform-design.md)。各期可在自身设计与计划获批后独立推进，不需等待后续期就绪；本表不是新增执行授权。
+
 六期已按用户批准的已证范围限定验收，正式全仓工程门禁与收尾交接已完成；
 2026-10-10 按用户授权删除六期路线图及六份编号计划，原文从本页的固定 Git 提交回溯。
 
@@ -28,7 +40,7 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 收口及阶段 05 本批汇总与复评成果保持有效；第 8 组性能数值未验收、五期整体未完成的事实
 保留，不安排新采样、配对或校准，不重复请求延期批准。
 
-本目录仅保留总索引；已执行或停止执行的计划已清理。五期有效要求、实现行为、
+本目录仅保留总索引，当前没有待执行的已批准计划组；已执行或停止执行的计划已清理。五期有效要求、实现行为、
 证据与未完成边界统一见[五期实现](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
 详细验收与预算证据归入 `specs/validation/`，现行专项结论归入五期实现，不恢复五期旧计划。
 
@@ -50,6 +62,7 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 | 扩展与计量工具 | 实现、组内修复及四项阻断均已关闭；[扩展管理](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-extensions)、[计量工具](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-metering) |
 | 第 5–7 组验收 | 第 5 组限定接受、第 6 组原五运行限定闭合、第 7 组本批 4/5＝80% 限定认证；[批准例外与支持边界](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status) |
 | 预算与性能 | N7 默认及获批 X1／X4 已执行，额度用尽；三条性能线、全流程取样与实测校准未完成；[停止点](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-closeout) |
+| 量化研究平台一期 | 原批准范围通过；[两榜、网页、策略准备、未完成能力及原计划归档](../2026-10-17-quant-research-platform-phase-1-implementation.md) |
 | 六期资料完整性与证据闭合 | 已证范围获限定验收、工程收尾完成；[已交付范围与证据入口](../2026-10-04-stock-analysis-workflow-v1-phase-6-implementation.md#6-交付与验收结果)，剩余取得要求仍在长期清单 |
 | 七期分层优化与能力补全 | Q01–Q08／S01–S08及完整Standard交付按批准范围验收；[七期实现](../2026-10-12-stock-analysis-workflow-v1-phase-7-implementation.md#13-当前完成边界)维护需求、设计、实现与证据，Deep仅整理 |
 
@@ -166,6 +179,10 @@ git show b5a23c8ac6803a76225811ddbc897d5ff5deb124:specs/2026-10-10-product-fixtu
 [修订四独立锁后评分](../../.hetu/validation/standard-scope-adjustment/standard-review/revisions/revision-04/scoring.md)；
 原验收记录中的计划路径和章节号指清理前版本，可从归档回源。研究树、锁、旧失败、
 预算及限定接受记录保留，不因本次清理失效或重跑。
+
+### 量化研究平台一期计划清理
+
+2026-10-17 按用户授权清理 `quant-research-platform-phase-1/` 的路线图及 01–05 五份编号计划，共六份。它们此前未提交，原字节已在本地 `.hetu/quant/acceptance/cleanup-20261017/originals/specs/plans/quant-research-platform-phase-1/` 保存，清单 `cleanup-20261017/manifest.json` 记录大小和 SHA256；该归档被 Git 忽略，不属于源码提交，不能从旧提交回源。现行入口见[一期实现与验收](../2026-10-17-quant-research-platform-phase-1-implementation.md)，历史失败、数据资产及验收原件保留。
 
 ## 新增计划约定
 

@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hetu-quant"
+version = "0.1.0"
+description = "HETU 量化研究平台一期：免费数据资产、两榜研究、网页闭环与成熟策略准备"
+requires-python = "==3.11.*"
+dependencies = [
+    "streamlit==1.65.0",
+    "pandas==2.3.3",
+    "pyarrow==24.0.0",
+    "duckdb==1.5.6",
+    "akshare==1.19.1",
+    "baostock==0.9.4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.17.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests", "research"]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

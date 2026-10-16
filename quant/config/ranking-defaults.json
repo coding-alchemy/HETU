@@ -1,0 +1,1471 @@
+{
+  "protocol_version": "ranking-03-v1",
+  "note": "非已证最优参数；更改另存定义，不为凑够五个而放宽",
+  "scope": {
+    "market": "CN_A",
+    "security_types": [
+      "common_stock"
+    ],
+    "industry_classification": "申万一级（单一版本）",
+    "theme_catalog": "东财产业主题目录（单一目录）"
+  },
+  "benchmark": {
+    "benchmark_id": "csi300_price",
+    "code": "000300.SH",
+    "return_basis": "price"
+  },
+  "as_of_cutoff": {
+    "as_of": "研究信息截止时点（Asia/Shanghai），数据取得后冻结定义",
+    "cutoff": "共同行情截止交易日，只能选已收盘交易日",
+    "missing_required_data": "显示缺口，不自动退一天",
+    "per_object_window_shift": false
+  },
+  "calendar_boundaries": {
+    "background_years": 3,
+    "half_year_months": 6,
+    "quarter_months": 3,
+    "anchor_rule": "cutoff - DateOffset(years=3/months=6/months=3)，取边界当日或之前最近市场交易日作锚点",
+    "request_covers_anchors": true
+  },
+  "required_completeness": {
+    "half_year_sessions": "半年内所有交易日",
+    "anchor_prices": [
+      "3m",
+      "6m"
+    ],
+    "recent_trading_days": 60,
+    "prev_day_price": true,
+    "unknown_window_ratio_max": 0.0,
+    "insufficient_window": "单列观察，不参与正常排序"
+  },
+  "suspension": {
+    "cutoff_suspended": "observe",
+    "half_year_suspended": "observe",
+    "reasons_kept_separate": [
+      "suspended",
+      "collection_missing"
+    ],
+    "forward_fill": false,
+    "not_a_delisting_rule": true
+  },
+  "status_liquidity": {
+    "exclude_delisted": true,
+    "exclude_st": true,
+    "unknown_status": "不得当正常",
+    "amount_median_20d_min_cny": 20000000,
+    "amount_sum_60d_min_cny_exclusive": 0.0
+  },
+  "history": {
+    "full_years": 3,
+    "short_history_rankable": true,
+    "no_fabricated_3y_chart": true
+  },
+  "membership_coverage": {
+    "theme_min_eligible": 5,
+    "theme_min_coverage": 0.8,
+    "industry_requires_eligible_index": true,
+    "industry_min_eligible_stocks": 5,
+    "denominator": "当前已知全部成员（含因短历史、停牌、流动性等被排除者）"
+  },
+  "corporate_actions": {
+    "definition": "价格收益口径（01）要求证明所需期间公司行动完整：按对象+期间消费覆盖证据——code 分区产品的快照 manifest table_files 分区条目携带 coverage [start, end]（该代码的查询期间），目标代码分区存在且 coverage 覆盖排名所需期间、提供该产品未列入 failures/gaps 时该对象记为覆盖已核验，表内该代码无记录=已核验无事件；分区缺失、缺 coverage 元数据（旧快照）或覆盖不足一律按未核验（不做宽容推导），unknown_coverage=exclude 按资格排除并记录代码与期间粒度。覆盖核验只针对需要现场复权的对象（标准化层已填 close_price_return 的对象不依赖该表）。",
+    "unknown_coverage": "exclude",
+    "exclude_reason": "corporate_actions_coverage: 复权口径需公司行动记录，快照未取齐或覆盖不明，空事件不得当无行动，未复权价格不参与正常排名"
+  },
+  "category": {
+    "keep_original_code_and_version": true,
+    "theme_requires_basis": true,
+    "excluded_labels": [
+      "style",
+      "listing_board",
+      "margin",
+      "index_membership"
+    ],
+    "unknown_category": "不按名字猜测纳入，保存排除依据",
+    "theme_basis": {
+      "rule_version": "em-themelib-20261015-v2",
+      "positive_source_table": "theme_library",
+      "positive_source_product": "em_theme_library",
+      "match": "name_exact_plus_audited_category",
+      "audited_category_pass": "industrial_theme",
+      "material_record": ".hetu/quant/qualification/theme-basis/theme-classification-em-themelib-v2.json",
+      "audited_boards": {
+        "BK0425": {
+          "name": "工程建设",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a156.html"
+        },
+        "BK0429": {
+          "name": "交运设备",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/00679.html"
+        },
+        "BK0490": {
+          "name": "军工",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/003.html"
+        },
+        "BK0505": {
+          "name": "中字头",
+          "category": "style",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a355.html"
+        },
+        "BK0506": {
+          "name": "创投",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a92.html"
+        },
+        "BK0534": {
+          "name": "成渝特区",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a138.html"
+        },
+        "BK0548": {
+          "name": "生物疫苗",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a137.html"
+        },
+        "BK0549": {
+          "name": "深圳特区",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a49.html"
+        },
+        "BK0554": {
+          "name": "物联网",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/f04.html"
+        },
+        "BK0556": {
+          "name": "移动支付",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a128.html"
+        },
+        "BK0577": {
+          "name": "核能核电",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/010002.html"
+        },
+        "BK0578": {
+          "name": "稀土永磁",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/110002004001.html"
+        },
+        "BK0579": {
+          "name": "云计算",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/006001002.html"
+        },
+        "BK0590": {
+          "name": "西部大开发",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a361.html"
+        },
+        "BK0597": {
+          "name": "水利建设",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a163.html"
+        },
+        "BK0601": {
+          "name": "海工装备",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/003007.html"
+        },
+        "BK0603": {
+          "name": "页岩气",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/c11.html"
+        },
+        "BK0617": {
+          "name": "石墨烯",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/d01.html"
+        },
+        "BK0619": {
+          "name": "3D打印",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/088.html"
+        },
+        "BK0628": {
+          "name": "智慧城市",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a112.html"
+        },
+        "BK0634": {
+          "name": "大数据",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/006001001.html"
+        },
+        "BK0643": {
+          "name": "上海自贸",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/005001.html"
+        },
+        "BK0653": {
+          "name": "养老概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a158.html"
+        },
+        "BK0655": {
+          "name": "网络安全",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/f09.html"
+        },
+        "BK0662": {
+          "name": "在线教育",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a83.html"
+        },
+        "BK0664": {
+          "name": "婴童概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a175.html"
+        },
+        "BK0665": {
+          "name": "电商概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a124.html"
+        },
+        "BK0666": {
+          "name": "苹果概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/c08.html"
+        },
+        "BK0675": {
+          "name": "病毒防治",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a76.html"
+        },
+        "BK0677": {
+          "name": "粤港自贸",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/005003.html"
+        },
+        "BK0680": {
+          "name": "智能家居",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/006003003.html"
+        },
+        "BK0684": {
+          "name": "京津冀",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/005002.html"
+        },
+        "BK0693": {
+          "name": "基因测序",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/076.html"
+        },
+        "BK0696": {
+          "name": "国产软件",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/f03.html"
+        },
+        "BK0704": {
+          "name": "无人机",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/006003007.html"
+        },
+        "BK0708": {
+          "name": "体育产业",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/102.html"
+        },
+        "BK0712": {
+          "name": "一带一路",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/009.html"
+        },
+        "BK0724": {
+          "name": "海绵城市",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a107.html"
+        },
+        "BK0800": {
+          "name": "人工智能",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/006.html"
+        },
+        "BK0802": {
+          "name": "智能驾驶",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a363.html"
+        },
+        "BK0806": {
+          "name": "精准医疗",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/004001004.html"
+        },
+        "BK0808": {
+          "name": "军民融合",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/003004.html"
+        },
+        "BK0813": {
+          "name": "雄安新区",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/008.html"
+        },
+        "BK0814": {
+          "name": "大飞机",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/003003.html"
+        },
+        "BK0818": {
+          "name": "可燃冰",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/074.html"
+        },
+        "BK0822": {
+          "name": "租售同权",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a01.html"
+        },
+        "BK0825": {
+          "name": "新零售",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a09.html"
+        },
+        "BK0830": {
+          "name": "区块链",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/084.html"
+        },
+        "BK0832": {
+          "name": "工业互联网",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/x04.html"
+        },
+        "BK0833": {
+          "name": "小米概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/d16.html"
+        },
+        "BK0834": {
+          "name": "乡村振兴",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/x03.html"
+        },
+        "BK0835": {
+          "name": "独角兽",
+          "category": "style",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a21.html"
+        },
+        "BK0837": {
+          "name": "互联网医疗",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a27.html"
+        },
+        "BK0838": {
+          "name": "东北振兴",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/005006.html"
+        },
+        "BK0839": {
+          "name": "知识产权",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a44.html"
+        },
+        "BK0840": {
+          "name": "OLED",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/085.html"
+        },
+        "BK0843": {
+          "name": "天然气",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/051.html"
+        },
+        "BK0852": {
+          "name": "冷链物流",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a05.html"
+        },
+        "BK0854": {
+          "name": "华为概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a54.html"
+        },
+        "BK0855": {
+          "name": "纳米银",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a40.html"
+        },
+        "BK0856": {
+          "name": "工业大麻",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a39.html"
+        },
+        "BK0859": {
+          "name": "超清视频",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a38.html"
+        },
+        "BK0860": {
+          "name": "边缘计算",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a37.html"
+        },
+        "BK0861": {
+          "name": "数字孪生",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a36.html"
+        },
+        "BK0864": {
+          "name": "氢能源",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a34.html"
+        },
+        "BK0865": {
+          "name": "电子烟",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a31.html"
+        },
+        "BK0866": {
+          "name": "人造肉",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a33.html"
+        },
+        "BK0873": {
+          "name": "垃圾分类",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a43.html"
+        },
+        "BK0875": {
+          "name": "ETC",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a42.html"
+        },
+        "BK0877": {
+          "name": "PCB",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a48.html"
+        },
+        "BK0880": {
+          "name": "UWB概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a129.html"
+        },
+        "BK0883": {
+          "name": "数字货币",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a53.html"
+        },
+        "BK0885": {
+          "name": "VPN",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a57.html"
+        },
+        "BK0886": {
+          "name": "智慧政务",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a58.html"
+        },
+        "BK0887": {
+          "name": "鸡肉概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a59.html"
+        },
+        "BK0888": {
+          "name": "农业种植",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a122.html"
+        },
+        "BK0891": {
+          "name": "国产芯片",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/f02.html"
+        },
+        "BK0892": {
+          "name": "乳业",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a64.html"
+        },
+        "BK0893": {
+          "name": "无线耳机",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a65.html"
+        },
+        "BK0894": {
+          "name": "阿兹海默",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a67.html"
+        },
+        "BK0895": {
+          "name": "维生素",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/075.html"
+        },
+        "BK0896": {
+          "name": "白酒",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/002001.html"
+        },
+        "BK0897": {
+          "name": "IPv6",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a68.html"
+        },
+        "BK0898": {
+          "name": "胎压监测",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a69.html"
+        },
+        "BK0899": {
+          "name": "CRO",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a70.html"
+        },
+        "BK0900": {
+          "name": "新能源车",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/001.html"
+        },
+        "BK0901": {
+          "name": "3D摄像头",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a71.html"
+        },
+        "BK0902": {
+          "name": "MiniLED",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a72.html"
+        },
+        "BK0905": {
+          "name": "传感器",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a75.html"
+        },
+        "BK0906": {
+          "name": "流感",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a77.html"
+        },
+        "BK0907": {
+          "name": "转基因",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a78.html"
+        },
+        "BK0909": {
+          "name": "降解塑料",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a80.html"
+        },
+        "BK0914": {
+          "name": "医废处理",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a85.html"
+        },
+        "BK0915": {
+          "name": "WiFi",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a86.html"
+        },
+        "BK0916": {
+          "name": "氮化镓",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a87.html"
+        },
+        "BK0917": {
+          "name": "半导体概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a205.html"
+        },
+        "BK0918": {
+          "name": "特高压",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a88.html"
+        },
+        "BK0922": {
+          "name": "数据中心",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a91.html"
+        },
+        "BK0924": {
+          "name": "地摊经济",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a94.html"
+        },
+        "BK0925": {
+          "name": "北交所概念",
+          "category": "listing_board",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a199.html"
+        },
+        "BK0926": {
+          "name": "湖北自贸",
+          "category": "regional",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a98.html"
+        },
+        "BK0927": {
+          "name": "免税概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a99.html"
+        },
+        "BK0932": {
+          "name": "尾气治理",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a103.html"
+        },
+        "BK0933": {
+          "name": "退税商店",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a104.html"
+        },
+        "BK0935": {
+          "name": "中芯概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a106.html"
+        },
+        "BK0936": {
+          "name": "长寿药",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a108.html"
+        },
+        "BK0938": {
+          "name": "代糖概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a110.html"
+        },
+        "BK0939": {
+          "name": "辅助生殖",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a111.html"
+        },
+        "BK0943": {
+          "name": "汽车拆解",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a116.html"
+        },
+        "BK0944": {
+          "name": "肝素概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a118.html"
+        },
+        "BK0945": {
+          "name": "装配建筑",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a119.html"
+        },
+        "BK0946": {
+          "name": "EDA概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a120.html"
+        },
+        "BK0947": {
+          "name": "屏下摄像",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a121.html"
+        },
+        "BK0948": {
+          "name": "MicroLED",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a123.html"
+        },
+        "BK0949": {
+          "name": "氦气概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a125.html"
+        },
+        "BK0950": {
+          "name": "草甘膦",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/041.html"
+        },
+        "BK0951": {
+          "name": "刀片电池",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a127.html"
+        },
+        "BK0952": {
+          "name": "第三代半导体",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a136.html"
+        },
+        "BK0954": {
+          "name": "盲盒经济",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a134.html"
+        },
+        "BK0955": {
+          "name": "C2M概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a135.html"
+        },
+        "BK0957": {
+          "name": "拼多多概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a140.html"
+        },
+        "BK0958": {
+          "name": "虚拟电厂",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a141.html"
+        },
+        "BK0959": {
+          "name": "数字阅读",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a142.html"
+        },
+        "BK0963": {
+          "name": "商业航天",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a366.html"
+        },
+        "BK0964": {
+          "name": "6G概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a147.html"
+        },
+        "BK0965": {
+          "name": "社区团购",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a148.html"
+        },
+        "BK0966": {
+          "name": "碳交易",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a149.html"
+        },
+        "BK0968": {
+          "name": "固态电池",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a151.html"
+        },
+        "BK0969": {
+          "name": "汽车芯片",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a152.html"
+        },
+        "BK0972": {
+          "name": "快手概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a154.html"
+        },
+        "BK0974": {
+          "name": "化妆品概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a179.html"
+        },
+        "BK0975": {
+          "name": "磁悬浮概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a189.html"
+        },
+        "BK0977": {
+          "name": "碳化硅",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a188.html"
+        },
+        "BK0979": {
+          "name": "低碳冶金",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a169.html"
+        },
+        "BK0981": {
+          "name": "工业气体",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a181.html"
+        },
+        "BK0982": {
+          "name": "电子车牌",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a167.html"
+        },
+        "BK0983": {
+          "name": "核污染防治",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a184.html"
+        },
+        "BK0984": {
+          "name": "华为汽车",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a166.html"
+        },
+        "BK0985": {
+          "name": "换电概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a164.html"
+        },
+        "BK0986": {
+          "name": "CAR-T细胞疗法",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a176.html"
+        },
+        "BK0988": {
+          "name": "钠离子电池",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a170.html"
+        },
+        "BK0990": {
+          "name": "快递概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/100.html"
+        },
+        "BK0991": {
+          "name": "工程机械概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a206.html"
+        },
+        "BK0992": {
+          "name": "REITs概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a173.html"
+        },
+        "BK0993": {
+          "name": "宠物经济",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/e07.html"
+        },
+        "BK0994": {
+          "name": "空间站概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a190.html"
+        },
+        "BK0995": {
+          "name": "华为昇腾",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a174.html"
+        },
+        "BK0996": {
+          "name": "毛发医疗",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a185.html"
+        },
+        "BK0998": {
+          "name": "机器视觉",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/006002008.html"
+        },
+        "BK1002": {
+          "name": "激光雷达",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a187.html"
+        },
+        "BK1003": {
+          "name": "抽水蓄能",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a182.html"
+        },
+        "BK1004": {
+          "name": "工业母机",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a193.html"
+        },
+        "BK1006": {
+          "name": "碳基材料",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a195.html"
+        },
+        "BK1007": {
+          "name": "植物照明",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a196.html"
+        },
+        "BK1008": {
+          "name": "国资云概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a197.html"
+        },
+        "BK1009": {
+          "name": "元宇宙概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a198.html"
+        },
+        "BK1010": {
+          "name": "磷化工",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a200.html"
+        },
+        "BK1011": {
+          "name": "环氧丙烷",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a202.html"
+        },
+        "BK1012": {
+          "name": "PVDF概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a201.html"
+        },
+        "BK1013": {
+          "name": "华为欧拉",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a203.html"
+        },
+        "BK1014": {
+          "name": "发电机概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a204.html"
+        },
+        "BK1022": {
+          "name": "职业教育",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a207.html"
+        },
+        "BK1023": {
+          "name": "培育钻石",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a208.html"
+        },
+        "BK1024": {
+          "name": "绿色电力",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a209.html"
+        },
+        "BK1025": {
+          "name": "预制菜概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a211.html"
+        },
+        "BK1026": {
+          "name": "调味品概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a210.html"
+        },
+        "BK1029": {
+          "name": "汽车整车",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a368.html"
+        },
+        "BK1047": {
+          "name": "数据安全",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a212.html"
+        },
+        "BK1048": {
+          "name": "IGBT概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a213.html"
+        },
+        "BK1049": {
+          "name": "EDR概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a214.html"
+        },
+        "BK1052": {
+          "name": "动力电池回收",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a217.html"
+        },
+        "BK1054": {
+          "name": "DRG/DIP",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a219.html"
+        },
+        "BK1055": {
+          "name": "虚拟数字人",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a220.html"
+        },
+        "BK1056": {
+          "name": "幽门螺杆菌概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a221.html"
+        },
+        "BK1057": {
+          "name": "电子纸概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a222.html"
+        },
+        "BK1058": {
+          "name": "地下管网",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a223.html"
+        },
+        "BK1061": {
+          "name": "数字经济",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a225.html"
+        },
+        "BK1063": {
+          "name": "重组蛋白",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a227.html"
+        },
+        "BK1064": {
+          "name": "东数西算",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a228.html"
+        },
+        "BK1066": {
+          "name": "民爆概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a231.html"
+        },
+        "BK1068": {
+          "name": "净水概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a232.html"
+        },
+        "BK1069": {
+          "name": "智慧灯杆",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a233.html"
+        },
+        "BK1070": {
+          "name": "土壤修复",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a234.html"
+        },
+        "BK1071": {
+          "name": "跨境支付",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a235.html"
+        },
+        "BK1072": {
+          "name": "中俄贸易概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a236.html"
+        },
+        "BK1073": {
+          "name": "啤酒概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a237.html"
+        },
+        "BK1074": {
+          "name": "托育服务",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a238.html"
+        },
+        "BK1075": {
+          "name": "电子身份证",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a239.html"
+        },
+        "BK1076": {
+          "name": "建筑节能",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a240.html"
+        },
+        "BK1077": {
+          "name": "统一大市场",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a241.html"
+        },
+        "BK1078": {
+          "name": "肝炎概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a242.html"
+        },
+        "BK1079": {
+          "name": "户外露营",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a243.html"
+        },
+        "BK1080": {
+          "name": "新型城镇化",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a244.html"
+        },
+        "BK1082": {
+          "name": "噪声防治",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a246.html"
+        },
+        "BK1086": {
+          "name": "粮食概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a250.html"
+        },
+        "BK1087": {
+          "name": "超超临界发电",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a251.html"
+        },
+        "BK1088": {
+          "name": "F5G概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a252.html"
+        },
+        "BK1089": {
+          "name": "汽车热管理",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a253.html"
+        },
+        "BK1090": {
+          "name": "机器人概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a254.html"
+        },
+        "BK1092": {
+          "name": "麒麟电池",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a256.html"
+        },
+        "BK1093": {
+          "name": "汽车一体化压铸",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a255.html"
+        },
+        "BK1094": {
+          "name": "钙钛矿电池",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a257.html"
+        },
+        "BK1095": {
+          "name": "钒电池",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a258.html"
+        },
+        "BK1097": {
+          "name": "TOPCon电池",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a260.html"
+        },
+        "BK1098": {
+          "name": "生物质能发电",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a261.html"
+        },
+        "BK1099": {
+          "name": "轮毂电机",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a262.html"
+        },
+        "BK1100": {
+          "name": "减速器",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a263.html"
+        },
+        "BK1101": {
+          "name": "先进封装",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a337.html"
+        },
+        "BK1102": {
+          "name": "空气能热泵",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a265.html"
+        },
+        "BK1103": {
+          "name": "熔盐储能",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a266.html"
+        },
+        "BK1104": {
+          "name": "信创",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a267.html"
+        },
+        "BK1106": {
+          "name": "创新药",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a269.html"
+        },
+        "BK1107": {
+          "name": "科创板做市商",
+          "category": "listing_board",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a270.html"
+        },
+        "BK1108": {
+          "name": "科创板做市股",
+          "category": "listing_board",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a271.html"
+        },
+        "BK1109": {
+          "name": "供销社概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a272.html"
+        },
+        "BK1110": {
+          "name": "Web3.0",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a273.html"
+        },
+        "BK1111": {
+          "name": "AIGC概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a274.html"
+        },
+        "BK1113": {
+          "name": "复合集流体",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a275.html"
+        },
+        "BK1115": {
+          "name": "跨境电商",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a277.html"
+        },
+        "BK1116": {
+          "name": "抗菌面料",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a278.html"
+        },
+        "BK1118": {
+          "name": "数据确权",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a280.html"
+        },
+        "BK1119": {
+          "name": "PLC概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a281.html"
+        },
+        "BK1121": {
+          "name": "第四代半导体",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a283.html"
+        },
+        "BK1124": {
+          "name": "毫米波概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a286.html"
+        },
+        "BK1125": {
+          "name": "电子后视镜",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a287.html"
+        },
+        "BK1126": {
+          "name": "ChatGPT概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a288.html"
+        },
+        "BK1127": {
+          "name": "AI芯片",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a289.html"
+        },
+        "BK1128": {
+          "name": "CPO概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a290.html"
+        },
+        "BK1129": {
+          "name": "数字水印",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a291.html"
+        },
+        "BK1130": {
+          "name": "时空大数据",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a293.html"
+        },
+        "BK1131": {
+          "name": "同步磁阻电机",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a292.html"
+        },
+        "BK1132": {
+          "name": "MLOps概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a294.html"
+        },
+        "BK1133": {
+          "name": "ERP概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a295.html"
+        },
+        "BK1134": {
+          "name": "算力概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a296.html"
+        },
+        "BK1135": {
+          "name": "数据要素",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a297.html"
+        },
+        "BK1136": {
+          "name": "光通信模块",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a298.html"
+        },
+        "BK1137": {
+          "name": "存储芯片",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a299.html"
+        },
+        "BK1141": {
+          "name": "混合现实",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a301.html"
+        },
+        "BK1142": {
+          "name": "裸眼3D",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a302.html"
+        },
+        "BK1143": {
+          "name": "空间计算",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a303.html"
+        },
+        "BK1144": {
+          "name": "高压快充",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a304.html"
+        },
+        "BK1145": {
+          "name": "机器人执行器",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a306.html"
+        },
+        "BK1146": {
+          "name": "减肥药",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a305.html"
+        },
+        "BK1147": {
+          "name": "SPD概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a307.html"
+        },
+        "BK1148": {
+          "name": "BC电池",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a308.html"
+        },
+        "BK1150": {
+          "name": "新型工业化",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a311.html"
+        },
+        "BK1151": {
+          "name": "短剧互动游戏",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a312.html"
+        },
+        "BK1152": {
+          "name": "高带宽内存",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a313.html"
+        },
+        "BK1153": {
+          "name": "多模态AI",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a314.html"
+        },
+        "BK1155": {
+          "name": "小米汽车",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a316.html"
+        },
+        "BK1156": {
+          "name": "PEEK材料概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a318.html"
+        },
+        "BK1157": {
+          "name": "飞行汽车(eVTOL)",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a319.html"
+        },
+        "BK1158": {
+          "name": "微盘股",
+          "category": "style",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a324.html"
+        },
+        "BK1160": {
+          "name": "柔性屏(折叠屏)",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a327.html"
+        },
+        "BK1161": {
+          "name": "英伟达概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a328.html"
+        },
+        "BK1162": {
+          "name": "AI手机",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a330.html"
+        },
+        "BK1164": {
+          "name": "AIPC",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a332.html"
+        },
+        "BK1166": {
+          "name": "低空经济",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a334.html"
+        },
+        "BK1171": {
+          "name": "碳纤维",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a345.html"
+        },
+        "BK1172": {
+          "name": "AI语料",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a346.html"
+        },
+        "BK1173": {
+          "name": "锂矿概念",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a356.html"
+        },
+        "BK1174": {
+          "name": "合成生物",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a364.html"
+        },
+        "BK1175": {
+          "name": "玻璃基板",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/a369.html"
+        },
+        "BK1176": {
+          "name": "财税数字化",
+          "category": "industrial_theme",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/00685.html"
+        },
+        "BK1177": {
+          "name": "荣耀概念",
+          "category": "unverified",
+          "evidence": "发布者详情页已下线（404 证据见 material.definitions.unavailable）"
+        },
+        "BK1178": {
+          "name": "AI眼镜",
+          "category": "unverified",
+          "evidence": "发布者详情页已下线（404 证据见 material.definitions.unavailable）"
+        },
+        "BK1661": {
+          "name": "行业龙头",
+          "category": "style",
+          "evidence": ".hetu/quant/qualification/theme-basis/defs/112.html"
+        }
+      },
+      "on_unknown": "exclude_with_record",
+      "note": "依据材料、逐条分类口径与证据见 material_record（267 条命中候选逐条核验：249 industrial_theme、4 style、9 regional、3 listing_board、2 unverified 保守排除）；规则于 2026-10-15 在查看主题排名结果前冻结；命中名称但不在 audited_boards 覆盖内 → 保守排除；快照缺 theme_library 表时全部主题按无依据排除；核验表缺失或为空（含 v1 协议、被剥离核验表的 v2 协议）→ 主题无产业分类依据，受限不降级放行，已生成的旧结果产物不受影响，重新执行须升级为含核验表的协议版本"
+    }
+  },
+  "ranking": {
+    "percentile_formula": "100 * (average_rank - 1) / (n - 1)，同值平均名次",
+    "direction": {
+      "excess_3m": "higher_better",
+      "excess_6m": "higher_better",
+      "max_drawdown_6m": "lower_better",
+      "up_amount_60d": "higher_better",
+      "volatility_60d": "lower_better"
+    },
+    "trend": "三月与半年相对收益各自百分位的均值",
+    "dimension_weights": {
+      "trend": 0.25,
+      "drawdown": 0.25,
+      "volume": 0.25,
+      "risk": 0.25
+    },
+    "score_tie": "总分并列保持同名次，展示按代码稳定顺序",
+    "seat5_tie": "第 5 席遇并列按代码截取并展示全部边界并列对象，说明截取不代表更优，不突破 50 席位、不补位",
+    "boards_per_kind": 5,
+    "stocks_per_board": 5,
+    "max_seats": 50,
+    "single_object_percentile": 50,
+    "single_object_flag": "样本不足，不能通过正常五个验收",
+    "duplicate_stock": "记录 duplicate_count，共用事实，不占额外席位、不去重补位",
+    "stock_ranking_scope": "所属板块全部合格成员内独立排名，不只取前五再算百分位",
+    "board_selection_order": "先选前五板块，再取各五只股票",
+    "stock_score_into_board": false,
+    "theme_aggregation": "合格当前成员各原始特征取中位数，不用主题指数替代"
+  },
+  "metrics": {
+    "return": "P_end / P_anchor - 1",
+    "excess": "对象收益减同期基准收益",
+    "max_drawdown_6m": "max(1 - P_t / running_max(P))",
+    "volatility_60d": "60 个日简单收益的样本标准差 × sqrt(252)",
+    "up_amount_60d": "同 60 日中 P_t > P_{t-1} 的成交额之和 / 全部成交额之和，平盘只进分母",
+    "display_precision": 4,
+    "rank_on_unrounded": true
+  }
+}
