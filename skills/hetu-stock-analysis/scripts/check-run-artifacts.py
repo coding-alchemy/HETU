@@ -471,11 +471,12 @@ def _validate_output_location(
 ) -> None:
     resolved_output = output.resolve()
     protected_roots = (research_root.resolve(), lock_record.parent.resolve())
-    if any(
-        resolved_output == protected or protected in resolved_output.parents
-        for protected in protected_roots
-    ):
-        raise ValueError("output must stay outside the research and lock directories")
+    for protected in protected_roots:
+        if resolved_output == protected or protected in resolved_output.parents:
+            raise ValueError(
+                "output must stay outside the research and lock directories; "
+                f"output={resolved_output}; protected={protected}"
+            )
 
 
 def _nonempty_string(value: object) -> bool:
@@ -2022,8 +2023,8 @@ def _check_phase4_quality(
                 _issue(
                     "quality.missing_required_items",
                     relative,
-                    f"{name.split('-', 1)[0]} must carry a required-items table "
-                    "with a non-empty row",
+                    f"{name.split('-', 1)[0]} requires a non-empty row; "
+                    f"header={REQUIRED_ITEM_HEADER!r}",
                 )
             )
             continue
@@ -2034,7 +2035,8 @@ def _check_phase4_quality(
                     _issue(
                         "quality.invalid_required_item",
                         relative,
-                        "required item must contain all five non-empty fields",
+                        f"required item needs all fields; "
+                        f"header={REQUIRED_ITEM_HEADER!r}; actual={row!r}",
                     )
                 )
                 continue
@@ -2074,7 +2076,8 @@ def _check_phase4_quality(
             _issue(
                 "quality.missing_model_profile",
                 "work-packages/W4-business-governance.md",
-                "W4 must carry a model profile table with all fixed fields",
+                f"W4 requires header={MODEL_PROFILE_HEADER!r}; "
+                f"fields={MODEL_PROFILE_FIELDS!r}",
             )
         )
 
@@ -2098,8 +2101,8 @@ def _check_phase4_quality(
                 _issue(
                     "quality.missing_method_selection",
                     relative,
-                    f"{name.split('-', 1)[0]} must carry a method selection table "
-                    "with a non-empty row",
+                    f"{name.split('-', 1)[0]} requires a complete row; "
+                    f"header={METHOD_SELECTION_HEADER!r}",
                 )
             )
             continue
@@ -2123,7 +2126,7 @@ def _check_phase4_quality(
             _issue(
                 "quality.missing_conclusion_boundary",
                 "work-packages/W9-thesis-counterevidence.md",
-                "W9 must carry a conclusion boundary table with a non-empty row",
+                f"W9 requires a complete row; header={CONCLUSION_BOUNDARY_HEADER!r}",
             )
         )
 
@@ -2137,7 +2140,8 @@ def _check_phase4_quality(
                 _issue(
                     "quality.missing_summary",
                     relative,
-                    f"{relative} must carry the five-field quality summary table",
+                    f"{relative} requires header={QUALITY_SUMMARY_HEADER!r}; "
+                    f"fields={QUALITY_SUMMARY_FIELDS!r}",
                 )
             )
             continue
@@ -2337,8 +2341,13 @@ def _artifact_basename_references(block: str, registered: set[str]) -> set[str]:
     return referenced
 
 
+def _trace_failure(diagnostics: list[str] | None, message: str) -> None:
+    if diagnostics is not None:
+        diagnostics.append(message)
+
+
 def _direct_artifact_references(
-    block: str, registered: set[str]
+    block: str, registered: set[str], diagnostics: list[str] | None = None
 ) -> tuple[set[str] | None, bool] | None:
     artifact_refs = ARTIFACT_REF_RE.findall(block)
     basename_refs = _artifact_basename_references(block, registered)
@@ -2350,12 +2359,17 @@ def _direct_artifact_references(
     for reference in artifact_refs:
         candidate, candidate_exact = _artifact_candidate(reference, registered)
         if candidate is None:
+            _trace_failure(diagnostics, f"unresolved or ambiguous artifact {reference!r}")
             return None, False
         resolved.add(candidate)
         exact = exact and candidate_exact
     for basename in basename_refs:
         candidates = [path for path in registered if Path(path).name == basename]
         if len(candidates) != 1:
+            _trace_failure(
+                diagnostics,
+                f"ambiguous basename {basename!r}; candidates={sorted(candidates)!r}",
+            )
             return None, False
         resolved.add(candidates[0])
         exact = False
@@ -2368,13 +2382,16 @@ def _evidence_ref_artifacts(
     registered: set[str],
     raw_evidence_text: str | None = None,
     seen: set[str] | None = None,
+    diagnostics: list[str] | None = None,
 ) -> tuple[set[str] | None, bool]:
     visited = set() if seen is None else set(seen)
     if reference in visited:
+        _trace_failure(diagnostics, f"cycle at evidence {reference!r}")
         return None, False
     visited.add(reference)
     block = _evidence_block(evidence_text, reference)
     if block is None:
+        _trace_failure(diagnostics, f"missing evidence block {reference!r}")
         return None, False
     resolved = _evidence_block_artifacts(
         block,
@@ -2383,9 +2400,11 @@ def _evidence_ref_artifacts(
         raw_evidence_text=raw_evidence_text,
         ignored_refs={reference},
         seen=visited,
+        diagnostics=diagnostics,
     )
     if resolved[0] is not None:
         return resolved
+    _trace_failure(diagnostics, f"via evidence {reference!r}")
     if _direct_artifact_references(block, registered) is not None:
         return resolved
     if set(EVIDENCE_REF_RE.findall(block)) - {reference}:
@@ -2395,7 +2414,9 @@ def _evidence_ref_artifacts(
     raw_block = _evidence_block(raw_evidence_text, reference, visible_only=False)
     if raw_block is None:
         return resolved
-    raw_resolved = _direct_artifact_references(raw_block, registered)
+    raw_resolved = _direct_artifact_references(
+        raw_block, registered, diagnostics=diagnostics
+    )
     if raw_resolved is None or raw_resolved[0] is None:
         return resolved
     return raw_resolved[0], False
@@ -2409,9 +2430,10 @@ def _evidence_block_artifacts(
     raw_evidence_text: str | None,
     ignored_refs: set[str],
     seen: set[str],
+    diagnostics: list[str] | None = None,
 ) -> tuple[set[str] | None, bool]:
     resolved: set[str] = set()
-    direct = _direct_artifact_references(block, registered)
+    direct = _direct_artifact_references(block, registered, diagnostics=diagnostics)
     if direct is not None:
         return direct
     exact = True
@@ -2423,11 +2445,16 @@ def _evidence_block_artifacts(
             registered,
             raw_evidence_text,
             seen,
+            diagnostics=diagnostics,
         )
         if linked_artifacts is None:
             return None, False
         resolved.update(linked_artifacts)
         exact = exact and linked_exact
+    if not resolved:
+        _trace_failure(
+            diagnostics, "block has no resolvable local artifact or further evidence"
+        )
     return (resolved or None), exact
 
 
@@ -2469,9 +2496,11 @@ def _fragment_artifacts(
     evidence_text: str,
     registered: set[str],
     raw_evidence_text: str | None = None,
+    diagnostics: list[str] | None = None,
 ) -> tuple[set[str] | None, bool]:
     matched = _fragment_block(fragment, evidence_text)
     if matched is None:
+        _trace_failure(diagnostics, f"missing evidence fragment {fragment!r}")
         return None, False
     block, heading_refs = matched
     return _evidence_block_artifacts(
@@ -2481,6 +2510,7 @@ def _fragment_artifacts(
         raw_evidence_text=raw_evidence_text,
         ignored_refs=heading_refs,
         seen=heading_refs,
+        diagnostics=diagnostics,
     )
 
 
@@ -2691,18 +2721,21 @@ def _check_w10_mapping(
         if not evidence_refs and not artifact_refs and not fragments:
             row_errors.append("evidence locator must reference evidence.md or a manifest artifact")
         for reference in sorted(evidence_refs):
+            details: list[str] = []
             resolved, exact = _evidence_ref_artifacts(
                 reference,
                 evidence_text,
                 registered,
                 raw_evidence_text,
+                diagnostics=details,
             )
             if resolved is None:
-                row_errors.append(
-                    f"evidence reference {reference!r} does not resolve to a manifest artifact"
-                )
+                detail = "; ".join(details)
+                label = f"evidence reference {reference!r}"
+                description = f"{label} does not resolve to a manifest artifact; {detail}"
+                row_errors.append(description)
                 if adopted_claim:
-                    source_gaps.append(f"evidence reference {reference!r}")
+                    source_gaps.append(description)
             else:
                 row_artifacts.update(resolved)
                 if not exact:
@@ -2723,18 +2756,21 @@ def _check_w10_mapping(
             else:
                 row_artifacts.add(artifact_ref.strip("`'\".。;；,，"))
         for fragment in fragments:
+            details: list[str] = []
             resolved, exact = _fragment_artifacts(
                 fragment,
                 evidence_text,
                 registered,
                 raw_evidence_text,
+                diagnostics=details,
             )
             if resolved is None:
-                row_errors.append(
-                    f"evidence.md fragment {fragment!r} does not resolve to a manifest artifact"
-                )
+                detail = "; ".join(details)
+                label = f"evidence.md fragment {fragment!r}"
+                description = f"{label} does not resolve to a manifest artifact; {detail}"
+                row_errors.append(description)
                 if adopted_claim and _fragment_block(fragment, evidence_text) is not None:
-                    source_gaps.append(f"evidence.md fragment {fragment!r}")
+                    source_gaps.append(description)
             else:
                 row_artifacts.update(resolved)
                 if not exact:
@@ -3970,10 +4006,21 @@ def check_run(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Stateless single-shot run artifact checker")
-    parser.add_argument("--research-root", required=True)
-    parser.add_argument("--delivery-message", required=True)
-    parser.add_argument("--lock-record", required=True)
-    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--research-root", required=True, help="Existing research directory"
+    )
+    parser.add_argument(
+        "--delivery-message", required=True, help="Actual delivery message copy"
+    )
+    parser.add_argument(
+        "--lock-record", required=True, help="Lock record for this delivery"
+    )
+    parser.add_argument(
+        "--output",
+        required=True,
+        help="New result file outside the research and lock directories; "
+        "exit 0/1 writes a result, exit 2 reports an input/output error",
+    )
     parser.add_argument(
         "--scope",
         choices=("full", "thematic"),

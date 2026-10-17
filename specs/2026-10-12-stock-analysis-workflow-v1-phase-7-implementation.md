@@ -1,6 +1,6 @@
 # HETU 个股分析工作流 V1 七期实现：分层优化与 Quick／Standard 能力补全
 
-> 文档版本：v1.1（产品 V0.3）
+> 文档版本：v1.2（产品 V0.3）
 > 文档状态：七期需求、设计与实现统一维护；Quick／Standard 已按批准范围验收，Deep 仅整理；产品尚未正式发布
 > 创建／修订日期：2026-10-12／2026-10-15
 > 适用范围：单只中国 A 股的 quick、standard、deep 职责、数据、报告、计算与能力边界
@@ -455,7 +455,7 @@ deep 承接现有完整研究内容和长期资料方向，但不要求每家公
 | Deep 深入专题 | 归入既有 D01–D08 与长期条目，说明 Standard 已覆盖部分和深入增量 | 后移不等于资料已取得、原缺口已关闭或 Deep 已实现 |
 | 独立工程增强 | 附注结构化平台、全行业数据库、共识历史库、自动监控等另行评估用户价值与成本 | 合法人工／宿主取得并正确研究可以满足用途，不以全部自动化作为 Standard 前提；必要局部工具修复仍按直接影响处理 |
 
-缺口沿本文§4.3与长期需求§2/§7/§8维护，须有Q/S、触发、已有证据、实际缺环、owner、来源条件及完成依据。许可/历史权限未知不填零，合法替代须满足同一用途；受限时由用户决定是否调整范围，不自行后移必需能力。巨潮空窗null工程项按旧证据销项，不连带关闭实际资料缺口。
+缺口沿本文§4.3与长期需求§2/§7维护，须有Q/S、触发、已有证据、实际缺环、owner、来源条件及完成依据。许可/历史权限未知不填零，合法替代须满足同一用途；受限时由用户决定是否调整范围，不自行后移必需能力。巨潮空窗null工程项按旧证据销项，不连带关闭实际资料缺口。
 
 ### 6.3 必要工具修复的最小边界
 
@@ -641,9 +641,8 @@ W4 提供模型依据，W5/W7/W8 按各自职责核对指标；涉及 W6 时沿�
 | §2.4 ESOP 考核目标 | 正式目标数值及条款属 quick 的公告事实，激励与经营关系属 standard；不混同业绩指引 | 第一／第二；W2 主公告，W4 主激励结构 |
 | §2.4 共识成分与历史 | 历史修订和预期差研究主要属 deep；standard 若使用共识，实际所用口径、成分和时点依据仍须满足 | 第三，实际采用需要时第二；W6 |
 | §2.4 历史股本及近期行情 | 新 quick 所需窗口、历史股本及复权基础，优先证明内容级取得；更长估值历史按用途扩展 | 第一／第三；W8，W7 消费 |
-| §2.5 来源采集工程缺陷 | 服务对应数据用途，故障修复与内容取得分别判定 | 按直接影响优先；不属于 deep 专享能力 |
-| §4.1 估值研究增强 | standard 保留基础可比性与依据；独立锚、正式可比组、历史区间及适用反向 DCF 纳入 deep 方向 | 第二／第三；W7，具体方法按适用性 |
-| §4.2 完整监控规则 | standard 保留关键复查及既有语义保真；deep 承接深入条件，完整规则工程继续单独取舍 | 第二／第三；W9 |
+| §7.3 D06 候选估值方法 | standard 保留基础可比性与依据；独立锚、正式可比组、历史区间及适用反向 DCF 纳入 deep 方向 | 第二／第三；W7，具体方法按适用性 |
+| 第 4 章完整监控规则 | standard 保留关键复查及既有语义保真；deep 承接深入条件，完整规则工程继续单独取舍 | 第二／第三；W9 |
 
 长期需求第 3 章的研究可靠性、安全和宿主支持属于共同能力，不因移到 deep 才要求正确；只
 限制实际依赖其未证能力的范围。第 5 章已停止投入的性能要求不由本分级恢复。
@@ -952,7 +951,7 @@ OHLCV 调用显式选择 `--operation ohlcv`，原 `close-series` 接口保留�
 | 输入、结果与报告合同 | [产物合同](../skills/hetu-stock-analysis/references/artifact-contract.md)、[结果结构](../skills/hetu-stock-analysis/references/work-package-result.md)、[报告指引](../skills/hetu-stock-analysis/references/report-guidance.md) |
 | 方法、来源及工具约束 | [公司模型](../skills/hetu-stock-analysis/references/company-models.md)、[来源合同](../skills/hetu-stock-analysis/references/source-contracts.md)、[工具目录](../skills/hetu-stock-analysis/references/tool-catalog.md) |
 | 实现导览与资料支持 | [工作流导览](../docs/engineering/stock-analysis-workflow.md)、[数据源支持现状](../docs/engineering/stock-analysis-data-sources.md) |
-| 当前Standard与长期深入缺口 | Standard完成证据见§4.3／§9；[长期需求](stock-analysis-workflow-v1-requirements.md)§8回指、§7维护Deep增量 |
+| 当前Standard与长期深入缺口 | Standard完成证据见§4.3／§9；[长期需求](stock-analysis-workflow-v1-requirements.md)§1说明当前边界、§7维护Deep增量 |
 | 回归与行为材料 | tests/product/skill/test_depth_tier_contract.py、test_market_series_chart_tool.py、指标／数值／来源测试；[材料入口](../tests/product/fixtures/material_cases/README.md) |
 
 2026-10-12 按用户提交前收尾授权，原三档需求、设计、路线图和三个阶段计划共 6 份合并为本文，活跃目录中的原文件删除。

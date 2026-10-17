@@ -1,6 +1,6 @@
 version: v2
 title: HETU 个股分析工作流 V1
-size: [1600, 1000]
+size: [1600, 1160]
 theme:
   colors:
     background: "#F5F7FB"
