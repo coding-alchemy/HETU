@@ -1,13 +1,15 @@
 # Standard Token 消耗优化设计：效果优先的机械改进与局部验证
 
-> 文档版本：v0.4
+> 文档版本：v0.6
 > 文档状态：M1–M5 已实现并完成原批准范围的局部验证；[初次执行与复核](../.hetu/validation/standard-token-efficiency/review-20261015.md)保留原宿主限制，[追加验证](../.hetu/validation/standard-token-efficiency-appendix-20261015/report.md)已补证当前 Codex 外层截断与网络即时保存，E2 局部效果成立、经济性未证。用户已确认同等效果，现已交付[实际输入差额及环节归因](../.hetu/validation/standard-token-comparison-20261015/input-delta-attribution-20261017.md)；执行计划退役留档，默认模型／上下文策略未切换。原全量工程记录为 1825 passed／6 skipped／2 failed，两项失败已定位为提交状态相关，其余检查及 manifest 内容核验通过
-> 创建／修订日期：2026-10-15（v0.1 获批；v0.2/v0.3 执行及复核状态）／2026-10-17（v0.4 交付清理、追加验证与计量入口同步；设计行为不变）
+> 创建／修订日期：2026-10-15（v0.1 获批；v0.2/v0.3 执行及复核状态）／2026-10-17（v0.4 交付清理与计量入口；v0.5 记录首批机械优化；v0.6 按用户要求沉淀经验、退役未推广候选与完成计划，历史行为及结论保留）
 > 适用范围：Standard 研究的工具往返、材料交付、记录与恢复、机械检查诊断；上下文缩减及低价模型仅作局部效果验证
 > 主题标识：standard-token-efficiency
 > 分析依据：[29.87M 优化分析](../.hetu/validation/standard-scope-adjustment/author-cost-analysis-20261015/optimization-analysis.md)、[128 次逐调用审视](../.hetu/validation/standard-scope-adjustment/author-cost-analysis-20261015/optimization-call-audit.md)
 > 能力基线：[七期实现与能力边界](2026-10-12-stock-analysis-workflow-v1-phase-7-implementation.md)、[长期需求](stock-analysis-workflow-v1-requirements.md)、[canonical Skill](../skills/hetu-stock-analysis/SKILL.md)
 > 项目约束：[AGENTS.md](../AGENTS.md)；本文不授权股票研究、模型切换、重跑、提交或实现
+
+> 2026-10-17 收尾：首批机械优化工程与两组局部对照已完成，A/B输入分别增加33.97%/21.85%，未实现新增降本。按用户清理指令，四个未推广候选范例退出现行 Skill，旧 M1–M5 及检查调用负例保留；完成计划归档。当前经验见[长期复盘](../docs/engineering/standard-token-cost-lessons.md)，原结果见[本轮报告](../.hetu/validation/standard-mechanical-optimization-20261017/report.md)，详见 §8。
 
 ## 1. 目标、范围与已确认决策
 
@@ -344,7 +346,39 @@ E2 成本包括派发、交接、辅助模型、主模型核验和失败返工�
 4. 新增／修改文档、调用范例和诊断可用，必要工程检查及相对链接检查通过；历史证据和锁未改写。
 5. 明确报告实际改善、尚未验证效果和成本计量范围；不把历史涉及成本或推测降幅当作节约成果。
 
-## 8. 假设、取舍与自检
+## 8. 逐调用分析后的首批机械优化
+
+### 8.1 已执行范围与结果
+
+2026-10-17 在逐调用分析后，用户批准 O01/O06 准确登记与兼容操作、O02 完整诊断、
+O04 生成后读取与结构探查。工程及两组离线局部对照已完成；每组参考／候选各一新上下文，
+股票研究和数据联网取件均为0。它们不重新认证历史研究效果。
+
+| 组合 | 参考 input | 候选 input | 实际差额与机制 |
+|---|---:|---:|---|
+| A 登记＋诊断 | 1,062,522 | 1,423,426 | +360,904（33.97%）；完整诊断仍另轮读取，并发生报告生成返工 |
+| B 生成＋探查 | 760,153 | 926,231 | +166,078（21.85%）；参考已自然合并，候选没有新增合并收益 |
+
+新增规则加载、回读、核验及修正计入实际窗口；局部保留行为未见退化，但没有新增节约。
+本次原生用量和限制见[成本账](../.hetu/validation/standard-mechanical-optimization-20261017/cost.json)
+及[复评](../.hetu/validation/standard-mechanical-optimization-20261017/review-20261017.md)。失败无输出
+脚本尚未满足现合同的output引用要求，完整最终共同投入、金额及各O项纯贡献没有得到证明。
+
+### 8.2 当前保留与退役边界
+
+用户要求沉淀经验并清理无用内容后，四个未推广的可选helper（输入引用去重、诊断视图、
+生成后读取、结构探查）及专属测试退出现行Skill；实现原文、阶段计划和一次性分析方案先归档。
+准确登记、完整诊断、失败保留及禁止读旧结果等既有合同保持，未放宽Schema或检查判定。
+
+`capture_once`、`check_once`、`replace_one`和全部旧M1–M5不变；本批新增的`check_once`
+缺结果、坏JSON和进程启动异常六个负例继续保护现行行为。清理不是新降本实验，不对删除后
+实际token作推测。原计划与候选代码见[回源归档](../.hetu/validation/standard-mechanical-optimization-20261017/closeout-20261017/README.md)，
+分析与实施之间的教训见[长期经验](../docs/engineering/standard-token-cost-lessons.md)。
+
+O03截断专项、O05乱码预检、O07上下文交接、O08低价辅助未在本批实施；Q/S能力、Deep边界、
+完整必要阅读与独立核对保持。后续候选不因本次清理自动启动；历史结果不因代码退出而失效。
+
+## 9. 假设、取舍与自检
 
 | 假设或不确定项 | 本设计处理 |
 |---|---|

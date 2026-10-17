@@ -2,8 +2,21 @@
 
 ## 当前状态
 
-2026-10-17 按用户“同等效果已经确认，只缺实际输入差额及归因”的最新指令完成存量账目核对，
-本次准备交付并清理计划。当前没有待执行计划；旧补件、筛样本和 G2 路径不再作为本次核账前提。
+2026-10-17 Standard 逐调用分析和首批机械优化局部对照已结束。分析覆盖132条用量事件、
+123个工具、301个动作；原件、分项容量和候选边界继续有效。两组候选 input 分别增加
+360,904（33.97%）和166,078（21.85%），工程及限定比较完成，**没有新增降本收益，不默认推广组合**。
+
+用户要求沉淀经验并清理无用内容后，两套已完成计划及一次性分析方案已归档退出当前入口，
+四个未推广候选范例及专属测试退出现行 Skill；M1–M5和现行合同保持，`check_once`失败分支
+负例保留。后续参考统一见[成本分析与优化经验](../../docs/engineering/standard-token-cost-lessons.md)，
+原计划及代码回源见[本次清理记录](#standard-mechanical-closeout)。
+[逐调用分析](../../.hetu/validation/standard-token-comparison-20261015/call-deep-dive-20261017/report.md)、
+[局部对照](../../.hetu/validation/standard-mechanical-optimization-20261017/report.md)及
+[复评](../../.hetu/validation/standard-mechanical-optimization-20261017/review-20261017.md)保持原结论与限定；
+清理没有新增研究、模型实验或降本证明，其他优化方向未启动。
+
+同日此前按用户“同等效果已经确认，只缺实际输入差额及归因”的指令完成存量账目核对，
+准备交付并清理旧计划。旧补件、筛样本和 G2 路径不再作为核账或新分析的前提。
 
 Standard Token 优化的 M1–M5 已落地，现行行为与兼容边界见
 [优化设计](../2026-10-15-standard-token-efficiency-design.md)及其链接的 canonical references。
@@ -44,7 +57,7 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 收口及阶段 05 本批汇总与复评成果保持有效；第 8 组性能数值未验收、五期整体未完成的事实
 保留，不安排新采样、配对或校准，不重复请求延期批准。
 
-已执行或停止执行的旧计划已清理；当前没有待执行计划。五期有效要求、实现行为、
+已执行或停止执行的五期旧计划已清理。五期有效要求、实现行为、
 证据与未完成边界统一见[五期实现](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
 详细验收与预算证据归入 `specs/validation/`，现行专项结论归入五期实现，不恢复五期旧计划。
 
@@ -55,6 +68,11 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
   已交付行为、限定验收及未完成事实，不作为新增执行授权。
 
 提交、推送与 main 集成按用户后续具体指令处理；清理不新增运行授权。
+
+## 当前执行计划
+
+当前没有待执行的成本优化计划。已完成分析与实验从下方成果和历史回源入口查阅；
+后续优化需重新明确具体范围，不把已完成计划当作新执行授权。
 
 ## 已完成功能与验收
 
@@ -200,6 +218,26 @@ G2从未启动，未执行项不记通过。用户最新确认同等效果后，
 
 原记录中的计划路径和章节号指归档版本；归档仅作历史回源。实现、有效测试、原始材料、
 失败、修订、研究树、锁、消息及用量账保留；清理不构成新运行或提交授权。
+
+<a id="standard-mechanical-closeout"></a>
+
+### Standard 逐调用分析与首批机械优化清理
+
+2026-10-17 按用户“沉淀经验、清理无用内容”的指令，移除以下已完成文档：
+
+| 原位置 | 已清理范围 | 当前成果入口 |
+|---|---|---|
+| `standard-call-cost-analysis/` | README和01–03阶段计划，共4份 | [逐调用分析报告](../../.hetu/validation/standard-token-comparison-20261015/call-deep-dive-20261017/report.md)及同目录JSON／CSV |
+| `standard-token-efficiency-mechanical/` | README和01–03阶段计划，共4份 | [局部对照报告](../../.hetu/validation/standard-mechanical-optimization-20261017/report.md)、[复评](../../.hetu/validation/standard-mechanical-optimization-20261017/review-20261017.md) |
+| `../2026-10-17-standard-call-cost-analysis-design.md` | 已完成的一次性分析方案，共1份 | [长期经验与分析方法](../../docs/engineering/standard-token-cost-lessons.md) |
+
+9份原文及清理前候选实现、测试和相关文档逐字节保存在
+[可恢复归档](../../.hetu/validation/standard-mechanical-optimization-20261017/closeout-20261017/README.md)，
+清单逐项核对大小与SHA-256；未提交原文不依赖Git历史恢复。历史证据中的原计划路径和章节号
+指归档版本，不作为现行链接或待执行入口。原输入、失败、评分、成本账和研究树保持。
+
+本次仅退役未推广的候选实现，保留旧M1–M5及新增的现行检查调用负例。负结果未改判为
+优化成功；完整最终共同投入和费用限制继续保留，未来方向不自动执行。
 
 ## 新增计划约定
 

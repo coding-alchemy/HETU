@@ -119,3 +119,27 @@ def test_mirror_rejects_locked_or_conflicting_targets(examples, tmp_path, text, 
     with pytest.raises(ValueError):
         examples["mirror"]["replace_one"](target, old, "new", locked=locked)
     assert target.read_text() == text
+
+
+@pytest.mark.parametrize("returncode", [0, 1])
+@pytest.mark.parametrize("mode", ["missing", "broken", "process-error"])
+def test_checker_missing_or_invalid_current_result_never_falls_back(
+    examples, tmp_path, monkeypatch, returncode, mode,
+):
+    ns = examples["check"]
+    output = tmp_path / "current.json"
+    old = tmp_path / "old.json"
+    old.write_text('{"mechanical_status":"PASS"}', encoding="utf-8")
+    def run(args, **kwargs):
+        if mode == "process-error":
+            raise OSError("fixture process failure")
+        if mode == "broken":
+            output.write_text("invalid JSON", encoding="utf-8")
+        return subprocess.CompletedProcess(args, returncode, "", "fixture stderr")
+    monkeypatch.setattr(ns["subprocess"], "run", run)
+    error = {"missing": FileNotFoundError, "broken": json.JSONDecodeError,
+             "process-error": OSError}[mode]
+    with pytest.raises(error):
+        ns["check_once"](Path("python"), Path("checker.py"), tmp_path / "research",
+                         tmp_path / "message.md", tmp_path / "lock.json", output)
+    assert old.read_text(encoding="utf-8") == '{"mechanical_status":"PASS"}'
