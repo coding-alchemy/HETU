@@ -69,5 +69,6 @@ Agent 使用当前已授权的搜索、浏览或数据工具完成研究，并�
 - [Agent Skill 安装与使用](docs/agent-skill-usage.md)
 - [授权数据源配置示例](config/data_sources.example.yaml)
 - [版本日志](CHANGELOG.md)
+- [Standard 成本分析与优化经验](docs/engineering/standard-token-cost-lessons.md)
 - [中国股票分析体系全景指南](docs/theory/中国股票分析体系全景指南.md)
 - [A股板块与行业分析指南](docs/theory/A股板块与行业分析指南.md)
