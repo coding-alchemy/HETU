@@ -10,7 +10,7 @@ CHANGELOG) and assert mechanically that:
 * the Agent-execution claims are present (natural-language start, canonical
   Skill owns the workflow, ``skill``/``helper`` role split with ``legacy``
   described only as removed history, helper-unavailable continuation,
-  authorized-failure semantics, host statuses, a single current unreleased
+  authorized-failure semantics, host statuses, a single current
   V0.3 entry, and the retained V0.2 / V0.1 historical baselines in CHANGELOG).
 
 Command-style matches use backtick- or ``hetu-stock``-prefixed patterns so a
@@ -251,17 +251,17 @@ def test_usage_guide_documents_explicit_host_evidence_entry() -> None:
     assert "不构成宿主正式支持认证" in usage
 
 
-def test_changelog_records_current_unreleased_v03_and_historical_baselines() -> None:
+def test_changelog_records_current_v03_and_historical_baselines() -> None:
     text = _read(CHANGELOG)
-    assert text.count("## V0.3（未正式发布）") == 1
+    assert text.splitlines().count("## V0.3") == 1
     assert text.count("## V0.2（未正式发布）") == 1
     assert "## V0.1（内部基线，未正式发布）" in text
     # Only implemented, delivered functionality belongs in the changelog.
     assert "后续规划" not in text
     assert "二期加固负责" not in text
     assert "长期需求负责" not in text
-    # Released claims stay bounded: no release, no host certification.
-    v03_start = text.index("## V0.3（未正式发布）")
+    # Version labels do not imply host certification.
+    v03_start = text.index("## V0.3\n")
     v03_section = text[v03_start:]
     next_header = re.search(r"\n## V0\.", v03_section[1:])
     v03_body = (
