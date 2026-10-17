@@ -125,6 +125,12 @@ owner 正文和最终报告。
 分批不截断必读规则、例外、否定和条件；问题确需完整文档（如公告并集、报表勾稽）时仍须
 分批读完，不只读摘要省时。摘要用于定位，必要核验回到原文。
 
+批读同时检查子工具与外层组合返回是否完整。出现截断时，已请求区间不算已接收；明确缺段后
+按章节／页码／行区间补读，无法确定缺段时重新分段确认，允许必要重叠。只有完整接收并完成
+必要核验才更新覆盖记录。每批继续抽取、核对与采用，必读规则、例外、否定及关联原文不裁掉。
+文件完整保存不等于模型已经读取。纯机械查询可以只返回完整查询结果；语义少读与上下文裁剪
+属实验候选，未经效果验证不设为默认。读取范围变化不自动豁免独立回源和回访。
+
 保留[检查点规则](checkpoint.md)的全部既定更新时机；在此之上，按材料规模（已读取批次与
 字节量）和宿主实际暴露的信号（上下文余量、压缩或 compact 提示）额外整理供恢复使用的
 检查点记录，再配合宿主原生压缩与恢复，不新增压缩引擎或研究状态机。宿主实际暴露上下文
@@ -139,6 +145,124 @@ owner 正文和最终报告。
 
 经长语料验证的单批安全读取量及适用证据（宿主与版本、材料类型、验证记录）登记在本文件；
 未验证的宿主与材料组合不声明支持长上下文验收，按参考值保守执行并记录缺口。
+
+## 机械编排范例：取得即保存、检查调用与字段复制
+
+以下三个范例是宿主单次编排内可用的代码，不是注册的产品工具、新 CLI 或调度服务。后续消费者
+只依赖函数签名及实际返回，不依赖本节正文措辞；三者相互独立，均为“无中间语义判断的链路在
+一次宿主编排内完成”的组织方式，输入、目的、授权与文件范围仍由 Agent 显式决定。
+
+`capture_once` 把“已授权的取得→记录实际取得时间→保存原始字节→返回回执”放在同一次编排。
+`fetch_selected` 是宿主已授权且已选定的一次取得调用，返回原始 bytes；不得在其内部选择新来源、
+绕权或自动重试。`output.parent` 由 Agent 在 W1 门槛后建立。
+
+```python hetu-example=capture
+import hashlib
+import os
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+
+
+async def capture_once(
+    fetch_selected: Callable[[], Awaitable[bytes]], output: Path
+) -> dict[str, object]:
+    if output.exists() or output.is_symlink():
+        raise FileExistsError(output)
+    receipt: dict[str, object] = {"acquired": False, "saved": False}
+    try:
+        payload = await fetch_selected()
+    except Exception as error:
+        return {**receipt, "failed_step": "fetch", "error_type": type(error).__name__}
+    receipt["acquired"] = True
+    receipt["received_at"] = datetime.now(timezone.utc).isoformat()
+    if not isinstance(payload, bytes):
+        return {**receipt, "failed_step": "save", "error_type": "ExpectedRawBytes"}
+    temporary: Path | None = None
+    try:
+        with NamedTemporaryFile(dir=output.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(payload)
+        os.link(temporary, output)
+    except OSError as error:
+        return {**receipt, "failed_step": "save", "error_type": type(error).__name__}
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+    return {
+        **receipt, "saved": True, "path": str(output), "bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+```
+
+仅在宿主可直接取得允许保存的原始字节时使用此编排范例；结构化连接器、浏览器对象或受限材料
+沿用该工具的合法保存方式，不把展示文本伪造为原件。来源发布时间与 source metadata 原样保留，
+`received_at` 仅为取得完成时刻。receipt 是本次操作回执，不是 manifest 状态或进程退出码。
+成功后在同一工具过程中保存允许留存的执行回执并返回；需要阅读的正文按完整性要求返回或分段打开。
+原始失败事件仍由宿主保留，回执只显示不泄露秘密的异常类型；没有新增权限时不重试失败请求。
+
+`check_once` 先判断检查器退出状态，再读取本次写出的结果；输出文件不存在或已存在都直接交给
+Agent，不退回旧结果。
+
+```python hetu-example=check
+import json
+import subprocess
+from pathlib import Path
+
+
+def check_once(
+    python: Path, checker: Path, research: Path,
+    delivery: Path, lock: Path, output: Path,
+) -> dict[str, object]:
+    if output.exists() or output.is_symlink():
+        raise FileExistsError(output)
+    completed = subprocess.run(
+        [str(python), str(checker), "--research-root", str(research),
+         "--delivery-message", str(delivery), "--lock-record", str(lock),
+         "--output", str(output)],
+        capture_output=True, text=True, check=False,
+    )
+    result = None
+    if completed.returncode in (0, 1):
+        result = json.loads(output.read_text(encoding="utf-8"))
+    return {"returncode": completed.returncode, "stderr": completed.stderr, "result": result}
+```
+
+输出目录位于研究根及锁目录之外；退出 0/1 却缺文件或不可解析时把异常交给 Agent，不能
+退回旧结果；完整 issues/warnings 留盘并读全。该范例仅默认 full，不为省成本改用 thematic。
+机械检查的接口、退出码与输出位置语义见[工具目录](tool-catalog.md)阶段 05 检查器条目，此处不重复代码。
+
+`replace_one` 把 Agent 已核定的一个显式源值复制到目标文件的唯一位置，锁定状态下拒绝修改。
+
+```python hetu-example=mirror
+from pathlib import Path
+from tempfile import NamedTemporaryFile
+
+
+def replace_one(path: Path, old: str, new: str, *, locked: bool) -> None:
+    if locked:
+        raise ValueError("locked research must not be modified")
+    if path.is_symlink():
+        raise ValueError("target must be a regular file")
+    text = path.read_text(encoding="utf-8")
+    if not old or text.count(old) != 1:
+        raise ValueError("expected old value is absent or not unique")
+    temporary: Path | None = None
+    try:
+        with NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
+            temporary = Path(handle.name)
+            handle.write(text.replace(old, new, 1))
+        temporary.replace(path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+```
+
+`locked` 由 Agent 按真实锁定状态明确提供，不能默认 false，也不是自动发现锁的安全系统。
+路径／源值／目标均由 Agent 已核定。共享文件串行写；多个文件之间没有事务，部分成功如实记录。
+这只复制显式值，不解释语义；质量字段若无 owner 最新明确源值就不调用。锁前／锁后边界见
+[产物合同](artifact-contract.md)与 W10 的对应条款。
 
 ## 宿主原生接口事实记录（阶段 07.1b）
 

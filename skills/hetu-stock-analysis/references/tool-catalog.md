@@ -161,9 +161,9 @@
 - 状态：`mechanical_helper`（机械检查器，不是第七个分析候选工具）
 - 文件路径：`skills/hetu-stock-analysis/scripts/check-run-artifacts.py`
 - 用途：对一次已完成研究的产物做无状态单次机械检查——必需文件（W0–W10、checkpoint、evidence、manifest、report）、manifest JSON 解析与条目/输入的路径安全和哈希、条目状态封闭集（`adopted/superseded/failed/not_adopted`，failed 条目须带失败原因、script 条目须带脚本元数据块）、manifest 闭合 Schema（顶层 `schema_version`/`run` 必填块、非空 `artifacts`、条目封闭键集与 type/work_package 合法值——稳定码 `manifest.schema`）、十二章固定顺序、首页固定字段（含“分析模型”）与第 2 章十行核心发现固定行均须为表格行（散文关键词不通过）、W10 报告映射须为含五字段表头＋至少一行数据的表格；明示 `adopted`/等价中文的事实映射中，每条证据编号或已匹配 fragment 分支必须闭合到已登记产物，且终端产物状态必须为 `adopted`（无实际产物链为 `trace.adopted_claim_missing_source`，终端状态不符沿用 `trace.report_claim_not_adopted`），一条有效分支不能遮蔽另一条悬空分支；中文括注可作为路径边界，完整 basename 或 `...`/`…` 前后缀可唯一定位 adopted 登记文件时保留追溯 warning 而不误判无源；未采用、失败和其他纯格式定位警告不因此升级。检查器还核对 `artifacts/scripts/` 实际文件对 manifest 的登记与属主目录归属（属主限 W0–W10，未知属主判 `script.unknown_owner`）、无脚本工作包的“未创建或修改中间脚本”声明、lock record 的最终消息哈希与研究树哈希重算及记录路径绑定（伪造路径判 `lock.message_path_mismatch`/`lock.research_path_mismatch`，父字段类型错误按不可读输入退出 2；缺失或类型错误的绑定哈希字段直接产生 issue，绝不静默放行；`PASS` 同时要求零 issue 且全部 check 为 ok）。不判断自然语言真假、来源适用性或采用裁决。
-- 输入：`check_run(research_root, delivery_message, lock_record)`；CLI `--research-root`/`--delivery-message`/`--lock-record`/`--output`。
-- 输出 Schema：`{schema_version, mechanical_status, message_input_status, checks, issues}`；issue 固定 `{code, path, message}`；最终消息缺失时 `message_input_status="not_checked"`，整体不得 `PASS`。
-- 失败异常：有 issue 时仍写结果并退出 1；参数错误、输入不可读、输入为符号链接或输出已存在退出 2，无部分产物（输出经临时文件＋原子 link 落盘）。
+- 输入：`check_run(research_root, delivery_message, lock_record)`；CLI `--research-root`/`--delivery-message`/`--lock-record`/`--output`。调用方“先判退出状态、再读本次结果、不读旧输出”的可执行范例见[宿主工具边界](host-tools.md)「机械编排范例」。
+- 输出 Schema：`{schema_version, scope, mechanical_status, message_input_status, checks, issues, warnings}`；issue 固定 `{code, path, message}`；最终消息缺失时 `message_input_status="not_checked"`，整体不得 `PASS`。
+- 失败异常与输出位置：有 issue 时仍写结果并退出 1；参数错误、输入不可读、输入为符号链接或输出已存在退出 2，无部分产物（输出经临时文件＋原子 link 落盘）。`--output` 必须是位于研究根与锁目录之外的新文件；退出 0/1 均写出本次结果，退出 2 只报 stderr 且不读取缺失或旧结果冒充本次。
 - 是否可离线重放：是（只读显式路径，无网络、无时钟依赖）。
 - 禁止边界：不执行工作包、不产生任何自然语言语义裁决（`mechanical_status` 的 `PASS/FAIL` 只表示机械结构闭合与否，`PASS` 不是发布许可）、不读取 G1/G2 答案、不作为 `hetu-stock` 子命令存在。
 - 实际测试文件：`tests/product/skill/test_artifact_checker.py`。

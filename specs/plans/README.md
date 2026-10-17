@@ -2,7 +2,23 @@
 
 ## 当前状态
 
-当前没有待执行计划。七期“分层优化与 Quick／Standard 能力补全”已按最新批准范围验收完成；
+2026-10-17 按用户“同等效果已经确认，只缺实际输入差额及归因”的最新指令完成存量账目核对，
+本次准备交付并清理计划。当前没有待执行计划；旧补件、筛样本和 G2 路径不再作为本次核账前提。
+
+Standard Token 优化的 M1–M5 已落地，现行行为与兼容边界见
+[优化设计](../2026-10-15-standard-token-efficiency-design.md)及其链接的 canonical references。
+[原执行记录](../../.hetu/validation/standard-token-efficiency/report.md)、
+[追加验证](../../.hetu/validation/standard-token-efficiency-appendix-20261015/report.md)保留各自条件下的结论：
+E2 局部效果成立、经济性未证；Codex 外层截断及网络即时保存局部成立；默认模型／上下文策略未切换。
+原全量工程记录为 1825 passed／6 skipped／2 failed，两项失败已定位为提交状态相关；不因清理重跑。
+
+本轮[实际输入差额及环节归因](../../.hetu/validation/standard-token-comparison-20261015/input-delta-attribution-20261017.md)
+给出两份指定作者记录 **29,871,095 → 24,183,238，减少 5,687,857（19.04%）**，四组环节差额可逐行平账。
+两侧修订截点不同，该数值是实际记录差额；完整日常交付总成本及 M1–M5 各自纯因果贡献尚未精确识别，
+不将其写成全部由机械优化带来的节约。效果不再重验，历史材料缺口仍按原范围保留；G2从未启动。
+七份已执行或被最新方向替代的计划已清理，原文及状态去向见[清理记录](#standard-token-efficiency-closeout)。
+
+七期“分层优化与 Quick／Standard 能力补全”已按最新批准范围验收完成；
 2026-10-14 按用户授权清理本批路线图及三份阶段计划，原文回源见[清理记录](#standard-scope-closeout)。
 
 三档分级与后续工作流/Quick/Standard补全现统一归为已完成的七期；需求、设计、实现、
@@ -28,7 +44,7 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 收口及阶段 05 本批汇总与复评成果保持有效；第 8 组性能数值未验收、五期整体未完成的事实
 保留，不安排新采样、配对或校准，不重复请求延期批准。
 
-本目录仅保留总索引；已执行或停止执行的计划已清理。五期有效要求、实现行为、
+已执行或停止执行的旧计划已清理；当前没有待执行计划。五期有效要求、实现行为、
 证据与未完成边界统一见[五期实现](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
 详细验收与预算证据归入 `specs/validation/`，现行专项结论归入五期实现，不恢复五期旧计划。
 
@@ -52,6 +68,7 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 | 预算与性能 | N7 默认及获批 X1／X4 已执行，额度用尽；三条性能线、全流程取样与实测校准未完成；[停止点](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-closeout) |
 | 六期资料完整性与证据闭合 | 已证范围获限定验收、工程收尾完成；[已交付范围与证据入口](../2026-10-04-stock-analysis-workflow-v1-phase-6-implementation.md#6-交付与验收结果)，剩余取得要求仍在长期清单 |
 | 七期分层优化与能力补全 | Q01–Q08／S01–S08及完整Standard交付按批准范围验收；[七期实现](../2026-10-12-stock-analysis-workflow-v1-phase-7-implementation.md#13-当前完成边界)维护需求、设计、实现与证据，Deep仅整理 |
+| Standard Token 机械优化与核账 | [实现范围与规则](../2026-10-15-standard-token-efficiency-design.md)、[局部验证](../../.hetu/validation/standard-token-efficiency-appendix-20261015/report.md)及[实际差额归因](../../.hetu/validation/standard-token-comparison-20261015/input-delta-attribution-20261017.md)；默认策略未切换，金额与分项纯因果贡献未证 |
 
 ## 历史与未启动范围
 
@@ -166,6 +183,23 @@ git show b5a23c8ac6803a76225811ddbc897d5ff5deb124:specs/2026-10-10-product-fixtu
 [修订四独立锁后评分](../../.hetu/validation/standard-scope-adjustment/standard-review/revisions/revision-04/scoring.md)；
 原验收记录中的计划路径和章节号指清理前版本，可从归档回源。研究树、锁、旧失败、
 预算及限定接受记录保留，不因本次清理失效或重跑。
+
+<a id="standard-token-efficiency-closeout"></a>
+
+### Standard Token 优化计划清理
+
+2026-10-17 按用户交付清理指令，删除 `standard-token-efficiency/README.md` 及同目录的六份
+`2026-10-15-01` 至 `2026-10-15-06` 编号计划，共七份。未提交原字节在删除前保存为
+[可恢复归档](../../.hetu/validation/standard-token-efficiency/closeout-20261017/README.md)，
+逐份大小、SHA-256 与归档解压内容核对一致；完整文件名见归档清单。
+
+阶段 01–03 的实现及局部验证、04 的离线审计继续有效；05 的已授权材料尝试按实际结果结束，
+G2从未启动，未执行项不记通过。用户最新确认同等效果后，06 的核账结果由
+[实际输入差额及环节归因](../../.hetu/validation/standard-token-comparison-20261015/input-delta-attribution-20261017.md)
+承接，保留计量边界及纯因果贡献未识别的限制。旧补件／配对安排不再作为当前执行入口。
+
+原记录中的计划路径和章节号指归档版本；归档仅作历史回源。实现、有效测试、原始材料、
+失败、修订、研究树、锁、消息及用量账保留；清理不构成新运行或提交授权。
 
 ## 新增计划约定
 

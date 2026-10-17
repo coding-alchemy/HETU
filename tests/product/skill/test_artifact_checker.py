@@ -2512,6 +2512,48 @@ def test_indirect_reference_to_nonadopted_basename_is_rejected(
     assert result["mechanical_status"] == "FAIL"
 
 
+@pytest.mark.parametrize(
+    ("body", "terminal"),
+    (
+        ("### E17\n另见 E18。\n", "E18"),
+        ("### E17\n另见 E18。\n### E18\n另见 E17。\n", "cycle"),
+        ("### E17\n`artifacts/raw/demo/missing.json`\n", "missing.json"),
+    ),
+)
+def test_diagnostics_follow_the_original_reference_parser(
+    checker: Any, body: str, terminal: str
+) -> None:
+    notes: list[str] = []
+    resolved, exact = checker._evidence_ref_artifacts(
+        "E17", body, set(), body, diagnostics=notes
+    )
+    assert resolved is None and exact is False
+    assert "E17" in " ".join(notes)
+    assert terminal in " ".join(notes)
+
+
+def test_diagnostics_reach_the_existing_adopted_issue(
+    checker: Any, tmp_path: Path
+) -> None:
+    research, delivery, lock = build_valid_phase2_run(tmp_path)
+    evidence = research / "evidence.md"
+    evidence.write_text(
+        evidence.read_text(encoding="utf-8")
+        + "\n### E17\n另见 E18。\n### E18\n`artifacts/raw/demo/missing.json`\n",
+        encoding="utf-8",
+    )
+    _set_w0_mapping_locator(research, "E1", "E17")
+    _refresh_research_lock(checker, research, lock)
+    result = checker.check_run(research, delivery, lock)
+    issue = next(
+        i for i in result["issues"] if i["code"] == "trace.adopted_claim_missing_source"
+    )
+    assert set(issue) == {"code", "path", "message"}
+    assert "#row-" in issue["path"]
+    assert all(word in issue["message"] for word in ("E17", "E18", "missing.json"))
+    assert result["mechanical_status"] == "FAIL"
+
+
 def test_fragment_with_unique_adopted_basename_is_nonblocking(
     checker: Any, tmp_path: Path
 ) -> None:
@@ -3271,6 +3313,9 @@ def test_cli_rejects_output_inside_locked_inputs(
     assert completed.returncode == 2
     assert "Traceback" not in completed.stderr
     assert not output.exists()
+    assert str(output.resolve()) in completed.stderr
+    assert str(output_parent.resolve()) in completed.stderr
+    assert "outside the research and lock directories" in completed.stderr
 
 
 def test_cli_rejects_symlinked_output_parent_into_research_root(tmp_path: Path) -> None:
@@ -3478,6 +3523,18 @@ def test_phase4_owner_tables_are_required(
 
     assert expected_code in codes
     assert result["mechanical_status"] == "FAIL"
+    headers = {
+        "quality.missing_required_items": checker.REQUIRED_ITEM_HEADER,
+        "quality.missing_model_profile": (
+            *checker.MODEL_PROFILE_HEADER,
+            *checker.MODEL_PROFILE_FIELDS,
+        ),
+        "quality.missing_method_selection": checker.METHOD_SELECTION_HEADER,
+        "quality.missing_conclusion_boundary": checker.CONCLUSION_BOUNDARY_HEADER,
+    }
+    issue = next(item for item in result["issues"] if item["code"] == expected_code)
+    assert issue["path"] == f"work-packages/{package_filename}"
+    assert all(field in issue["message"] for field in headers[expected_code])
 
 
 @pytest.mark.parametrize(
@@ -3533,6 +3590,10 @@ def test_phase4_rejects_an_incomplete_required_item_row(
 
     assert "quality.invalid_required_item" in codes
     assert result["mechanical_status"] == "FAIL"
+    issue = next(
+        item for item in result["issues"] if item["code"] == "quality.invalid_required_item"
+    )
+    assert all(field in issue["message"] for field in checker.REQUIRED_ITEM_HEADER)
 
 
 @pytest.mark.parametrize(
@@ -3564,6 +3625,11 @@ def test_phase4_quality_summary_is_required(
 
     assert "quality.missing_summary" in codes
     assert result["mechanical_status"] == "FAIL"
+    issue = next(
+        item for item in result["issues"] if item["code"] == "quality.missing_summary"
+    )
+    assert all(field in issue["message"] for field in checker.QUALITY_SUMMARY_HEADER)
+    assert all(field in issue["message"] for field in checker.QUALITY_SUMMARY_FIELDS)
 
 
 @pytest.mark.parametrize("target", ("checkpoint", "W10"))
