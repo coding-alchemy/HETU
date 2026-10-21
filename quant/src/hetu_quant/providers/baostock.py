@@ -249,6 +249,11 @@ class BaoStockProvider:
                 ex_date = str(row.get("dividOperateDate") or "") or None
                 code = normalize_code(str(row["code"]))
                 terms = str(row.get("dividCashStock") or "")
+                action_dates = {
+                    "record_date": str(row.get("dividRegistDate") or "") or None,
+                    "pay_date": str(row.get("dividPayDate") or "") or None,
+                    "stock_listing_date": str(row.get("dividStockMarketDate") or "") or None,
+                }
                 if cash > 0:
                     rows.append(
                         {
@@ -259,6 +264,7 @@ class BaoStockProvider:
                             "d": cash,
                             "terms_raw": terms,
                             "available_at": available,
+                            **action_dates,
                         }
                     )
                 if m != 1.0:
@@ -271,13 +277,14 @@ class BaoStockProvider:
                             "d": 0.0,
                             "terms_raw": terms,
                             "available_at": available,
+                            **action_dates,
                         }
                     )
             frame = pd.DataFrame(
                 rows,
                 columns=[
                     "code", "ex_date", "action_type", "m", "d",
-                    "terms_raw", "available_at",
+                    "terms_raw", "available_at", "record_date", "pay_date", "stock_listing_date",
                 ],
             )
             if len(frame):
@@ -286,6 +293,12 @@ class BaoStockProvider:
                 def _earliest(values: pd.Series):
                     known = [str(v) for v in values if str(v or "")]
                     return min(known) if known else None
+
+                def _one_date(values: pd.Series):
+                    known = {str(v) for v in values if pd.notna(v) and str(v)}
+                    if len(known) > 1:
+                        raise ValueError(f"conflicting corporate action dates: {sorted(known)}")
+                    return next(iter(known), None)
 
                 frame = (
                     frame.groupby(["code", "ex_date", "action_type"], as_index=False)
@@ -297,6 +310,9 @@ class BaoStockProvider:
                             lambda s: ";".join(sorted({str(v) for v in s if str(v or "")})),
                         ),
                         available_at=("available_at", _earliest),
+                        record_date=("record_date", _one_date),
+                        pay_date=("pay_date", _one_date),
+                        stock_listing_date=("stock_listing_date", _one_date),
                     )
                 )
             return {"corporate_actions": frame}

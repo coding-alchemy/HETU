@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "study_id": "phase2-lowvol",
+  "status": "frozen_pre_result",
+  "frozen_at": "2026-10-17",
+  "note": "二期低波动正式研究事前协议：最终历史样本外结果查看前冻结。数值运行仍待 01 数据资格与 02 引擎准入；snapshot_id 为占位，资格成立后替换为实际合格快照即形成新实验记录。",
+  "definition": {
+    "as_of": "2026-10-17T21:00:00+08:00",
+    "snapshot_id": "pending-real-data-admission",
+    "start": "2019-11-01",
+    "end": "2026-10-13",
+    "strategy_id": "low_volatility",
+    "parameters": {"lookback_months": 36},
+    "protocol": {
+      "schema_version": 1,
+      "stage": "formal",
+      "universe": {
+        "rule": "historical_sh_sz_common_stock",
+        "includes_delisted": true,
+        "boards": ["main", "chinext", "star"],
+        "ipo_warmup_rule": "exclude_and_record_daily",
+        "no_future_exclusion": true
+      },
+      "warmup_months": 36,
+      "initial_cash_cny": 1000000,
+      "currency": "CNY",
+      "account_type": "cash",
+      "leverage": 1.0,
+      "cash_interest_rate": 0.0,
+      "investor_tax_profile": "cn_individual_research",
+      "rebalance": {"frequency": "monthly"},
+      "benchmark_id": "universe_vw",
+      "execution": {
+        "signal_time": "close",
+        "fill_time": "next_open",
+        "order_expiry": "same_day",
+        "volume_lookback_days": 20,
+        "participation_rate": 0.01,
+        "terminal_policy": "hold"
+      },
+      "costs": {
+        "commission_rate": 0.0003,
+        "min_commission_cny": 5,
+        "slippage_rate": 0.0005,
+        "statutory_rules_ref": "phase2-trading-rules"
+      },
+      "rules_ref": "phase2-trading-rules",
+      "time_split": {
+        "development": ["2019-11-01", "2021-12-31"],
+        "validation": ["2022-01-01", "2023-12-31"],
+        "final": ["2024-01-01", "2026-10-13"]
+      },
+      "parameter_family": {"lookback_months": [30, 36, 42]},
+      "objectives": {
+        "income": "final_net_cagr_gt_0_and_excess_vs_universe_vw_gt_0",
+        "risk": "ann_vol_lte_90pct_benchmark_and_maxdd_not_worse",
+        "tolerance": "zero"
+      },
+      "robustness": {
+        "scenarios": ["double_costs", "capacity_participation_0.0025"],
+        "bootstrap": {"block_months": 3, "reps": 1000, "seed": 20261017}
+      },
+      "trial_budget": {
+        "max_runs": 8,
+        "allocation": "dev+validation 4（主规则/账户基准/30月/42月邻域），final 4（主规则/基准/双倍成本/容量0.25%）"
+      },
+      "viewing_record": {
+        "final_seen": false,
+        "prior_exposure": "phase1_market_and_ranking_views_2023_2026",
+        "final_used_for_tuning": false
+      }
+    },
+    "market": "CN_A",
+    "mode": "free"
+  },
+  "method_differences": [
+    "universe: 原文历史 MSCI 股票池/美元收益 → 信号日历史登记仍上市沪深普通股/CNY",
+    "return_basis: 原文总收益 → 01 核验的税前除息日收盘再投资研究序列",
+    "selection: 低波动分组 → 合格池最低十分位 max(1, floor(N/10)) 且 N>=10",
+    "ties: 原文未规定 → 同波动按代码稳定截取",
+    "benchmark: universe_vw 同池同成本可交易账户基准；沪深300价格指数仅独立背景"
+  ],
+  "viewing_record_frozen": {
+    "final_seen": false,
+    "frozen_by": "phase2-plan-approved-2026-10-17",
+    "note": "一期已看行情/排名保留记录，不称 2024-2026 为从未看过的市场"
+  }
+}

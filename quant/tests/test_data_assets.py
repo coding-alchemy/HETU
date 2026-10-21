@@ -488,6 +488,97 @@ def test_event_product_same_window_prepare_is_idempotent(tmp_path: Path) -> None
     assert len(provider.calls) == calls, "完整覆盖时不得重复取数"
 
 
+class _ProvenActions(FakeDatelessProvider):
+    """合成查询原事实；沿用原事件替身，不附资格或预期结果。"""
+
+    def fetch(self, product_id, codes, start, end):
+        raw = super().fetch(product_id, codes, start, end)
+        raw.attrs["query_evidence"] = [
+            dict(code=code, basis="ex_date", start=str(start), end=str(end),
+                 method="query_dividend_data", yearType="operate") for code in codes
+        ]
+        return raw
+
+
+def test_action_increment_uses_proven_query_span_not_generic_coverage(tmp_path: Path) -> None:
+    """历史组合资产的 generic coverage 不得遮蔽实际 operate 缺口。"""
+    from hetu_quant.data import action_query_covers
+
+    provider = _ProvenActions()
+    store = _actions_only_store(tmp_path, provider)
+    old = store.prepare(_actions_request(date(2024, 1, 1), date(2024, 12, 31)))
+    path = store.root / "snapshots" / old.snapshot_id / "manifest.json"
+    manifest = json.loads(path.read_text())
+    # 仅模拟已存历史形状：原件/真实查询证明不变，通用跨度比实际证明宽。
+    manifest["table_files"][0]["coverage"] = ["2024-01-01", "2025-12-31"]
+    manifest["table_files"][0].pop("query_basis", None)
+    path.write_text(json.dumps(manifest))
+    ref = store.prepare(_actions_request(date(2024, 1, 1), date(2025, 12, 31)))
+    assert [(start, end) for _, _, start, end in provider.calls] == [
+        (date(2024, 1, 1), date(2024, 12, 31)),
+        (date(2025, 1, 1), date(2025, 12, 31)),
+    ]
+    assert len(store.read_table(ref, "corporate_actions")) == 2
+    entry = store.load_manifest(ref)["table_files"][0]
+    assert action_query_covers(entry, "2024-01-01", "2025-12-31")
+    reopened = DataStore(store.root, config_path=tmp_path / "products.json",
+                         providers={"fake": provider})
+    assert reopened.prepare(_actions_request(date(2024, 1, 1), date(2025, 12, 31))) == ref
+    assert len(provider.calls) == 2
+
+
+@pytest.mark.parametrize("item_count", [1, 2])
+def test_official_action_supplement_preserves_query_proof_and_rejects_overlap(tmp_path, item_count):
+    """已存查询证明与新官方事件事实分别继承，不能以补事实伪造查询覆盖。"""
+    from hetu_quant.data import action_query_covers
+
+    store = _actions_only_store(tmp_path, _ProvenActions())
+    base = store.prepare(_actions_request(date(2024, 1, 1), date(2024, 12, 31)))
+    parent_entry = store.load_manifest(base)["table_files"][0]
+    parent_file = store.root / "snapshots" / base.snapshot_id / parent_entry["path"]
+    parent_bytes = parent_file.read_bytes()
+    files, items, extra_days = [], [], ["2024-06-28", "2024-09-27"][:item_count]
+    for index, day in enumerate(extra_days):
+        csv = tmp_path / f"official-actions-{index}.csv"
+        pd.DataFrame([dict(code="000001.SZ", ex_date=day, action_type="cash_dividend",
+            m=1, d=2, record_date=("2024-06-27", "2024-09-26")[index],
+            pay_date=("2024-07-01", "2024-09-30")[index],
+            available_at=("2024-06-21", "2024-09-20")[index])]).to_csv(csv, index=False)
+        files.append(csv)
+        items.append(dict(product_id="test_actions",table="corporate_actions",supplement=True,
+            files=[csv.name], source=dict(name=f"synthetic_official_{index}",fee_class="free",
+                permission_basis="合成免费原件",obtained_at="2025-01-01T00:00:00+08:00")))
+    doc = dict(mode="free", base_snapshot_ids=[base.snapshot_id], items=items)
+    manifest = tmp_path / "official-import.json"
+    manifest.write_text(json.dumps(doc))
+    ref = store.import_files(manifest, tuple(files))
+    frame = store.read_table(ref, "corporate_actions")
+    assert sorted(frame["ex_date"].astype(str)) == extra_days + ["2024-12-31"]
+    assert parent_file.read_bytes() == parent_bytes
+    current = store.load_manifest(ref)
+    assert len(list((store.root / "snapshots" / ref.snapshot_id / "tables/corporate_actions").glob("*.parquet"))) == 1
+    assert current["table_files"][0]["coverage"] == parent_entry["coverage"]
+    assert current["table_files"][0]["query_coverage"] == parent_entry["query_coverage"]
+    for item in current["items"]:
+        for raw in item["raw_files"]:
+            raw_file = store.root / "snapshots" / ref.snapshot_id / raw["path"]
+            assert hashlib.sha256(raw_file.read_bytes()).hexdigest() == raw["sha256"]
+    assert {Path(x).name for x in frame["source_ref"] if "official-actions-" in x} == {f.name for f in files}
+    entry = next(e for e in store.load_manifest(ref)["table_files"] if e["partition"].startswith("code="))
+    assert action_query_covers(entry,"2024-01-01","2024-12-31")
+    origin = entry["supplemented_from"]
+    assert hashlib.sha256((store.root / "snapshots" / origin["snapshot_id"] /
+                           origin["path"]).read_bytes()).hexdigest() == origin["sha256"]
+    assert next(frame[frame.ex_date.astype(str)=="2024-06-28"].itertuples()).pay_date == "2024-07-01"
+    extended = store.prepare(_actions_request(date(2024, 1, 1), date(2025, 12, 31)))
+    assert sorted(store.read_table(extended, "corporate_actions")["ex_date"].astype(str)) == [
+        *extra_days, "2024-12-31", "2025-12-31"]
+    doc['base_snapshot_ids'] = [ref.snapshot_id]
+    manifest.write_text(json.dumps(doc))
+    with pytest.raises(DataQualityError, match="overlap"):
+        store.import_files(manifest, tuple(files))
+
+
 def _tamper_actions_partition(tmp_path: Path, ref: SnapshotRef) -> None:
     table_dir = tmp_path / "store" / "snapshots" / ref.snapshot_id / "tables" / "corporate_actions"
     target = next(iter(table_dir.glob("*.parquet")))
@@ -1195,3 +1286,23 @@ def test_board_query_legacy_coverage_survives_copy_with_another_product(tmp_path
     _dateless_store(tmp_path, provider).prepare(mixed)
     assert len(provider.calls) == calls
     assert len(actions.calls) == 1
+
+
+def test_repeated_evidence_imports_keep_inherited_partitions_readable(tmp_path):
+    """合成连续证据补录不能因把所有祖先ID叠进文件名而达到文件系统长度上限。"""
+    provider = _ProvenActions()
+    store = _actions_only_store(tmp_path, provider)
+    base = store.prepare(_actions_request(date(2024, 1, 1), date(2024, 12, 31)))
+    original_entry = store.load_manifest(base)['table_files'][0]
+    parent_file = store.root / 'snapshots' / base.snapshot_id / original_entry['path']
+    parent_bytes = parent_file.read_bytes()
+    current = base
+    for step in range(10):
+        manifest = tmp_path / f'chain-{step}.json'
+        manifest.write_text(json.dumps({'mode': 'free', 'items': [],
+                                       'base_snapshot_ids': [current.snapshot_id]}))
+        current = store.import_files(manifest, ())
+    assert parent_file.read_bytes() == parent_bytes
+    assert store.read_table(current, 'corporate_actions').equals(store.read_table(base, 'corporate_actions'))
+    store._verify_hashes(current, store.load_manifest(current))
+    assert store.load_manifest(current)['table_files'][0]['coverage'] == original_entry['coverage']

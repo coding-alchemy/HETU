@@ -1,13 +1,13 @@
 # HETU 量化研究平台一期实现与验收
 
-> 文档版本：v0.1
+> 文档版本：v0.2
 > 文档状态：一期原批准范围已于 2026-10-16 验收通过；保留后续能力限制
 > 创建／修订日期：2026-10-17
 > 适用范围：一期现行实现、已证结果、未完成能力及已执行计划清理后的交接
 > 权威要求：[总需求](2026-10-13-quant-research-platform-requirements.md)、[一期设计](2026-10-13-quant-research-platform-phase-1-design.md)
 > 总方案：[量化研究平台方案](2026-10-13-quant-research-platform-design.md)
 > 使用入口：[安装、网页与 worker](../quant/README.md)
-> 后续设计：[二期](2026-10-13-quant-research-platform-phase-2-design.md)、[三期](2026-10-13-quant-research-platform-phase-3-design.md)均待批准
+> 后续现行入口：[新二期软件实现与限定验收](2026-10-21-quant-research-platform-phase-2-implementation.md)；完整数据与真实研究交接新三／四期，设计待审；原分期要求与审批记录保留
 
 ## 1. 现行结论与批准范围
 

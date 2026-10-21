@@ -289,6 +289,62 @@
       "provider_timezone": "Asia/Shanghai",
       "notes": "02 低波动市值权重所需；上游核验 2026-10-16 完成，重建方法与单位换算见 permission.basis；历史 knowability 限制（变动原因无公告日）在导入清单中如实登记"
     },
+    "cn_a_hist_securities": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "历史身份事实经免费原始目录及官方披露核对；事件日与公告公开日分别登记，目录事件日期不能直接充当published_at。import_files逐文件登记原件、permission_basis/obtained_at和公开时点证明。",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "markets": [
+        "SH",
+        "SZ"
+      ],
+      "tables": [
+        "historical_securities"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "二期历史宇宙仅经import_files导入：已核验官方原件与独立发布记录按版本登记；仅有当前目录摘录时不证明历史公开，不经prepare网络取数"
+    },
+    "cn_a_knowledge": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "knowledge_evidence 登记随各表导入进行（§3a/b 口径，.hetu/quant/qualification/phase2/data-acquisition-plan-20261017.md）；证据原件存数据根 evidence/，sha256 随记录登记",
+        "source_url": ""
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "knowledge_evidence"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "二期历史时点证据表：仅经 import_files 导入"
+    },
+    "cn_a_trading_rules": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "沪深交易所/中登/财政部税务总局官方公告人工整理（.hetu/quant/qualification/phase2/trading-rules-20261017/sources.md，含逐条来源 URL、摘录与核验强度分级）；官方公开文件，0 次 provider.fetch、0 费用；导入经 import_files 逐文件登记 permission_basis/obtained_at",
+        "source_url": ""
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "markets": [
+        "SH",
+        "SZ"
+      ],
+      "tables": [
+        "trading_rules"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "二期回测历史交易制度（T+1、整手、涨跌幅、印花税/过户费/股息税逐日期生效）：仅经 import_files 导入"
+    },
     "cn_a_financial_reports": {
       "provider": "local_file",
       "fee_class": "free",

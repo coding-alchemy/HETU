@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
+from hetu_quant.backtest_models import backtest_definition_to_dict
 from hetu_quant.data import DataStore
 from hetu_quant.experiments import ExperimentStore
 from hetu_quant.jobs import JobService
@@ -34,7 +35,13 @@ from hetu_quant.reporting import export_result
 
 CN = ZoneInfo("Asia/Shanghai")
 
-_PAGES = ("任务列表", "数据", "研究提交", "结果与导出")
+_PAGES = ("任务列表", "数据", "研究提交", "回测", "结果与导出")
+
+_DEFINITION_ENCODERS = {
+    "data": data_request_to_dict,
+    "ranking": ranking_definition_to_dict,
+    "backtest": backtest_definition_to_dict,
+}
 
 
 # ---- 接缝：测试以替身隔离网络与长计算，生产走真实实现 ----
@@ -195,7 +202,9 @@ def _binding_expired(service: JobService, bound: tuple) -> bool:
 
 
 def _submit(store: ExperimentStore, kind: str, definition) -> None:
-    to_dict = data_request_to_dict if kind == "data" else ranking_definition_to_dict
+    to_dict = _DEFINITION_ENCODERS.get(kind)
+    if to_dict is None:
+        raise ValueError(f"unknown definition kind: {kind!r}")
     payload = json.loads(json.dumps(to_dict(definition), ensure_ascii=False))
     fingerprint = hashlib.sha256(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -642,6 +651,10 @@ def main() -> None:
         _page_data(root, store)
     elif page == "研究提交":
         _page_research(root, store)
+    elif page == "回测":
+        from hetu_quant.ui.backtest_page import render_backtest_page
+
+        render_backtest_page(root, store)
     else:
         _page_results(root)
 

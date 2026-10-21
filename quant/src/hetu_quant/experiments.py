@@ -15,6 +15,12 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
+from hetu_quant.backtest_models import (
+    BacktestDefinition,
+    BacktestRef,
+    backtest_definition_from_dict,
+    backtest_definition_to_dict,
+)
 from hetu_quant.models import (
     DataRequest,
     RankingDefinition,
@@ -28,7 +34,7 @@ from hetu_quant.models import (
 
 CN = ZoneInfo("Asia/Shanghai")
 
-_DEFINITION_KINDS = ("data", "ranking")
+_DEFINITION_KINDS = ("data", "ranking", "backtest")
 
 
 def _new_id(prefix: str) -> str:
@@ -83,8 +89,8 @@ class ExperimentStore:
 
     def save_definition(
         self,
-        kind: Literal["data", "ranking"],
-        definition: DataRequest | RankingDefinition,
+        kind: Literal["data", "ranking", "backtest"],
+        definition: DataRequest | RankingDefinition | BacktestDefinition,
     ) -> str:
         if kind not in _DEFINITION_KINDS:
             raise ValueError(f"unknown definition kind: {kind!r}")
@@ -92,6 +98,10 @@ class ExperimentStore:
             if not isinstance(definition, DataRequest):
                 raise TypeError("kind 'data' requires a DataRequest")
             payload: Mapping[str, object] = data_request_to_dict(definition)
+        elif kind == "backtest":
+            if not isinstance(definition, BacktestDefinition):
+                raise TypeError("kind 'backtest' requires a BacktestDefinition")
+            payload = backtest_definition_to_dict(definition)
         else:
             if not isinstance(definition, RankingDefinition):
                 raise TypeError("kind 'ranking' requires a RankingDefinition")
@@ -141,6 +151,8 @@ class ExperimentStore:
             return data_request_from_dict(payload)
         if doc["kind"] == "ranking":
             return ranking_definition_from_dict(payload)
+        if doc["kind"] == "backtest":
+            return backtest_definition_from_dict(payload)
         raise ValueError(f"unknown definition kind: {doc['kind']!r}")
 
     # ---- 结果（只读已发布产物，不伪造）----
@@ -160,5 +172,31 @@ class ExperimentStore:
         for child in sorted(self.results_dir.iterdir()):
             if child.is_dir() and not child.name.startswith(".tmp-"):
                 if (child / "result.json").exists():
+                    found.append(child.name)
+        return found
+
+    # ---- 回测结果（只读已发布 backtests 目录，与一期 results 独立）----
+
+    @property
+    def backtests_dir(self) -> Path:
+        return self.root / "backtests"
+
+    def get_backtest(self, run_id: str) -> BacktestRef:
+        manifest_path = self.backtests_dir / run_id / "backtest.json"
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"backtest manifest missing: {run_id}")
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        status = manifest.get("status")
+        if status not in ("complete", "limited"):
+            raise ValueError(f"backtest {run_id} has unknown status: {status!r}")
+        return BacktestRef(run_id=run_id, root=self.root, status=status)
+
+    def list_backtests(self) -> list[str]:
+        if not self.backtests_dir.exists():
+            return []
+        found = []
+        for child in sorted(self.backtests_dir.iterdir()):
+            if child.is_dir() and not child.name.startswith(".tmp-") and child.name != "_partial":
+                if (child / "backtest.json").exists():
                     found.append(child.name)
         return found

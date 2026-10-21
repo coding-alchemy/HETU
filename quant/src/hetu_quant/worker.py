@@ -12,10 +12,12 @@ import fcntl
 import json
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from hetu_quant.backtest import BacktestCancelled
+from hetu_quant.backtest_models import BacktestDefinition, BacktestRef
 from hetu_quant.data import DataStore
 from hetu_quant.experiments import ExperimentStore
 from hetu_quant.jobs import JobService
@@ -74,6 +76,23 @@ def recover_stale_jobs(store: ExperimentStore) -> list:
     return recovered
 
 
+def _execute_backtest(
+    definition: BacktestDefinition,
+    data: DataStore,
+    *,
+    progress: Callable[[float], None],
+    cancelled: Callable[[], bool],
+) -> BacktestRef:
+    """回测执行接缝：默认走 02 的 run_backtest，测试以替身隔离引擎。"""
+    from hetu_quant.backtest import run_backtest, run_formal_job
+
+    if definition.protocol["stage"] == "formal":
+        return run_formal_job(definition, data, progress=progress, cancelled=cancelled)
+    return run_backtest(
+        definition, data, data.root, progress=progress, cancelled=cancelled
+    )
+
+
 def _execute_ranking(
     definition: RankingDefinition, ref: SnapshotRef, output_root: Path
 ) -> ResultRef:
@@ -103,6 +122,16 @@ def _verify_result_published(result_dir: Path) -> None:
             raise FileNotFoundError(f"result table missing: {name}")
 
 
+def _verify_backtest_published(run_dir: Path) -> None:
+    manifest_path = run_dir / "backtest.json"
+    if not manifest_path.exists():
+        raise FileNotFoundError(f"backtest manifest missing: {run_dir.name}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    for name in manifest.get("tables", {}):
+        if not (run_dir / f"{name}.parquet").exists():
+            raise FileNotFoundError(f"backtest table missing: {name}")
+
+
 def run_job(job_id: str, store: ExperimentStore, data: DataStore):
     """领取并执行一个任务；取消在数据／计算／发布边界生效。"""
     service = JobService(store)
@@ -123,7 +152,42 @@ def run_job(job_id: str, store: ExperimentStore, data: DataStore):
             if not report.can_run:
                 reason = "qualify: " + "; ".join(report.limitations[:5])
             service.finish(job_id, progress=1.0, output=output, reason=reason)
-        else:
+        elif kind == "backtest":
+            assert isinstance(definition, BacktestDefinition)
+            stage = "access"
+            if definition.mode != "free":
+                raise PermissionError("paid mode is not enabled (paid)")
+            # 重读冻结定义（store.read_definition），不使用页面残留默认值
+            ref = SnapshotRef(definition.snapshot_id, data.root)
+            data.load_manifest(ref)
+            _raise_if_cancelled(service, job_id)
+            stage = "compute"
+
+            def progress(value: float) -> None:
+                bounded = min(max(float(value), 0.0), 1.0)
+                service._update(job_id, progress=round(0.1 + 0.8 * bounded, 3))
+
+            def cancelled() -> bool:
+                return service.get(job_id).state == "cancel_requested"
+
+            try:
+                result = _execute_backtest(
+                    definition, data, progress=progress, cancelled=cancelled
+                )
+            except BacktestCancelled:
+                raise _JobCancelled from None
+            _raise_if_cancelled(service, job_id)
+            stage = "publish"
+            run_dir = data.root / "backtests" / result.run_id
+            _verify_backtest_published(run_dir)
+            reason = None
+            if result.status == "limited":
+                manifest = json.loads(
+                    (run_dir / "backtest.json").read_text(encoding="utf-8")
+                )
+                reason = "qualify: " + "; ".join(manifest.get("limitations", [])[:5])
+            service.finish(job_id, progress=1.0, output=run_dir, reason=reason)
+        elif kind == "ranking":
             assert isinstance(definition, RankingDefinition)
             stage = "access"
             if definition.mode != "free":
@@ -138,6 +202,8 @@ def run_job(job_id: str, store: ExperimentStore, data: DataStore):
             result_dir = data.root / "results" / result.result_id
             _verify_result_published(result_dir)
             service.finish(job_id, progress=1.0, output=result_dir)
+        else:
+            raise ValueError(f"unknown definition kind: {kind!r}")
     except _JobCancelled:
         service.finalize_cancel(job_id)
     except Exception as error:  # noqa: BLE001 - 失败原因持久化到任务记录

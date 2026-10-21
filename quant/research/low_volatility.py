@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -144,14 +144,18 @@ def _month_end_dates(
 
 
 def _known_market_cap(
-    market_cap: pd.DataFrame, code: str, signal_date: date, as_of: datetime
+    market_cap: pd.DataFrame, code: str, signal_date: date
 ) -> float | None:
+    """信号日当日或之前、且信号时点（当日 21:00 CN）前已公开的最新市值。
+
+    不得按研究 as_of 筛选：信号时点后披露的版本属于未来数据。"""
     own = market_cap[market_cap["code"] == code]
     if not len(own):
         return None
+    cutoff = datetime.combine(signal_date, time(21, 0), tzinfo=CN).isoformat()
     known = own[
         (own["date"].astype(str) <= signal_date.isoformat())
-        & (own["available_at"].astype(str) <= as_of.isoformat())
+        & (own["available_at"].astype(str) <= cutoff)
     ]
     if not len(known):
         return None
@@ -295,6 +299,7 @@ def prepare(store, request, snapshot, output_dir) -> dict:
 
     eligible = set(quality.eligible_ids)
     vols: dict[str, float] = {}
+    price_map: dict[str, list[float]] = {}
     for code in request.codes:
         reasons: list[str] = []
         coverage_reason = _action_coverage_reason(
@@ -340,6 +345,7 @@ def prepare(store, request, snapshot, output_dir) -> dict:
             continue
         returns = pd.Series(prices).pct_change().dropna()
         vols[code] = float(returns.std(ddof=1))
+        price_map[code] = prices
     executed.append("warmup_36m_volatility")
 
     gaps: list[str] = []
@@ -359,15 +365,34 @@ def prepare(store, request, snapshot, output_dir) -> dict:
     selected = ordered[:count]
     executed.append("lowest_decile_selection")
 
-    weights: dict[str, float] = {}
+    # 选择/权重核心复用 hetu_quant.strategies.low_volatility_weights（同一计算）；
+    # 市值时点过滤在本侧完成后传入，缺市值的入选对象按原规则记 no_known_market_cap
+    from hetu_quant.strategies import low_volatility_weights
+
+    # 共享函数内部重算波动池与十分位选择，须传入全部合格对象的收益与市值，
+    # 不能只传已入选者（否则池规模检查必然失败）。
+    known_caps: dict[str, float] = {}
+    for code in vols:
+        cap = _known_market_cap(market_cap, code, signal_date)
+        if cap is not None and cap > 0:
+            known_caps[code] = cap
+    return_rows = [
+        {"code": code, "month_end": month_ends[index + 1], "month_return": value}
+        for code in vols
+        for index, value in enumerate(pd.Series(price_map[code]).pct_change().dropna())
+    ]
+    weights_frame = low_volatility_weights(
+        pd.DataFrame(return_rows, columns=["code", "month_end", "month_return"]),
+        pd.DataFrame(
+            {"code": list(known_caps), "market_cap_cny": list(known_caps.values())}
+        ),
+        lookback_months=WARMUP_MONTHS,
+    )
+    weighted = set(weights_frame["code"])
     for code, _vol in selected:
-        cap = _known_market_cap(market_cap, code, signal_date, request.as_of)
-        if cap is None or cap <= 0:
+        if code not in weighted:
             excluded[code] = ["no_known_market_cap"]
-            continue
-        weights[code] = cap
-    total = sum(weights.values())
-    if not total:
+    if not len(weights_frame):
         report = _report(
             quality, excluded, executed, "blocked", signal_date, snapshot.snapshot_id,
             {"reason": "no_known_market_cap"},
@@ -379,10 +404,10 @@ def prepare(store, request, snapshot, output_dir) -> dict:
 
     signals = pd.DataFrame(
         {
-            "code": [code for code, _ in selected if code in weights],
+            "code": list(weights_frame["code"]),
             "signal_date": signal_date.isoformat(),
-            "signal": [vols[code] for code, _ in selected if code in weights],
-            "target_weight": [weights[code] / total for code, _ in selected if code in weights],
+            "signal": list(weights_frame["signal_value"]),
+            "target_weight": list(weights_frame["target_weight"]),
         }
     )
     data_window = {

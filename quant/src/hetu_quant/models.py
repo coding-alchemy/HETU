@@ -23,6 +23,8 @@ PURPOSES: tuple[str, ...] = (
     "ranking_historical",
     "low_volatility_preparation",
     "ep_value_preparation",
+    "backtest_low_volatility",
+    "backtest_ep",
 )
 
 MODES: tuple[str, ...] = ("free", "paid")

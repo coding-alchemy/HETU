@@ -46,6 +46,16 @@ PURPOSE_TABLES: dict[str, tuple[str, ...]] = {
     "ep_value_preparation": (
         "calendar", "daily_bars", "security_status", "financial_reports", "market_cap",
     ),
+    # 二期回测用途：另需历史证券（含退市）、历史交易制度与公开时点证据；
+    # 财务链缺失只阻断 backtest_ep
+    "backtest_low_volatility": (
+        "calendar", "daily_bars", "security_status", "corporate_actions", "market_cap",
+        "historical_securities", "trading_rules", "knowledge_evidence",
+    ),
+    "backtest_ep": (
+        "calendar", "daily_bars", "security_status", "corporate_actions", "market_cap",
+        "historical_securities", "trading_rules", "knowledge_evidence", "financial_reports",
+    ),
 }
 
 def _action_query_records(entry: Mapping) -> list[dict]:
@@ -87,6 +97,11 @@ class _ProductPlan(TypedDict):
 
 
 TABLE_SCHEMAS: dict[str, dict[str, list[str]]] = {
+    "terminal_disposals": {
+        "columns": ["code", "date", "cash_per_share", "available_at", "evidence_ref", "sha256",
+                    "product_id", "source_ref"],
+        "keys": ["code", "date"],
+    },
     "securities": {
         "columns": [
             "code", "name", "market", "ipo_date", "out_date",
@@ -116,7 +131,7 @@ TABLE_SCHEMAS: dict[str, dict[str, list[str]]] = {
     "corporate_actions": {
         "columns": [
             "code", "ex_date", "action_type", "m", "d", "terms_raw",
-            "available_at", "product_id", "source_ref",
+            "available_at", "record_date", "pay_date", "stock_listing_date", "product_id", "source_ref",
         ],
         "keys": ["code", "ex_date", "action_type"],
     },
@@ -162,6 +177,29 @@ TABLE_SCHEMAS: dict[str, dict[str, list[str]]] = {
             "product_id", "source_ref",
         ],
         "keys": ["code", "report_period", "available_at"],
+    },
+    # 二期回测事实表：历史证券（含退市）、历史交易制度、公开时点证据
+    "historical_securities": {
+        "columns": [
+            "code", "valid_from", "valid_to", "listed", "market", "board",
+            "available_at", "evidence_ref", "product_id", "source_ref",
+        ],
+        "keys": ["code", "valid_from", "available_at"],
+    },
+    "trading_rules": {
+        "columns": [
+            "rule_id", "market", "board", "security_type", "valid_from", "valid_to",
+            "min_buy_qty", "qty_step", "tick_size", "settlement", "limit_rule",
+            "fee_rule", "product_id", "source_ref",
+        ],
+        "keys": ["rule_id", "valid_from"],
+    },
+    "knowledge_evidence": {
+        "columns": [
+            "table_name", "record_key", "revision_id", "supersedes", "published_at",
+            "evidence_ref", "sha256", "verified", "product_id", "source_ref",
+        ],
+        "keys": ["table_name", "record_key", "revision_id"],
     },
 }
 
@@ -466,6 +504,21 @@ class DataStore:
     ) -> list[str] | None:
         """分区实际覆盖期间 [min, max]；新快照持久化 coverage，旧快照按请求窗口推导。"""
         stored = entry.get("coverage")
+        if entry.get("table") == "corporate_actions" and entry.get("query_coverage"):
+            spans = sorted((str(r["start"]), str(r["end"]))
+                           for r in _action_query_records(entry) if r.get("basis") == "ex_date")
+            if spans:
+                # 历史组合的通用 coverage 可能宽于真实实施日查询证明。
+                # 只复用第一段连续证明；不能用 min/max 跨过未知间隔。
+                left, right = spans[0]
+                for start, end in spans[1:]:
+                    if date.fromisoformat(start) > date.fromisoformat(right) + timedelta(days=1):
+                        break
+                    right = max(right, end)
+                if isinstance(stored, (list, tuple)) and left == str(stored[0]):
+                    return [left, right]
+                # 缺前段证明的旧公告年/未知资产仍保留原范围与受限资格；
+                # 不因后段已证就隐式重查旧段，或升级旧段的查询口径。
         if isinstance(stored, (list, tuple)) and len(stored) == 2:
             return [str(stored[0]), str(stored[1])]
         partition = str(entry.get("partition", ""))
@@ -1024,7 +1077,50 @@ class DataStore:
         tmp_dir = self.root / "snapshots" / f".tmp-{snapshot_id}"
         written_items: list[dict[str, object]] = []
         table_files: list[dict[str, object]] = []
+        base_ids = list(manifest_doc.get("base_snapshot_ids", []))
         for item in items:
+            if item.get("supplement") and self.product(item["product_id"])["tables"] != ["corporate_actions"]:
+                raise ValueError("supplement only supports corporate_actions")
+        replaced = {table for item in items if not item.get("supplement")
+                    for table in self.product(item["product_id"])["tables"]}
+        inherited: dict[str, tuple[str, dict]] = {}
+        bases = {}
+        for base_id in base_ids:
+            ref = SnapshotRef(base_id, self.root)
+            base = self.load_manifest(ref)
+            self._verify_hashes(ref, base)
+            if base.get("mode") != "free":
+                raise AccessDenied("import base must use free mode")
+            for entry in base["table_files"]:
+                self.check_access(mode, self.product(entry["product_id"]))
+                if entry["table"] not in replaced:
+                    inherited[entry["table"]] = (base_id, base)
+            bases[base_id] = base
+        inherited_products = set()
+        for table, (base_id, base) in inherited.items():
+            prefix = Path("inherited") / base_id
+            for file_index, entry in enumerate(base["table_files"]):
+                if entry["table"] != table:
+                    continue
+                source = self.root / "snapshots" / base_id / entry["path"]
+                relative = Path("tables") / table / f"part-inherited-{file_index:012d}.parquet"
+                target = tmp_dir / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(source, target)
+                table_files.append({**entry, "path": str(relative), "inherited_from": base_id})
+                inherited_products.add(entry["product_id"])
+            for item in base.get("items", []):
+                if item.get("table") != table:
+                    continue
+                raw_files = []
+                for raw in item.get("raw_files", []):
+                    relative = prefix / raw["path"]
+                    target = tmp_dir / relative
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copyfile(self.root / "snapshots" / base_id / raw["path"], target)
+                    raw_files.append({**raw, "path": str(relative)})
+                written_items.append({**item, "raw_files": raw_files, "inherited_from": base_id})
+        for item_index, item in enumerate(items):
             product = self.product(item["product_id"])
             source = item["source"]
             self._log_invocation(
@@ -1048,6 +1144,41 @@ class DataStore:
             for table_name, frame in tables.items():
                 table_dir = tmp_dir / "tables" / table_name
                 table_dir.mkdir(parents=True, exist_ok=True)
+                if item.get("supplement"):
+                    # 官方原件补充漏报事件；保留旧事实及实际查询证明，
+                    # 不把新增事实本身升级为新的查询覆盖。重叠键须另作修订。
+                    prior = [e for e in table_files if e["table"] == table_name]
+                    if prior:
+                        old = pd.concat([pd.read_parquet(tmp_dir / e["path"]) for e in prior])
+                        keys = TABLE_SCHEMAS[table_name]["keys"]
+                        if len(frame[keys].astype(str).merge(old[keys].astype(str), on=keys)):
+                            raise DataQualityError("action supplement overlap; explicit revision required")
+                    for code, group in frame.groupby("code"):
+                        key = f"code={code}"
+                        entry = next((e for e in prior if e["partition"] == key), None)
+                        if entry is None:
+                            raise DataQualityError("action supplement requires existing code partition")
+                        combined = pd.concat([pd.read_parquet(tmp_dir / entry["path"]), group],
+                                             ignore_index=True)
+                        for column in ("m", "d"):
+                            combined[column] = pd.to_numeric(combined[column], errors="raise")
+                        name = (f"part-{_safe_name(item['product_id'])}-supplement-"
+                                f"{item_index}-{_safe_name(key)}.parquet")
+                        target = table_dir / name
+                        combined.to_parquet(target, index=False)
+                        table_files.remove(entry)
+                        # read_table按目录读取；移除本次暂存的旧副本，父快照不动。
+                        (tmp_dir / entry["path"]).unlink()
+                        parent_id, parent = inherited[table_name]
+                        parent_entry = next(e for e in parent["table_files"]
+                                            if e["table"] == table_name and e["partition"] == key)
+                        updated = {k: v for k, v in entry.items() if k != "inherited_from"}
+                        updated.update(path=str(target.relative_to(tmp_dir)), sha256=_sha256(target),
+                                       supplemented_from={"snapshot_id": parent_id,
+                                                          "path": parent_entry["path"],
+                                                          "sha256": parent_entry["sha256"]})
+                        table_files.append(updated)
+                    continue
                 name = f"part-{_safe_name(item['product_id'])}-import-{_safe_name(source['name'])}.parquet"
                 target = table_dir / name
                 frame.to_parquet(target, index=False)
@@ -1077,9 +1208,11 @@ class DataStore:
             "request": None,
             "items": written_items,
             "table_files": table_files,
-            "gaps": {},
-            "failures": [],
-            "revises": None,
+            "gaps": {pid: value for base in bases.values() for pid, value in base.get("gaps", {}).items()
+                     if pid in inherited_products},
+            "failures": [f for base in bases.values() for f in base.get("failures", [])
+                         if f["product_id"] in inherited_products],
+            "revises": base_ids or None,
         }
         return self._publish(tmp_dir, snapshot_id, doc)
 
@@ -1403,9 +1536,13 @@ class DataStore:
         excluded: dict[str, list[str]] = {code: [] for code in request.codes}
         eligible: list[str] = []
 
-        # 信息时点：快照取得时间不得晚于研究 as_of
+        # 信息时点：快照取得时间不得晚于研究 as_of；只核本用途实际所需表的
+        # 取得时点，未用于本研究的晚取得域不触发全快照否决
+        purpose_tables = set(PURPOSE_TABLES[request.purpose])
         obtained_latest = ""
         for item in manifest.get("items", []):
+            if str(item.get("table", "")) not in purpose_tables:
+                continue
             obtained = str((item.get("source") or {}).get("obtained_at", ""))
             obtained_latest = max(obtained_latest, obtained)
         obtained_ok = True
@@ -1543,7 +1680,7 @@ class DataStore:
                         if str(row["is_listed"]) in ("False", "0", "false"):
                             excluded[code].append("delisted")
 
-                if request.purpose == "ep_value_preparation":
+                if request.purpose in ("ep_value_preparation", "backtest_ep"):
                     own_fin = financials[financials["code"] == code] if len(financials) else financials
                     known = own_fin[
                         own_fin["available_at"].astype(str) <= as_of.isoformat()
