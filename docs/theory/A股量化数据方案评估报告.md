@@ -1,11 +1,11 @@
 # 个人 A 股量化研究数据方案评估报告
 
-> 文档版本：v0.3；状态：信息源核查资料，采购决策暂缓
-> 初稿／修订日期：2026-10-18／2026-10-20；基础资料核查于2026-10-19，行业／主题及日线／分钟扩展资料核查于2026-10-19—20，具体范围见§1.1
+> 文档版本：v0.4；状态：信息源核查资料，采购决策暂缓
+> 初稿／修订日期：2026-10-18／2026-10-21；基础资料核查于2026-10-19，行业／主题及日线／分钟扩展资料核查于2026-10-19—20，必要供应商事实复核于2026-10-21，具体范围见§1.1、§10.3
 > 文档职责：维护供应商接口、价格、调用限制、历史覆盖及证据；项目选型、容量、存储和更新方案以[系统数据与数据源方案](A股量化系统数据与数据源方案.md)为阅读入口
 > 历史案例背景：沪深 A 股（主板／创业板／科创板），含退市股，2016-04-29至2026-10-13；36个月月收益低波动多头、市值加权、月调仓（30／42个月对照），RQAlpha回测；不代表新增沪深北二十年归档已核验
 > 证据分级：**【官方文档】**=公开说明或源码，尚不等于本项目实测；**【项目实测】**=本项目保存的响应及证据；**【社区反馈】**=用户报告，未必经维护方确认或当前复现；**【待验证】**=公开证据不足；**【估算】**=注明假设的离线量级计算
-> 本次边界：v0.3仅整理既有资料，将系统方案中已核对的供应商事实归入本文；未重新联网核查、使用账号／Token、调用证券数据、注册／购买／联系供应商或运行研究，不改变现有0元数据支出上限
+> 本次边界：v0.3仅归集既有资料；v0.4只复核Tushare、RQData、JQData与历史池、PIT股本市值、公司行动相关的官方网页／源码，未扩查二十年分钟。未使用账号／Token、调用证券数据、注册／申请试用／购买／联系供应商或运行研究，不改变现有0元数据支出上限
 
 ---
 
@@ -30,6 +30,7 @@
 | 行业／主题及历史成员 | 2026-10-19核对§8.5所列接口、权限、行限和历史起点 | 不同体系、公开时点、成员版本及更早历史待核；当前成员不能外推历史 |
 | 分钟1／3／10／20年、1／5／15／30／60分钟 | 2026-10-20核对Tushare分钟价目、字段／限额与RQData行情文档；RQData2005年起点仅有历史简介材料，见§8.6 | 未进行分钟账号样例或全A股覆盖验证；Tushare2009年起点不足截至2026年的完整二十年；RQData当前账号、早期退市及北交所覆盖待核 |
 | 当期价格、账号额度与离线使用权 | 已有公开价和文档额度见§8；未用账号实测 | RQData／JQData适用报价、试用权限、实际扣额及订阅到期使用权仍未核齐 |
+| 历史池、PIT股本市值与行动的必要供应商事实 | 2026-10-21复核Tushare积分价目与相关端点、RQData字段／身份／配额文档、JQData官方SDK源码；结果见§10.3 | 仅网页核查，未取得账号响应或新增数据资格；既有其他范围的核查时点保留 |
 
 本次扩展只补充来源资料，**不将原范围的核查结论升级为新范围已通过**。各K线粒度是否有量额字段见§8.6；系统容量估算不属于来源交付证明。
 
@@ -40,7 +41,7 @@
 | 需求域 | TuShare Pro(2000 分) | TuShare Pro(5000 分) | BaoStock | AKShare | JQData(聚宽) | RQData(米筐) | Wind/iFinD/Choice |
 |---|---|---|---|---|---|---|---|
 | A1 历史每日总市值 | ✅ `daily_basic.total_mv`（万元） | ✅ 同左；仍有单次/频次限制 | 🟡 本次未核得逐日市值接口 | ✅ `stock_value_em`/`stock_zh_valuation_baidu`；覆盖待核 | ✅ `valuation`/`get_valuation` | ✅ `get_factor` | 🟡 需具体产品/字段证明 |
-| A2 历史股本（总/流通/自由流通） | ✅ `daily_basic`三口径 | ✅ | 🟡 本次未核得逐日三口径接口；`query_stock_industry`是行业接口 | ✅ 历史/候选接口存在，版本待核 | 🟡 逐字段口径核对 | 🟡 `get_shares`，三口径须逐字段核对 | 🟡 需字段表 |
+| A2 历史股本（总/流通/自由流通） | ✅ `daily_basic`三口径 | ✅ | 🟡 本次未核得逐日三口径接口；`query_stock_industry`是行业接口 | ✅ 历史/候选接口存在，版本待核 | 🟡 逐字段口径核对 | ✅ `get_shares`列`total/circulation_a/free_circulation`；PIT及修订另核 | 🟡 需字段表 |
 | A3 市值 PIT 口径说明 | 🟡 交易日期不能证明公告版本 | 🟡 | — | 🟡 未证完整PIT | 🟡 日期查询及修订语义待核 | ✅ `market_cap_3`有公告后调整说明；修订溯源仍待核 | 🟡 不作行业整体推断 |
 | B1 退市股列表与身份 | ✅ `stock_basic(list_status='D')` | ✅ | 🟡 跨端点历史覆盖待核 | 🟡 某股本接口成功空不等于没有退市名录，须分别核对 | ✅ 历史日期筛选，实际覆盖待核 | ✅ 历史日期筛选，实际覆盖待核 | 🟡 需具体接口/覆盖 |
 | B2 按历史日期取当时股票池 | 🟡 `list_date/delist_date`及公开版本须区分 | ✅ `bak_basic`有日期化列表，身份链另核 | 🟡 需版本/覆盖核对 | 🟡 需版本/覆盖核对 | ✅ `get_all_securities(date=...)` | ✅ `all_instruments(date=...)` | 🟡 需具体接口/覆盖 |
@@ -197,7 +198,7 @@
 - TuShare 平台积分规则：https://tushare.pro/document/1?doc_id=13
 - TuShare stock_basic（含 list_status='D' 退市列表）：https://tushare.pro/document/2?doc_id=25
 - TuShare daily_basic（股本与市值字段、2000/5000 积分门槛）：https://tushare.pro/document/2?doc_id=32
-- TuShare dividend（div_proc 进度字段、明示不含配股）：https://tushare.pro/document/2?doc_id=103
+- TuShare dividend（分红送股、div_proc进度字段；不据此证明其他行动覆盖）：https://tushare.pro/document/2?doc_id=103
 - TuShare stk_premarket（盘前股本/涨跌停、pre_close 除权口径）：https://tushare.pro/document/2?doc_id=353
 - Tushare stock_st（3000积分起，2000年起历史）：https://tushare.pro/document/2?doc_id=397
 - Tushare公开价格/通用频次：https://tushare.pro/document/2?doc_id=290
@@ -248,6 +249,8 @@ caps = pro.daily_basic(trade_date="20260930",
 | 10000以上 | 常规500次/分，特色300次/分 | 常规数据无每日总量上限；特色按产品核对 | 1000元/年 |
 
 “次调用”不是“数据行”。单次行数另看下表；独立权限另计。通用流控的跨API共享方式、账号实际获批条件待核；端点有独立更严限制时，不能直接套通用值。[官方权限/价目](https://tushare.pro/document/2?doc_id=290)
+
+2026-10-21复核发现，`daily`端点另写基础积分500次／分，与通用表免费档50次／分存在表述差异；实际账号适用频次仍待确认，不能据此将免费档提高到500次／分。[日线说明](https://tushare.pro/document/2?doc_id=27)
 
 | 接口 | 最低积分 | 单次最大行数（公开页） | 接口独立说明/历史范围 |
 | --- | --- | --- | --- |
@@ -402,3 +405,20 @@ Tushare `stk_mins`官方1分钟示例为09:30至15:00共241条，不能将240条
 - **独立的软件事项：**事实核验接缝、数据字段映射及未支持换股处理，不能记作采购已解决；已通过机制和旧结果不重复验收。
 
 本轮不注册/申请试用、不登录或调用数据、不联系销售、不改变免费边界；后续若需要这些动作，应明确具体样例、请求量和费用。当前不排序采购方案、不承诺能以某一套餐完成二期。
+
+### 10.3 必要供应商事实复核（2026-10-21）
+
+本节仅记录官方网页／源码核查及其边界，不是市场数据API请求、账号试用或研究验收。旧核查时点及既有有效结果保持原适用范围；下表不触发重取数据或重跑研究。
+
+| 范围／原文链接 | 当前确认 | 仍需账号、样例或适用报价 |
+| --- | --- | --- |
+| Tushare[积分价目](https://tushare.pro/document/2?doc_id=290) | 个人200／500／1000元每年分别对应2000／5000／10000以上积分档；2000档200次／分、每API每日10万次，后两档常规500次／分且常规日总量不限；特色另有限制 | 端点独立限制仍适用；3000／6000门槛最低开通价、账号权限和缓存／到期使用权未知 |
+| Tushare[日线](https://tushare.pro/document/2?doc_id=27)、[因子](https://tushare.pro/document/2?doc_id=28)、[每日指标](https://tushare.pro/document/2?doc_id=32) | `daily`是未复权日线，6000行／次；因子与`daily_basic`均2000积分起，后者6000行／次，含股本与市值；免费档只有未复权日线 | 端点和通用日线频次差异见§8.1；`trade_date`及三股本字段未证明公告版本PIT，完整历史覆盖仍须验证 |
+| Tushare[基础身份](https://tushare.pro/document/2?doc_id=25)、[历史列表](https://tushare.pro/document/2?doc_id=262)、[分红](https://tushare.pro/document/2?doc_id=103)、[ST](https://tushare.pro/document/2?doc_id=397) | 身份默认L，D须另取；`bak_basic`2016年起、5000积分、7000行／次；`dividend`2000积分、2000行／次，含进度和实施／登记／除息／派息／红股上市日期；ST需3000积分 | 历史池完整性、代码变更与身份公开版本、特别分红和行动修订仍未取得账号证据；分红接口不能证明配股／换股／退市处置齐备 |
+| Tushare[申万成员](https://tushare.pro/document/2?doc_id=335)、[申万日线](https://tushare.pro/document/2?doc_id=327)、[东财成员](https://tushare.pro/document/2?doc_id=363) | 申万成员2000积分、2000行／次，默认最新，列纳入／剔除日；申万行情5000积分、4000行／次；东财成员6000积分、5000行／次，2024-12-20起 | 成员日期不自动证明当时公开可得；更早历史、退市关系和版本覆盖未证。500元档不足6000门槛，1000元档达门槛但不代表最低价格 |
+| RQData[股本、市值与行动字段](https://www.ricequant.com/doc/rqdata/python/stock-mod) | `market_cap_3`有公告后调整股本的PIT说明；`get_shares`列总、流通A股及自由流通股本，后者2005年起；`get_dividend`含现金到账日，`get_split`的`payable_date`指送转股上市日 | 不把`get_shares`日期序列自动视为完整PIT；全窗覆盖、修订留存、特别分红及其他行动须核。现金到账与送转股上市不可合并 |
+| RQData[历史身份与详情](https://www.ricequant.com/doc/rqdata/python/generic-api) | `all_instruments(type='CS', date=...)`支持指定日期筛选；`instruments`明示返回最新详情，含上市／退市日期 | 历史筛选与最新详情不能合成已经成立的历史公开版本链；退市对象及跨端点映射须按目标池核验 |
+| RQData[配额手册](https://www.ricequant.com/doc/rqdata/python/manual)、[商城](https://www.ricequant.com/welcome/store/) | SDK按压缩后的实际传输流量计量；`get_quota`返回字节上限／用量和许可期限，手册试用值为每日1G；商城本次未返回可读报价 | 适用字段组合价格、账号真实配额、权限／期限、批量导出及离线／到期许可仍未知，文档试用值不等于已取得试用资格 |
+| JQData[官方SDK](https://github.com/JoinQuant/jqdatasdk/blob/master/jqdatasdk/api.py)、[购买入口](https://www.joinquant.com/help/api/doc?name=logon&id=9831)、[旧FAQ](https://www.joinquant.com/community/post/detailMobile?postId=21247) | 源码确认历史日期股票池、`get_fundamentals(date=...)`及`get_valuation`区间估值；市值亿元、股本万股；`get_query_count`按条数。购买页及旧FAQ本次均受地区限制 | 日期参数本身未证明股本按公开时点变化或全部修订保留；旧FAQ不升级为现行全产品结论。当前报价、账号额度、原池／行动覆盖及许可仍待确认 |
+
+上述证据可用于界定日线、历史池、PIT市值和行动各自的有界用途验证；接口存在、公开价或PIT文字均不能替代保存响应、目标对象／期间覆盖与关键难例证据。本次没有取得新的【项目实测】结论。
