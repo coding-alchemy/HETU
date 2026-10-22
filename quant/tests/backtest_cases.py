@@ -748,6 +748,22 @@ def _execution_clocks_case(variant: str) -> dict[str, object]:  # noqa: C901
 
     if variant == "base":
         return case()
+    if variant in ("ex_dividend_buy", "ex_dividend_sell", "ex_dividend_unknown_cash",
+                   "ex_dividend_missing_previous"):
+        # 合成除息事实：前收10、每原股派1，登记/除息/派息日期各自保留。
+        selling = variant == "ex_dividend_sell"
+        signals = ([{"signal_at": days[0], "executable_from": days[1],
+                     "code": "CODE_A", "target_weight": 0.5}] if selling else [])
+        signals.append({"signal_at": days[1], "executable_from": days[2],
+                        "code": "CODE_A", "target_weight": 0.0 if selling else 0.5})
+        bars = [("CODE_A", day, 10.0 if i < 2 else 9.0, 10.0 if i < 2 else 9.0, 1_000_000)
+                for i, day in enumerate(days)]
+        if variant == "ex_dividend_missing_previous":
+            bars = [row for row in bars if row[1] != days[1]]
+        actions = _actions_df([("CODE_A", days[2], "cash_dividend", 1.0,
+                               None if variant == "ex_dividend_unknown_cash" else 1.0,
+                               days[1], days[3], None)])
+        return case(bars=bars, signals=signals, actions=actions)
     if variant == "d2_close_volume":
         # 只改 d2 收盘与全天量：不得改变 d1 信号、d2 预先订单数量与开盘成交决策
         bars = [("CODE_A", days[0], 10.0, 10.0, 1_000_000),

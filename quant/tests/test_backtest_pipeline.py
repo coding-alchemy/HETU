@@ -612,6 +612,32 @@ def test_cost_decomposition_uses_one_execution_trace(tmp_path: Path) -> None:
     assert explicit > 0
 
 
+def test_unproven_ex_reference_reaches_published_evaluation(tmp_path):
+    """导入缺现金金额的合成行动：真实引擎限制必须传到发布及经济评价。"""
+    from hetu_quant.backtest_reporting import read_backtest as read_published
+
+    case = make_backtest_case("pipeline")
+    case["csvs"]["corporate_actions"] = (
+        "code,ex_date,action_type,m,d,terms_raw,available_at,record_date,pay_date,stock_listing_date\n"
+        "KEEP_A,2021-06-30,cash_dividend,1,,合成未知现金金额,2021-05-30T18:00:00+08:00,"
+        "2021-05-31,2021-07-31,\n"
+    )
+    store, ref = _build_store(tmp_path / "store", case)
+    coverage = case["actions_coverage"]
+    annotate_actions_coverage(store, ref, coverage["start"], coverage["end"],
+                             codes=list(case["codes"]), query_basis="ex_date")
+    latest, interpreter = _latest_admission(), _engine_python()
+    assert latest is not None and interpreter is not None
+    published_ref = run_backtest(_definition(case, ref.snapshot_id), store, tmp_path / "out",
+                                admission_path=latest, engine_python=interpreter)
+    published = read_published(published_ref)
+    assert published_ref.status == "limited"
+    assert any("limit_reference_unproven" in reason for reason in published["manifest"]["limitations"])
+    assert published["evaluation"]["research_status"] == "blocked"
+    assert published["evaluation"]["economic_status"] == "not_evaluated"
+    assert published["tables"]["trades"].empty
+
+
 # ---- runner CLI 一致性：同一 bundle 经 run_backtest 内部链路与独立 CLI 一致 ----
 
 

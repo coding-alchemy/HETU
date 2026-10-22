@@ -15,7 +15,9 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from datetime import date, datetime
+from decimal import Decimal
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +51,10 @@ _DIVIDEND_DTYPE = np.dtype(
 )
 
 _SPLIT_DTYPE = np.dtype([("ex_date", "<i8"), ("split_factor", "<f8")])
+
+
+class LimitReferenceError(ValueError):
+    """无法从前收和已核验行动形成当日除权参考价。"""
 
 
 def _truthy(value: object) -> bool:
@@ -230,6 +236,45 @@ class LocalBundleDataSource(BaseDataSource):
         return self._calendar[0].date(), self._calendar[-1].date()
 
     # ---- 行情 ----
+
+    def limit_reference_price(self, code: str, dt: datetime) -> float:
+        """限制价专用参考：普通日前收，除权日 (原前收-每原股现金)/新原股数比。
+
+        不改账户bar原价，不使用忽略复权参数的DataProxy.get_prev_close。
+        输入仍须满足生产包的行动覆盖／日期合同；缺值或不能解释的组合不回落原前收。
+        """
+        day = dt.date()
+        reason = f"limit_reference_unproven: {code} @ {day}"
+        index = self._calendar.searchsorted(pd.Timestamp(day))
+        if index == 0:
+            raise LimitReferenceError(f"{reason}: 缺前一交易日")
+        previous_day = self._calendar[index - 1].strftime("%Y%m%d")
+        previous = self._prev_close.get(code, {}).get(previous_day, float("nan"))
+        if not math.isfinite(previous) or previous <= 0:
+            raise LimitReferenceError(f"{reason}: 缺前一交易日原收盘")
+        cash, ratio = Decimal("0"), Decimal("1")
+        splits = 0
+        for event in self.action_events.get(code, []):
+            if event["ex_date"] != day:
+                continue
+            field = "d" if event["action_type"] == "cash_dividend" else "m"
+            try:
+                value = float(event[field])
+            except (TypeError, ValueError, KeyError) as exc:
+                raise LimitReferenceError(f"{reason}: 行动 {field} 未知") from exc
+            if not math.isfinite(value) or value < 0 or (field == "m" and value == 0):
+                raise LimitReferenceError(f"{reason}: 行动 {field} 无有效数值")
+            if field == "d":
+                cash += Decimal(str(value))
+            else:
+                splits += 1
+                if splits > 1:
+                    raise LimitReferenceError(f"{reason}: 同日多送转比例关系未证明")
+                ratio = Decimal(str(value))
+        reference = float((Decimal(str(previous)) - cash) / ratio)
+        if not math.isfinite(reference) or reference <= 0:
+            raise LimitReferenceError(f"{reason}: 除权参考价非正或无效")
+        return reference
 
     def _all_day_bars_of(self, instrument: Instrument) -> np.ndarray:
         return self._bars_by_code.get(instrument.order_book_id, np.zeros(0, dtype=_BAR_DTYPE))

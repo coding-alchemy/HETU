@@ -20,7 +20,7 @@ quant/.venv/bin/python -m pip check
 
 运行锁 `.hetu/quant/runtime/rqalpha/requirements.lock` 的原字节源码副本为 [quant/engine/requirements.lock](engine/requirements.lock)，用于恢复相同依赖，不含许可凭据；RQAlpha 6.4.1／NumPy 1.26.4／PyArrow 17.0.0 与主环境分离。运行锁和原探查消费路径保留；主环境仍用 `quant/requirements.lock`。本次只保全锁和执行两环境 `pip check`，不安装或升级依赖。
 
-引擎入口为 `quant/engine/runner.py`，使用本地 bundle、制度解析与次日开盘撮合。已证范围包括 T+1、开盘涨跌停保守拒绝、价格步长、申报数量、容量和历史显式费用；滑点进入成交价，现金不重复扣滑点，gross_nav 仅加回显式费用。分红／送转按登记、除息、实际到账及可卖日期消费，差别化股息税、退出受阻和未知处置保留轨迹。真实 RQAlpha 合成账本见 `test_backtest_account.py` 及上述软件实现记录；这不表示支持所有行动类型或真实来源资格齐备。
+引擎入口为 `quant/engine/runner.py`，使用本地 bundle、制度解析与次日开盘撮合。已证范围包括 T+1、开盘涨跌停保守拒绝、价格步长、申报数量、容量和历史显式费用；申报与撮合共用可核验的除权参考价，账户行情保持原价，未知参考拒单并登记limited；滑点进入成交价，现金不重复扣滑点，gross_nav 仅加回显式费用。分红／送转按登记、除息、实际到账及可卖日期消费，差别化股息税、退出受阻和未知处置保留轨迹。真实 RQAlpha 合成账本见 `test_backtest_account.py` 及上述软件实现记录；这不表示支持所有行动类型或真实来源资格齐备。
 
 ## 测试
 

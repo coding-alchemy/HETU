@@ -32,7 +32,6 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
-import math
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -149,6 +148,7 @@ def _execute_with_rqalpha(
     module = importlib.util.module_from_spec(spec)
     sys.modules.setdefault("hetu_engine_mod", module)
     spec.loader.exec_module(module)
+    from datasource import LimitReferenceError
     from rules import load_bundle_rules  # 引擎进程旁路导入（quant/engine 在 sys.path）
 
     rules = load_bundle_rules(bundle_dir)
@@ -355,14 +355,19 @@ def _execute_with_rqalpha(
             )
             limit = rules.slippage_price(code, today, price, slippage_rate, buy=side == "BUY")
             env = Environment.get_instance()
-            previous = float(env.data_proxy.get_prev_close(code, env.trading_dt))
-            if not math.isfinite(previous) or previous <= 0:
+            try:
+                reference = env.data_source.limit_reference_price(code, env.trading_dt)
+            except LimitReferenceError as exc:
                 attempt = state["attempts"][-1]
                 attempt["recorded"] = True
                 state["rejected"].append(dict(signal_at=signal_day, submitted_at=today, code=code,
-                    side=side, requested_qty=qty, reason="缺前收盘，无法形成合法申报价"))
+                    side=side, requested_qty=qty, reason=str(exc)))
+                state.setdefault("reference_restrictions", []).append((today, code, str(exc)))
                 continue
-            upper, lower = rules.limit_price(previous, rules.limit_pct(code, today), rules.tick_size(code, today))
+            upper, lower = rules.limit_price(reference, rules.limit_pct(code, today), rules.tick_size(code, today))
+            state.setdefault("limit_references", []).append(dict(date=today, code=code,
+                reference_price=reference, upper=upper, lower=lower,
+                source_ref="bundle:daily_bars,corporate_actions"))
             # 申报价限定为合法界内的步长点；Matcher仍校验完整滑点，不截断后假成交。
             limit = min(upper, max(lower, limit))
             order = rq_api.order(code, qty if side == "BUY" else -qty, style=LimitOrder(limit))
@@ -431,7 +436,7 @@ def _execute_with_rqalpha(
     rqalpha.run_func(config=config, init=init, before_trading=before_trading, after_trading=after_trading)
     from position import HetuStockPosition
 
-    state["restrictions"] = HetuStockPosition.restrictions
+    state["restrictions"] = HetuStockPosition.restrictions + state.get("reference_restrictions", [])
     state["disposition_events"] = HetuStockPosition.disposition_events
     if state.get("implicit_targets"):
         signals = pd.concat([signals, pd.DataFrame(state["implicit_targets"])], ignore_index=True)
@@ -587,8 +592,11 @@ def _write_outputs(
             columns=TABLE_COLUMNS["positions"],
         ),
         "exclusions": pd.DataFrame([
-            {"date": day, "code": code, "scope": "account_valuation", "field": "disposal",
-             "reason": reason, "source_ref": "bundle:historical_securities"}
+            {"date": day, "code": code,
+             "scope": "execution" if reason.startswith("limit_reference_unproven") else "account_valuation",
+             "field": "limit_reference_price" if reason.startswith("limit_reference_unproven") else "disposal",
+             "reason": reason, "source_ref": "bundle:daily_bars,corporate_actions"
+             if reason.startswith("limit_reference_unproven") else "bundle:historical_securities"}
             for day, code, reason in state.get("restrictions", [])
         ], columns=TABLE_COLUMNS["exclusions"]),
         "costs": pd.DataFrame(cost_rows, columns=TABLE_COLUMNS["costs"]),
@@ -640,6 +648,7 @@ def _write_outputs(
         "status": "limited" if state.get("restrictions") else "complete",
         "limitations": [reason for _day, _code, reason in state.get("restrictions", [])],
         "disposition_events": state.get("disposition_events", []),
+        "limit_references": state.get("limit_references", []),
         "submitted_prices": [dict(code=str(record["order"].order_book_id),
                                   date=record["submitted_at"], price=float(record["order"].price))
                              for record in state["orders"]],

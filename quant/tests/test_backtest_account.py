@@ -701,3 +701,83 @@ def test_slippage_uses_applicable_rule_tick(tmp_path):
     assert tables['trades'].stamp_tax.sum() == pytest.approx(4.975)
     assert tables['cash'].iloc[-1].cash_available == pytest.approx(9935.025, abs=.01)
     assert tables['nav'].iloc[-1].gross_nav == pytest.approx(9950, abs=.01)
+
+
+@ADMITTED
+def test_ex_dividend_open_limit_buy_is_rejected(tmp_path):
+    case = make_backtest_case("execution_clocks", "ex_dividend_buy")
+    bars = case["tables"]["daily_bars"]
+    bars.loc[bars.date == EL[2], ["open_raw", "high_raw", "low_raw", "close_raw"]] = 9.90
+    out = _run_case(tmp_path, "ex-dividend-limit-buy", case)
+    tables = _tables(out)
+    assert tables["trades"].empty
+    order = tables["orders"].iloc[0]
+    assert order.status == "REJECTED" and "开盘涨停" in order.reason
+    assert tables["cash"].iloc[-1].cash_available == 10000
+    audit = json.loads((out / "backtest.json").read_text())
+    reference = audit["limit_references"][0]
+    assert (reference["reference_price"], reference["upper"], reference["lower"]) == pytest.approx((9, 9.9, 8.1))
+    assert audit["submitted_prices"][0]["price"] == pytest.approx(9.90)
+
+
+@ADMITTED
+def test_ex_dividend_raw_previous_close_is_not_a_down_limit(tmp_path):
+    out = _run_case(tmp_path, "ex-dividend-sell", make_backtest_case("execution_clocks", "ex_dividend_sell"))
+    tables = _tables(out)
+    assert tables["trades"].side.tolist() == ["BUY", "SELL"]
+    sell = tables["trades"].iloc[-1]
+    assert sell.executed_at == EL[2] and sell.price_raw == 9 and sell.execution_price == 9
+    assert sell.qty == 500
+    assert tables["cash"].query("date == @EL[2]").iloc[0].receivable == 500
+    assert tables["cash"].iloc[-1].cash_available == pytest.approx(9985.5, abs=.01)
+    assert tables["nav"].iloc[-1].net_nav == pytest.approx(9985.5, abs=.01)
+
+
+@ADMITTED
+@pytest.mark.parametrize("variant", ["ex_dividend_unknown_cash", "ex_dividend_missing_previous"])
+def test_unproven_limit_reference_rejects_and_limits_account(tmp_path, variant):
+    out = _run_case(tmp_path, variant, make_backtest_case("execution_clocks", variant))
+    tables = _tables(out)
+    assert tables["trades"].empty
+    audit = json.loads((out / "backtest.json").read_text())
+    assert audit["status"] == "limited"
+    assert any("limit_reference_unproven" in reason for reason in audit["limitations"])
+    assert tables["orders"].reason.str.contains("limit_reference_unproven").all()
+    exclusions = pd.read_parquet(out / "exclusions.parquet")
+    assert "limit_reference_price" in exclusions.field.tolist()
+    assert tables["cash"].iloc[-1].cash_available == 10000
+
+
+@ADMITTED
+def test_ex_dividend_legal_slippage_keeps_account_prices_raw(tmp_path):
+    case = make_backtest_case("execution_clocks", "ex_dividend_buy")
+    case["definition"]["protocol"]["costs"]["slippage_rate"] = .001
+    bars = case["tables"]["daily_bars"]
+    bars.loc[bars.date == EL[2], ["open_raw", "high_raw"]] = 9.81
+    out = _run_case(tmp_path, "ex-dividend-slippage", case)
+    tables = _tables(out)
+    trade = tables["trades"].iloc[0]
+    assert trade.price_raw == pytest.approx(9.81) and trade.execution_price == pytest.approx(9.82)
+    assert trade.slippage_cost == pytest.approx(5)
+    assert tables["cash"].iloc[-1].cash_available == pytest.approx(5085, abs=.01)
+    assert tables["positions"].iloc[-1].price_raw == 9
+    assert tables["nav"].iloc[-1].gross_nav - tables["nav"].iloc[-1].net_nav == pytest.approx(5, abs=.01)
+
+
+@ADMITTED
+@pytest.mark.parametrize(("with_cash", "opening", "reference"), [(False, 5.5, 5), (True, 4.95, 4.5)])
+def test_ex_rights_limit_consumes_production_share_ratio(tmp_path, with_cash, opening, reference):
+    case = _production_action_case()
+    if not with_cash:
+        actions = case["tables"]["corporate_actions"]
+        case["tables"]["corporate_actions"] = actions[actions.action_type == "bonus_split"]
+    case["signals"] = [dict(signal_at=EL[1], executable_from=EL[2],
+                            code="SYN_A.SZ", target_weight=.5)]
+    bars = case["tables"]["daily_bars"]
+    bars.loc[bars.date == EL[2], ["open_raw", "high_raw", "low_raw", "close_raw"]] = opening
+    out = _run_case(tmp_path, f"ex-rights-production-{with_cash}", case)
+    assert _tables(out)["trades"].empty
+    orders = _tables(out)["orders"]
+    assert len(orders) == 1 and "开盘涨停" in orders.iloc[0].reason
+    audit = json.loads((out / "backtest.json").read_text())
+    assert audit["limit_references"][0]["reference_price"] == pytest.approx(reference)

@@ -22,7 +22,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 from rqalpha.const import INSTRUMENT_TYPE, SIDE
 from rqalpha.interface import (
     AbstractMod,
@@ -36,11 +35,11 @@ from rqalpha.mod.rqalpha_mod_sys_transaction_cost.deciders import (
 )
 
 try:  # 包内导入（测试）与脚本旁路导入（runner 以文件路径加载本模块）均可
-    from .datasource import LocalBundleDataSource
+    from .datasource import LimitReferenceError, LocalBundleDataSource
     from .position import HetuStockPosition
     from .rules import BundleRules, load_bundle_rules
 except ImportError:  # pragma: no cover - 取决于加载方式
-    from datasource import LocalBundleDataSource  # type: ignore[no-redef]
+    from datasource import LimitReferenceError, LocalBundleDataSource  # type: ignore[no-redef]
     from position import HetuStockPosition  # type: ignore[no-redef]
     from rules import BundleRules, load_bundle_rules  # type: ignore[no-redef]
 
@@ -49,8 +48,8 @@ class NextOpenBarMatcher(DefaultBarMatcher):
     """普通股日线撮合：开盘加滑点，按不利方向取整；开盘不利限制价或滑点越界拒绝。
 
     涨停价开盘（开盘价 ≥ 涨停价）拒绝买入；跌停价开盘（开盘价 ≤ 跌停价）
-    拒绝卖出。涨停价／跌停价按 trading_rules limit_rule 与前一交易日原价
-    收盘计算（0.01 元最小变动单位四舍五入）。成交量限制沿用 sys_simulation
+    拒绝卖出。涨停价／跌停价按 trading_rules limit_rule 与可核验的当日除权
+    参考价计算（按适用步长四舍五入），未知参考价拒绝。成交量限制沿用 sys_simulation
     配置（volume_limit/volume_percent）。
     """
 
@@ -67,13 +66,12 @@ class NextOpenBarMatcher(DefaultBarMatcher):
         day = self._env.trading_dt.date().isoformat()
         pct = self._rules.limit_pct(instrument.order_book_id, day)
         try:
-            prev_close = float(self._env.data_proxy.get_prev_close(instrument.order_book_id, self._env.trading_dt))
-        except (TypeError, ValueError, KeyError):
-            prev_close = float("nan")
-        if not np.isfinite(prev_close) or prev_close <= 0:
-            raise OrderRejected(f"{instrument.order_book_id}: 缺前一交易日收盘，无法核验涨跌幅限制")
+            reference = self._env.data_source.limit_reference_price(
+                instrument.order_book_id, self._env.trading_dt)
+        except LimitReferenceError as exc:
+            raise OrderRejected(str(exc)) from exc
         limit_up, limit_down = self._rules.limit_price(
-            prev_close, pct, self._rules.tick_size(instrument.order_book_id, day))
+            reference, pct, self._rules.tick_size(instrument.order_book_id, day))
         if order.side == SIDE.BUY and deal_price >= limit_up - 1e-9:
             raise OrderRejected(
                 f"{instrument.order_book_id}: 开盘涨停（{deal_price} ≥ 涨停价 {limit_up}），买入保守拒绝"

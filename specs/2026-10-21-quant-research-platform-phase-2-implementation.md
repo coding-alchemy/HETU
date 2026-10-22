@@ -1,15 +1,15 @@
 # HETU 量化研究平台新二期实现与限定验收
 
-> 文档版本：v1.0
-> 文档状态：软件限定验收及一次独立只读评审通过；提交事实由包含本记录的收口提交及清单核对确认
-> 创建／修订日期：2026-10-21
+> 文档版本：v1.1
+> 文档状态：除权参考价P1及非阻断材料修正均已通过复评；本次提交事实由两次Git提交与本地提交记录核对确认，历史记录保留
+> 创建日期：2026-10-21；修订日期：2026-10-22
 > 适用范围：现有软件独立收口；不代表原二期整体、真实数据、真实研究或经济目标通过
 > 权威依据：[总需求](2026-10-13-quant-research-platform-requirements.md)、[总方案 §15](2026-10-13-quant-research-platform-design.md#15-五期交付与重组映射)、[新二期设计](2026-10-21-quant-research-platform-phase-2-design.md)
 > 使用入口：[quant/README.md](../quant/README.md)；本地执行清单：[manifest.json](../.hetu/quant/acceptance/phase2-closeout-20261021/manifest.json)
 
 ## 1. 范围
 
-用户本次明确启动已批准01→02→03，授权必要修复、验证、可恢复清理及当前分支提交；不逐单元重新报批。基线分支为 `zn_quant`，HEAD 为 `058cdc01cae28f2f921a076c0be92c7e135628db`，暂存区为空。初始未提交内容、逐文件原字节及哈希见本地清单。其他工作不覆盖，不切分支、不用worktree、不推送。
+用户于2026-10-21明确启动已批准01→02→03，授权必要修复、验证、可恢复清理及当前分支提交；不逐单元重新报批。基线分支为 `zn_quant`，HEAD 为 `058cdc01cae28f2f921a076c0be92c7e135628db`，暂存区为空。初始未提交内容、逐文件原字节及哈希见本地清单。其他工作不覆盖，不切分支、不用worktree、不推送。
 
 保持普通现金多头、不加杠杆、沪深普通股（含创业板／科创板）、日线估值及周／月机制；低波动正式研究仍为月频、36月、ddof=1、最低十分位、市值权重，至少10只是信号条件而非缩小原历史池的许可。研究区间2019-11-01..2026-10-13、30／42月邻域、100万元、原成本及八次预算不变。`phase2-protocol.json` 原字节和研究身份保留。
 
@@ -31,7 +31,7 @@
 
 上表未写目录的生产模块在 `quant/src/hetu_quant/`，测试在 `quant/tests/`。旧全量有失败时保留原数字及失败项复验，不改写为新的全量全绿：D/P全量342 passed／4 failed／0 skipped，四个材料缺池事实修正后单独4 passed；之后尾部直接回归63 passed。后续数据修复按其各自直接回归复用。
 
-支持边界：现金分红、生产m＝新／原股数的送转、登记权益／实际到账／新增股可卖、获批2015-09-08后差别化股息税和具证现金退出已有合成真实引擎验证；不承诺配股、跨证券换股、任意税制或所有公司行动。缺退出证据保留持仓及估值限制，不按末价返现。除权限制价格参考目前仍依赖合格输入和既有适配边界，不能把原始前收当作所有除权日的合法参考；真实来源／实际事件须按三、四期补核，不宣称全部支持。
+支持边界：现金分红、生产m＝新／原股数的送转、登记权益／实际到账／新增股可卖、获批2015-09-08后差别化股息税和具证现金退出已有合成真实引擎验证；不承诺配股、跨证券换股、任意税制或所有公司行动。缺退出证据保留持仓及估值限制，不按末价返现。2026-10-22复评确认：原始前收不能作为除权日限制价参考，这是本期软件消费错误，不能转交三、四期代替修复。现申报与撮合共用 `LocalBundleDataSource.limit_reference_price`：按已核验现金分红／送转事实计算 `(原前收−每原股现金)/新原股数比`，上下限按适用步长取整，账户行情保持原价；缺前收、行动金额／比例未知或组合无法证明时拒单并登记执行限制。其他未支持行动／真实来源字段仍按原交接处理，不宣称全部支持。
 
 周／月机制仅对透明 `universe_vw`、warmup0按完整周期末生成真实共同信号并进入真实引擎，经济状态not_evaluated；低波动正式研究保持原月频方法。合成证券／免费事实证明软件，不代表真实研究或原论文收益。
 
@@ -80,23 +80,53 @@
 
 | 编号 | 当前结论／直接依据 |
 | --- | --- |
-| N2-1 | 行为证据通过；§2五条软件线均有直接断言、许可／隔离真实引擎、资格不足拒绝与原始失败可回源；复用有效证据 |
+| N2-1 | 经2026-10-22 P1补修及直接回归后软件行为通过；原2026-10-21“全部通过”遗漏除权日成交反例，不能以数据阶段补核代替；本次证据和受限行为见§5.1 |
 | N2-2 | 行为证据通过；正式网页／worker／实际进程取消／找回／同产物导出及Notebook已证，无LLM必需依赖；本轮只读复核原合成产物 |
 | N2-3 | 交接与保护通过；§3覆盖原未完项及总方案§15.2–§15.3；13旧成果、483父文件、5项冻结／台账控制均与原依据一致，真实研究仍0/8 |
 | N2-4 | 必要工程检查通过；README更正、锁原字节复制、两环境pip check、ruff、空白／链接／保护及旧计划恢复核对通过；最终计划恢复及提交允许表由本地manifest逐文件核对；无环境、raw或凭据混入 |
-| N2-5 | 提交事实由包含本记录的收口提交与清单核对确认，SHA见Git历史／本地commit-result.json；不在文档预填自身SHA |
+| N2-5 | 原软件收口61文件提交 `6ec2701daac8fad2ce979c1dafab3b31425684a3` 保持；2026-10-22按用户要求先单独提交理论报告，再提交P1补修及记录。修复提交事实由包含本修订的Git提交和清单核对确认，SHA见Git历史／本地commit-result.json |
 
 本轮新验证与复用分别记录于本节，详细日志留本地收口目录；不重新生成一期榜单或真实资格／研究。只对确认新增／失败／直接影响行为补验，核心真实引擎不以mock／skip替代。
 
-本轮没有确认需改动的生产行为缺陷；43个Python文件在独立评审时均与盘点原字节相同。随后首次完整暂存空白门禁发现 `backtest_data.py`、`backtest_cases.py` 的EOF额外空行，仅移除该空行并逐文件核对AST相同，未改变行为；[空白修正核对](../.hetu/quant/acceptance/phase2-closeout-20261021/eof-whitespace-check.json)及原失败日志保留。不编造行为红灯或重跑已通过量化套件。实际新检查：两环境 `python -m pip check` 均为 `No broken requirements found`（仅不可写pip缓存提示，未联网／安装）；`quant/.venv/bin/python -m ruff check quant` 为 `All checks passed!`。源引擎锁与运行锁均为SHA256 `2d000cae39ededadc7c7d8b6a35475c16afd5e28a02e890b9fb34b6f81ac7688`。
+2026-10-21收口时没有确认需改动的生产行为缺陷；43个Python文件在当时独立评审时均与盘点原字节相同（2026-10-22发现的P1及修复见§5.1）。随后首次完整暂存空白门禁发现 `backtest_data.py`、`backtest_cases.py` 的EOF额外空行，仅移除该空行并逐文件核对AST相同，未改变行为；[空白修正核对](../.hetu/quant/acceptance/phase2-closeout-20261021/eof-whitespace-check.json)及原失败日志保留。不编造行为红灯或重跑已通过量化套件。实际新检查：两环境 `python -m pip check` 均为 `No broken requirements found`（仅不可写pip缓存提示，未联网／安装）；`quant/.venv/bin/python -m ruff check quant` 为 `All checks passed!`。源引擎锁与运行锁均为SHA256 `2d000cae39ededadc7c7d8b6a35475c16afd5e28a02e890b9fb34b6f81ac7688`。
 
 [只读证据核对](../.hetu/quant/acceptance/phase2-closeout-20261021/evidence-readback.json)验证两份原合成发布记录、九表ZIP／Parquet原字节一致及Notebook无执行输出，未执行第二次模拟或导出。[保护检查](../.hetu/quant/acceptance/phase2-closeout-20261021/protection.json)及[相对路径／锚点检查](../.hetu/quant/acceptance/phase2-closeout-20261021/relative-links.json)可回源；总索引五条其他任务旧本地归档缺失单列，不冒称整仓无断链。
 
-按 `requesting-code-review` 组织的[一次独立只读评审](../.hetu/quant/acceptance/phase2-closeout-20261021/independent-review.json)通过，无阻断；独立重算13／483／5项保护、核对评审当时43个Python文件原字节与合成产物和断言；之后两处EOF空白修正由主会话核对AST及受影响ruff，未增开全面复评。唯一非阻断为总方案页首状态落后，已随现行状态更正。未重开后期数据／经济目标或全面扫描旧软件。最终恢复、链接／空白及暂存允许表核对见manifest和检查日志；本记录只有被实际收口提交包含后才证明N2-5。
+2026-10-21按 `requesting-code-review` 组织的[一次独立只读评审](../.hetu/quant/acceptance/phase2-closeout-20261021/independent-review.json)通过，无阻断；独立重算13／483／5项保护、核对评审当时43个Python文件原字节与合成产物和断言；之后两处EOF空白修正由主会话核对AST及受影响ruff，未增开全面复评。唯一非阻断为总方案页首状态落后，已随现行状态更正。未重开后期数据／经济目标或全面扫描旧软件。最终恢复、链接／空白及暂存允许表核对见manifest和检查日志；本记录只有被实际收口提交包含后才证明N2-5。
+
+### 5.1 2026-10-22：除权日限制参考价P1补修
+
+采用 `receiving-code-review` 核实反馈、`systematic-debugging` 定位真实消费路径、`karpathy-guidelines` 限定修改，并先运行真实RQAlpha合成账户反例。原始红灯为4 failed／1 passed：现金分红1元后，9.90元买入被误放行，9元卖出被误拒；缺金额和缺前收证明仍被交易。合法区间滑点账本原先已通过，不将其写成红灯。
+
+根因是RQAlpha通过 `history_bars(adjust_type="pre", adjust_orig=当日)` 请求前收，而本地适配器保留原价；申报和撮合误把这个值用于除权日价格限制。最小修复没有改动账户bar或实现通用复权：增加限制价专用参考入口，两侧统一消费；只使用前一交易日原收及当日已核验行动，不用成交日收盘／高低价。`m` 保持生产新／原股数比；单一送转及现金加送转已验证，同日多送转关系未证明时明确拒绝。
+
+未知参考记录为 `limit_reference_unproven`，拒单、`exclusions.field=limit_reference_price`、引擎manifest限制及生产发布限制一致；沿用共同发布逻辑阻止经济评价。已证完整日期／查询覆盖仍是输入前提，不把计算公式升级为真实数据资格。
+
+| 直接行为 | 实际证据 |
+| --- | --- |
+| 前收10、每股派1，参考9、上下限9.90／8.10；开盘9.90拒买、9元正常卖出 | `test_ex_dividend_open_limit_buy_is_rejected`、`test_ex_dividend_raw_previous_close_is_not_a_down_limit`；真实引擎申报轨迹及独立现金9985.50元核对 |
+| 缺现金金额或前一交易日收盘证明不得回落原前收 | `test_unproven_limit_reference_rejects_and_limits_account` 两反例均拒单、limited、现金不变 |
+| 生产标准化m=2及现金+送转、非零滑点／原价账本 | `test_ex_rights_limit_consumes_production_share_ratio` 两正例；`test_ex_dividend_legal_slippage_keeps_account_prices_raw` 核对9.81原价／9.82成交、现金5085及毛净差仅显式费用 |
+| 实际导入→prepare→真实引擎→发布与评价 | `test_unproven_ex_reference_reaches_published_evaluation`：limited／blocked／not_evaluated；测试初次误用不含evaluation的读取接口，纠正测试调用后单项通过，保留失败日志 |
+| 普通交易日、开盘涨跌停、滑点／费用及账户事件不回退 | 账户文件43 passed；毛净同轨迹与独立CLI一致性2 passed。连同新增发布测试首轮为45 passed／1 failed（测试读取接口），失败单项复验1 passed；不是一次全套46全绿，不重跑量化全套或真实研究 |
+
+本次[原红灯](../.hetu/quant/acceptance/phase2-ex-rights-fix-20261022/red.log)、[新增反例转绿](../.hetu/quant/acceptance/phase2-ex-rights-fix-20261022/green.log)、[直接回归](../.hetu/quant/acceptance/phase2-ex-rights-fix-20261022/direct-regression.log)、[失败项复验](../.hetu/quant/acceptance/phase2-ex-rights-fix-20261022/published-limit-recheck.log)及[核对记录](../.hetu/quant/acceptance/phase2-ex-rights-fix-20261022/verification.json)独立保存。历史收口清单／提交、失败、评审与归档原文不改写；2026-10-21 N2-1的过宽表述由本节纠正，其他有效验证保持原范围。本轮未另写设计／计划，未恢复采集或执行真实研究，研究预算仍0/8；补修复验时保留在 `zn_quant` 工作区，尚未提交／推送，理论报告修改保持原样；后续提交见§5.2。
+
+
+2026-10-22后续复评确认上轮P1关闭，N2-1修复结论成立；Standards无阻断、Spec无残留。唯一非阻断建议已落实：滑点合成行情同时设置开盘和最高价9.81，保持高价覆盖开收盘，成交9.82仍按模拟滑点形成，不用全天最高价限制开盘模拟。仅复验 `test_ex_dividend_legal_slippage_keeps_account_prices_raw`，真实引擎1 passed／0 skipped；该文件ruff及空白检查通过，生产实现未再改变，不重复账户／管道套件。见[单项日志](../.hetu/quant/acceptance/phase2-ex-rights-fix-20261022/ohlc-fixture-followup.log)与[补充记录](../.hetu/quant/acceptance/phase2-ex-rights-fix-20261022/ohlc-fixture-followup.json)。旧8组合成产物与原验证记录保留；该次单项复验时修复仍未提交；后续提交见§5.2，不因此启动数据接入或真实研究。
+
+
+### 5.2 2026-10-22：安全清理与按顺序分开提交
+
+用户明确要求清理已执行计划／临时中间文件，再先提交理论文档、后提交其余改动。分支继续 `zn_quant`，不切分支、不使用worktree、不推送。原9份计划正文此前已完成交接和可恢复归档；此次只移除遗留空目录，不重新清理其原件或未完项。
+
+清理前逐文件保全并回读核对11个可再生缓存目录内92个文件，随后移除已明确列出的Python字节码、pytest和ruff缓存；路径、原字节哈希与恢复tar见[本次清理清单](../.hetu/quant/acceptance/phase2-submit-20261022/cleanup-manifest.json)。原始响应、市场原件、快照、失败／验证日志、8组合成产物、环境、锁、fixtures和仍有消费者的probe全部保留。没有使用 `git clean`，没有删除数据或研究证据。
+
+两次提交分别只取 `docs/theory/A股量化数据方案评估报告.md` 的既有供应商核查增补，以及本次其余8个文件的除权参考价修复、测试和现行记录；不混入本地运行资产。完整暂存差异与允许表分别核对，实际SHA及最终工作区状态记录在本地 `.hetu/quant/acceptance/phase2-submit-20261022/commit-result.json`，源码不嵌入自身SHA或回填一次额外提交。复用已通过的账户43项、管道3项分批证据及OHLC单项复验，不重刷全套或研究；本次只补工程、链接、恢复及提交核对。
 
 ## 6. 提交范围与残留
 
-提交允许表以manifest逐文件项为准：现有软件、稳定测试、产品配置、候选／原协议、Notebook、使用说明、现行实现及重组依据。原始数据、环境、凭据、验收运行资产不进入源码提交；三至五期待审设计作为交接依据保留其待审标签。理论报告额外修改保持未提交。
+提交允许表以manifest逐文件项为准：现有软件、稳定测试、产品配置、候选／原协议、Notebook、使用说明、现行实现及重组依据。原始数据、环境、凭据、验收运行资产不进入源码提交；三至五期待审设计作为交接依据保留其待审标签。理论报告在2026-10-21原收口中未提交，2026-10-22按用户新指令先单独提交；本次修复随后单独提交，具体范围见§5.2。
 
 实际提交前核对允许表与完整暂存差异，无他人暂存内容混入。N2-5提交事实由包含本记录的收口提交与清单核对确认，SHA见Git历史／本地 `commit-result.json`，不在源码文档嵌入自身SHA或为回填再提交。
 
