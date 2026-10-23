@@ -1,0 +1,1034 @@
+{
+  "CM01/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T01"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F02"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM02/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T02"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F02"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM02/main/02": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T02B"
+      ]
+    ],
+    "material": [],
+    "assets": [],
+    "context": "continue",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM03/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T03"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F05"
+      ],
+      [
+        "inputs/facts.md",
+        "F06"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM03/missing/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T03"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F06"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM04/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T04"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F07"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM05/readonly/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T05"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM05/save-failure/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T05"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM06/excluded/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T06"
+      ]
+    ],
+    "material": [],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM06/ambiguous/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T06B"
+      ]
+    ],
+    "material": [],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM07/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T07"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F08"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM07/main/02": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T07B"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F09"
+      ]
+    ],
+    "assets": [],
+    "context": "continue",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM07/declined/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T07C"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F08"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM08/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T08"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F02"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F10"
+      ],
+      [
+        "inputs/facts.md",
+        "F11"
+      ],
+      [
+        "inputs/facts.md",
+        "F12"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM08/limited/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T00"
+      ],
+      [
+        "inputs/tasks.md",
+        "T08L"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F11"
+      ],
+      [
+        "inputs/facts.md",
+        "F13"
+      ],
+      [
+        "inputs/facts.md",
+        "F14"
+      ]
+    ],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM09/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T09"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F15"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/depth_bank_release.txt",
+        "depth_bank_release.txt"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM10/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T01"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F10"
+      ],
+      [
+        "inputs/facts.md",
+        "F16"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/public-library.md",
+        "library.md"
+      ],
+      [
+        "assets/public-research-index.html",
+        "r210.html"
+      ],
+      [
+        "assets/closed-publication.txt",
+        "r211.html"
+      ],
+      [
+        "assets/public-netfin.html",
+        "r212.html"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM10/restricted/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T02"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F16"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/public-library.md",
+        "library.md"
+      ],
+      [
+        "assets/public-research-index.html",
+        "r210.html"
+      ],
+      [
+        "assets/closed-publication.txt",
+        "r211.html"
+      ],
+      [
+        "assets/closed-publication.txt",
+        "r212.html"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM11/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T11"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F10"
+      ],
+      [
+        "inputs/facts.md",
+        "F11"
+      ],
+      [
+        "inputs/facts.md",
+        "F12"
+      ],
+      [
+        "inputs/facts.md",
+        "F16"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/transmission-library.md",
+        "library.md"
+      ],
+      [
+        "assets/transmission-policy.md",
+        "m320.md"
+      ],
+      [
+        "assets/public-netfin.html",
+        "r212.html"
+      ],
+      [
+        "assets/transmission-release.md",
+        "m310.md"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM11/limited/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T11L"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F01"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F10"
+      ],
+      [
+        "inputs/facts.md",
+        "F16"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/transmission-library.md",
+        "library.md"
+      ],
+      [
+        "assets/transmission-policy.md",
+        "m320.md"
+      ],
+      [
+        "assets/public-netfin.html",
+        "r212.html"
+      ],
+      [
+        "assets/transmission-limited.md",
+        "m310.md"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM11/scope/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T11S"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F10"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/transmission-library.md",
+        "library.md"
+      ],
+      [
+        "assets/transmission-policy.md",
+        "m320.md"
+      ],
+      [
+        "assets/public-netfin.html",
+        "r212.html"
+      ],
+      [
+        "assets/transmission-release.md",
+        "m310.md"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM12/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T12"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F17"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F10"
+      ],
+      [
+        "inputs/facts.md",
+        "F11"
+      ],
+      [
+        "inputs/facts.md",
+        "F12"
+      ],
+      [
+        "inputs/facts.md",
+        "F16"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/integration-library.md",
+        "library.md"
+      ],
+      [
+        "assets/integration-release.md",
+        "m410.md"
+      ],
+      [
+        "assets/integration-policy.md",
+        "m420.md"
+      ],
+      [
+        "assets/integration-gdp-index.md",
+        "m430.md"
+      ],
+      [
+        "assets/integration-gdp-archive.md",
+        "m431.md"
+      ],
+      [
+        "assets/transmission-policy.md",
+        "m320.md"
+      ],
+      [
+        "assets/public-netfin.html",
+        "r212.html"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM12/limited/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T12L"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F17"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F10"
+      ],
+      [
+        "inputs/facts.md",
+        "F11"
+      ],
+      [
+        "inputs/facts.md",
+        "F12"
+      ],
+      [
+        "inputs/facts.md",
+        "F16"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/integration-library.md",
+        "library.md"
+      ],
+      [
+        "assets/integration-limited.md",
+        "m410.md"
+      ],
+      [
+        "assets/integration-policy-limited.md",
+        "m420.md"
+      ],
+      [
+        "assets/integration-gdp-index.md",
+        "m430.md"
+      ],
+      [
+        "assets/integration-gdp-archive.md",
+        "m431.md"
+      ],
+      [
+        "assets/transmission-policy.md",
+        "m320.md"
+      ],
+      [
+        "assets/public-netfin.html",
+        "r212.html"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM12/scope/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T12S"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "F17"
+      ],
+      [
+        "inputs/facts.md",
+        "F03"
+      ],
+      [
+        "inputs/facts.md",
+        "F04"
+      ],
+      [
+        "inputs/facts.md",
+        "F10"
+      ],
+      [
+        "inputs/facts.md",
+        "F11"
+      ],
+      [
+        "inputs/facts.md",
+        "F12"
+      ],
+      [
+        "inputs/facts.md",
+        "F16"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/integration-library.md",
+        "library.md"
+      ],
+      [
+        "assets/integration-release.md",
+        "m410.md"
+      ],
+      [
+        "assets/integration-policy.md",
+        "m420.md"
+      ],
+      [
+        "assets/integration-gdp-index.md",
+        "m430.md"
+      ],
+      [
+        "assets/integration-gdp-archive.md",
+        "m431.md"
+      ],
+      [
+        "assets/transmission-policy.md",
+        "m320.md"
+      ],
+      [
+        "assets/public-netfin.html",
+        "r212.html"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+08:00"
+    ]
+  },
+  "CM13/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T13"
+      ]
+    ],
+    "material": [],
+    "context": "new",
+    "as_of": [
+      "2026-11-20T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "assets/history-library.md",
+        "library.md"
+      ],
+      [
+        "assets/history-notes.md",
+        "m500.md"
+      ],
+      [
+        "assets/history-monthly.csv",
+        "m510.csv"
+      ],
+      [
+        "assets/history-quarterly.csv",
+        "m520.csv"
+      ],
+      [
+        "assets/history-annual.csv",
+        "m530.csv"
+      ],
+      [
+        "assets/history-debt-policy.md",
+        "m540.md"
+      ],
+      [
+        "assets/history-debt-execution.md",
+        "m550.md"
+      ]
+    ]
+  },
+  "CM13/limited/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T10"
+      ],
+      [
+        "inputs/tasks.md",
+        "T13L"
+      ]
+    ],
+    "material": [],
+    "context": "new",
+    "as_of": [
+      "2026-11-20T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "assets/history-library.md",
+        "library.md"
+      ],
+      [
+        "assets/history-notes.md",
+        "m500.md"
+      ],
+      [
+        "assets/history-monthly-limited.csv",
+        "m510.csv"
+      ],
+      [
+        "assets/history-quarterly.csv",
+        "m520.csv"
+      ],
+      [
+        "assets/history-annual.csv",
+        "m530.csv"
+      ],
+      [
+        "assets/history-debt-policy.md",
+        "m540.md"
+      ],
+      [
+        "assets/history-debt-execution.md",
+        "m550.md"
+      ]
+    ]
+  }
+}
