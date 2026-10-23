@@ -71,13 +71,20 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 
 ## 当前执行计划
 
-当前没有待执行的成本优化计划。已完成分析与实验从下方成果和历史回源入口查阅；
-后续优化需重新明确具体范围，不把已完成计划当作新执行授权。
+当前没有继续执行中的计划。中国宏观历史数据对照与跨年化债的执行及授权增量补证已收尾，
+部分数据覆盖仍未满足；[结果、剩余缺口及清理回源](#china-macro-history-closeout)保留原结论。
+
+中国宏观证据采用与季度判断01／02已通过，03已按次数边界结束，
+LIVE04整体验收未通过；计划原文退出工作区，未完成命题继续保留。
+[本轮结果及清理回源](#china-macro-evidence-integration-closeout)不是新的研究授权。
 
 ## 已完成功能与验收
 
 | 范围 | 结果与现行入口 |
 |---|---|
+| 中国宏观 Skill 传导分析完善 | 四文件、21个材料选择，D1–D4按批准范围验收；CM11三项首次通过，公司股票分析0次；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-transmission-analysis/acceptance.md)及[计划清理回源](#china-macro-transmission-closeout)，旧通过结果及真实资料限制保持 |
+| 中国宏观 Skill 研究深度完善 | 四文件、16个材料选择及V1–V6按批准范围验收；CM09边界失败最小复验、官方日收盘补证已关闭；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-research-depth/acceptance.md)及[计划清理回源](#china-macro-depth-closeout)，旧宏观验收与更强命题限制继续有效 |
+| 中国宏观基本面 Agent Skill | 01–06按已批准范围验收，四文件、13个材料选择及LIVE01–03/HIST01原件保留；[使用说明](../../docs/china-macro-skill-usage.md)、[首版验收](../../.hetu/validation/china-macro-fundamentals/acceptance.md)、[补齐验收](../../.hetu/validation/china-macro-fundamentals/completion/acceptance.md)；已完成计划见[清理回源](#china-macro-closeout)，更强全量命题与工具限制仍适用 |
 | 安装维护与旧成果 | 已交付，[实现与安全边界](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-foundation) |
 | 任务控制恢复与资料复用 | 十二条功能闭环，M2-6 组合补证、历史用量对账与预算方法已通过；[行为与证据](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-middle) |
 | 上下文、正式并行与三项优化 | 规则已交付，R1 开关传递问题已关闭；[行为与限制](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-execution) |
@@ -239,6 +246,69 @@ G2从未启动，未执行项不记通过。用户最新确认同等效果后，
 本次仅退役未推广的候选实现，保留旧M1–M5及新增的现行检查调用负例。负结果未改判为
 优化成功；完整最终共同投入和费用限制继续保留，未来方向不自动执行。
 
+<a id="china-macro-closeout"></a>
+
+### 中国宏观 Skill 计划与临时资料清理
+
+2026-10-18 按用户清理并提交工作区的明确授权，移除已完成的
+china-macro-fundamentals/README.md及01–06六份阶段计划，共7份。
+它们此前未提交，删除前将原字节保存至[可恢复归档](../../.hetu/validation/china-macro-fundamentals/closeout-20261018/README.md)，逐份校验大小和SHA-256。
+
+当前使用、来源方法、验收与限制由[使用说明](../../docs/china-macro-skill-usage.md)、
+[首版验收](../../.hetu/validation/china-macro-fundamentals/acceptance.md)及
+[04–06验收](../../.hetu/validation/china-macro-fundamentals/completion/acceptance.md)维护。
+旧记录中的计划路径/章节号指归档原文，不是当前待执行入口；原始研究、失败、修复与有效结果保留。
+全平台融资、实际支付、银行分布及完整即时定价等未证命题未因清理改判，也不触发已通过研究重跑。
+
+同时移除本任务23个临时工作区、408份临时脚本/schema及5个项目生成缓存目录。
+同份原件复用和其余文件的归档去向均在清理记录中；原workspace.path作为历史定位保留。
+四文件Skill、13个材料选择、构造器/消费者及其他未完成规格不删除，不修改事实或评分。
+
+<a id="china-macro-depth-closeout"></a>
+
+### 中国宏观研究深度已完成计划与临时文件清理
+
+2026-10-19 按用户明确授权，移除china-macro-research-depth路线图及01–03三份阶段计划，
+共4份未提交原文；先保存并逐字节核对[可恢复归档](../../.hetu/validation/china-macro-research-depth/closeout-20261019/README.md)。
+当前设计、四文件、16个材料选择、构造器及消费者保留，完成依据见[本轮验收](../../.hetu/validation/china-macro-research-depth/acceptance.md)。
+
+清理4个完成研究的临时工作区，其中38份文件与保留运行记录逐字节一致；另将4份一次性核验脚本／空提取／定位模板归档后移除，清除5个生成缓存目录。
+原始来源、报告、失败、修复、上下文、实际命令及用量均保留；历史计划路径和workspace.path只作当时定位，恢复见归档清单。
+本次不重跑研究或旧验收，不改变事实、评分、来源门及已证范围。用户另行明确授权本次清理后提交当前工作区改动，推送未授权。
+
+<a id="china-macro-transmission-closeout"></a>
+
+### 中国宏观传导分析已完成计划与临时文件清理
+
+2026-10-20 按用户明确授权，移除china-macro-transmission-analysis路线图及01–03三份已完成阶段计划。
+4份计划、4份一次性执行／核验命令及6份起始文档快照共14份原文，删除前已逐字节归档；
+[清理记录、归档与恢复清单](../../.hetu/validation/china-macro-transmission-analysis/closeout-20261020/README.md)可回源。
+
+同时清理5个已完成研究临时工作区，其中65份文件均与保留副本一致，及5个生成缓存目录。
+原始报告、证据、初始消息、权限、实际调用和用量继续保留；原workspace.path只作历史定位。
+清理不重跑研究，不改变事实、评分和已证边界。用户已授权本次清理后提交工作区改动，推送未授权。
+
+<a id="china-macro-evidence-integration-closeout"></a>
+
+### 中国宏观证据采用与季度判断执行收尾清理
+
+2026-10-22按用户清理并提交工作区的明确授权，将路线图及01–03共4份已执行结束的计划
+移出当前入口；原文未提交，删除前与7份一次性临时命令一同逐字节归档。
+[归档、恢复清单和清理记录](../../.hetu/validation/china-macro-evidence-integration/closeout-20261022/README.md)
+保留原计划内容，历史路径及章节号均指归档版本，不表示重新授权执行。
+
+01材料、02规则和三项离线结果通过；原计划共7次研究，LIVE04整体未通过的事实保留。
+后续R2局部修复前未复现、修复后通过，不能量化漏用率改善；原生浏览正文／错误留存仍未证。
+替代连接器在独立上下文的返回留存成立；GDP短专题读取／版本／停止行为通过，数值问题部分回答，
+当前精确基数及完整修订链仍缺，R2复杂联网稳定性不由该专题证明。
+当前依据见[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、
+[总验收](../../.hetu/validation/china-macro-evidence-integration/acceptance.md)及
+[最新增量验收](../../.hetu/validation/china-macro-evidence-integration/alternative-gdp-20261021/acceptance.md)。
+
+同时删除10个已结束的临时工作区，其中160份文件均与保留副本逐字节相同；清理5个生成缓存目录。
+原始报告、失败、输入、Skill快照、消息、工具返回、用量与验收均保留，原workspace.path只作历史定位。
+清理不重跑研究或旧通过项，不改变未完成事实；公司股票分析0次。本次提交已获授权，推送未授权。
+
 ## 新增计划约定
 
 1. 设计文档先按 `specs/YYYY-MM-DD-<topic>-design.md` 创建并获批。
@@ -246,3 +316,23 @@ G2从未启动，未执行项不记通过。用户最新确认同等效果后，
 3. 子目录以 `README.md` 作为路线图，链接回对应设计。
 4. 分阶段文件命名为 `YYYY-MM-DD-NN-<step-title>.md`，按文件名排序即执行顺序。
 5. 每阶段写明准确范围、前置条件、验证命令、停止门和回退边界；不得复用已删除的历史路径。
+
+
+<a id="china-macro-history-closeout"></a>
+
+### 中国宏观历史数据对照与跨年化债执行收尾清理
+
+2026-10-23按用户授权，移除已执行结束的路线图和01编号计划共2份，以及4份一次性材料生成／监测文件；原文未提交，删除前逐字节保存于[归档与恢复清单](../../.hetu/validation/china-macro-history-and-debt-policy/closeout-20261023/README.md)。历史计划路径指归档版本，不是继续执行授权。
+
+[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[四文件Skill](../../skills/hetu-china-macro/SKILL.md)、[使用说明](../../docs/china-macro-skill-usage.md)及26个材料选择保留。原计划4次另授权1次研究累计5次；main的V2局部遗漏、limited复验有效、旧监测偏差及所有原件均保留，不因清理改判或重跑。
+
+[总验收](../../.hetu/validation/china-macro-history-and-debt-policy/acceptance.md)与[最新历史比较补正](../../.hetu/validation/china-macro-history-and-debt-policy/history-comparison-closeout-20261023/acceptance.md)维护实际范围：9条财政序列和跨年判断已证，8月三项同比正文遗漏及法定债12期同比／累计比较已补齐；新世纪正文已核但具体版本截止前公开时间待证，完整信用／城投可比历史和部分执行终点仍未满足。本次仅清理并提交，不新增研究、股票分析或商业操作，推送未授权。
+
+
+### 中国宏观已得数据采用最小修订收尾
+
+2026-10-24按用户授权清理并提交。当前没有新增或待删除的已完成执行计划；本次最小修订直接落实于现行研究规则和报告约定，未另写计划。
+
+[局部验收](../../.hetu/validation/china-macro-evidence-use-20261024/acceptance.md)保留一次独立离线输出的三个行为通过范围；13处验证附件URL注记误配已另存真实取得映射，原输入输出未改，不称来源注记全面通过，也不关闭旧报告的数据缺口。
+
+两份一次性组装／检查脚本归档后移除，计算依据、研究原件和验证记录保留；[清理回源及检查](../../.hetu/validation/china-macro-evidence-use-20261024/closeout-20261024/README.md)可回查。本次未追加研究或行为试跑，推送未授权。

@@ -67,6 +67,8 @@ Agent 使用当前已授权的搜索、浏览或数据工具完成研究，并�
 ## 文档
 
 - [Agent Skill 安装与使用](docs/agent-skill-usage.md)
+- [中国宏观基本面 Skill 使用说明](docs/china-macro-skill-usage.md)
+- [中国宏观基本面实现与验收边界](specs/2026-10-24-china-macro-fundamentals-implementation.md)
 - [授权数据源配置示例](config/data_sources.example.yaml)
 - [版本日志](CHANGELOG.md)
 - [Standard 成本分析与优化经验](docs/engineering/standard-token-cost-lessons.md)
