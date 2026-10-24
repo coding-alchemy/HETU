@@ -71,7 +71,9 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 
 ## 当前执行计划
 
-当前没有继续执行中的计划。中国宏观历史数据对照与跨年化债的执行及授权增量补证已收尾，
+全球宏观基本面 Agent Skill 的首版三阶段执行及历史对照／表旁释义增量已收尾；已完成计划退出当前执行入口，见[清理回源与有效边界](#global-macro-closeout)。研究、失败和漏登记修正原件保留，融资细项限制及历史监测例外不因清理消失，不追加运行。
+
+中国宏观历史数据对照与跨年化债的执行及授权增量补证已收尾，
 部分数据覆盖仍未满足；[结果、剩余缺口及清理回源](#china-macro-history-closeout)保留原结论。
 
 中国宏观证据采用与季度判断01／02已通过，03已按次数边界结束，
@@ -82,6 +84,7 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 
 | 范围 | 结果与现行入口 |
 |---|---|
+| 全球宏观基本面 Agent Skill | 独立四文件、十二个材料选择及历史对照/表旁释义；[使用说明](../../docs/global-macro-skill-usage.md)、[首版验收](../../.hetu/validation/global-macro-fundamentals/acceptance.md)、[历史表增量验收](../../.hetu/validation/global-macro-history-tables-20261024/acceptance.md)及[清理回源](#global-macro-closeout)。LIVE01融资细项受限、历史监测例外未豁免，E17为事后补登记 |
 | 中国宏观 Skill 传导分析完善 | 四文件、21个材料选择，D1–D4按批准范围验收；CM11三项首次通过，公司股票分析0次；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-transmission-analysis/acceptance.md)及[计划清理回源](#china-macro-transmission-closeout)，旧通过结果及真实资料限制保持 |
 | 中国宏观 Skill 研究深度完善 | 四文件、16个材料选择及V1–V6按批准范围验收；CM09边界失败最小复验、官方日收盘补证已关闭；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-research-depth/acceptance.md)及[计划清理回源](#china-macro-depth-closeout)，旧宏观验收与更强命题限制继续有效 |
 | 中国宏观基本面 Agent Skill | 01–06按已批准范围验收，四文件、13个材料选择及LIVE01–03/HIST01原件保留；[使用说明](../../docs/china-macro-skill-usage.md)、[首版验收](../../.hetu/validation/china-macro-fundamentals/acceptance.md)、[补齐验收](../../.hetu/validation/china-macro-fundamentals/completion/acceptance.md)；已完成计划见[清理回源](#china-macro-closeout)，更强全量命题与工具限制仍适用 |
@@ -336,3 +339,22 @@ china-macro-fundamentals/README.md及01–06六份阶段计划，共7份。
 [局部验收](../../.hetu/validation/china-macro-evidence-use-20261024/acceptance.md)保留一次独立离线输出的三个行为通过范围；13处验证附件URL注记误配已另存真实取得映射，原输入输出未改，不称来源注记全面通过，也不关闭旧报告的数据缺口。
 
 两份一次性组装／检查脚本归档后移除，计算依据、研究原件和验证记录保留；[清理回源及检查](../../.hetu/validation/china-macro-evidence-use-20261024/closeout-20261024/README.md)可回查。本次未追加研究或行为试跑，推送未授权。
+
+
+<a id="global-macro-closeout"></a>
+
+### 全球宏观已完成计划与临时文件清理
+
+2026-10-24按用户授权，将global-macro-fundamentals路线图及01–03共4份已结束的计划，
+以及21份一次性任务brief、差异/审查载体、交接和协调文件逐份归档后移出工作区；
+[归档、原字节清单及恢复说明](../../.hetu/validation/global-macro-fundamentals/closeout-20261024/README.md)可回查。
+原始派发与差异内容仍在归档中，最终开发/评审报告、研究输出、调用、失败、用量和修正前快照保持。
+另清理4个生成缓存目录，不删除测试材料、构造器或测试代码。
+
+[四文件Skill](../../skills/hetu-global-macro/SKILL.md)、[用户说明](../../docs/global-macro-skill-usage.md)、
+GM01–GM07十二个显式材料选择及两个输入测试文件保留。首版02十项行为成立，LIVE01真实专题路径与受限条件判断已交付；
+日本曲线/美元融资细项及历史监测超60秒例外仍按原范围保留。美国就业原文已取得采用、附录漏记的事实已通过E17事后补登记修正，
+不改写首次模型输出历史。历史对照和表旁释义增量另有3个离线输出会话、默认/指定窗口两项增强后行为通过，
+不扩大为公网历史覆盖认证。各阶段和增量账目分别保留，不因清理重跑。
+
+本轮只清理并提交现有工作区改动，不新增研究、模型复验、股票分析或网络调用；推送未授权、未执行。

@@ -1,0 +1,307 @@
+{
+  "GM01/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T01"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G01"
+      ],
+      [
+        "inputs/facts.md",
+        "G02"
+      ],
+      [
+        "inputs/facts.md",
+        "G03"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM02/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T02"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G01"
+      ],
+      [
+        "inputs/facts.md",
+        "G03"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM03/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T03"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G05"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM04/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T04"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G06"
+      ],
+      [
+        "inputs/facts.md",
+        "G07"
+      ],
+      [
+        "inputs/facts.md",
+        "G08"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM04/main/02": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T04B"
+      ]
+    ],
+    "material": [],
+    "context": "continue",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM04/missing/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T04"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G07"
+      ],
+      [
+        "inputs/facts.md",
+        "G08"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM05/readonly/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T05R"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G01"
+      ],
+      [
+        "inputs/facts.md",
+        "G03"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM05/save-failure/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T05F"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G01"
+      ],
+      [
+        "inputs/facts.md",
+        "G03"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM06/excluded/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T06E"
+      ]
+    ],
+    "material": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM06/ambiguous/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T06A"
+      ]
+    ],
+    "material": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM07/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/history.md",
+        "T07"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G09"
+      ],
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/history.md",
+        "G11"
+      ],
+      [
+        "inputs/history.md",
+        "G12"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": []
+  },
+  "GM07/window/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/history.md",
+        "T07W"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G09"
+      ],
+      [
+        "inputs/history.md",
+        "G11"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": []
+  }
+}
