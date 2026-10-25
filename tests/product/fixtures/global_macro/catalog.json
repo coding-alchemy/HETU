@@ -303,5 +303,168 @@
       "2026-10-24T12:00:00+08:00"
     ],
     "assets": []
+  },
+  "GM09/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "T09"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G09"
+      ],
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/history.md",
+        "G11"
+      ],
+      [
+        "inputs/history.md",
+        "G12"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G13"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G14"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G15"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G16"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G17"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G18"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G19"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G20"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/stablecoin-history.csv",
+        "stablecoin-history.csv"
+      ]
+    ]
+  },
+  "GM09/limited/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "T09L"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G09"
+      ],
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/history.md",
+        "G11"
+      ],
+      [
+        "inputs/history.md",
+        "G12"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G13"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G14"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G15"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G16"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G19"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G20"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/stablecoin-history-limited.csv",
+        "stablecoin-history.csv"
+      ]
+    ]
+  },
+  "GM09/scope/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "T09S"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/asset-feedback.md",
+        "G15"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G17"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": []
   }
 }

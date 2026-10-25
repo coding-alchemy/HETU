@@ -71,6 +71,8 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 
 ## 当前执行计划
 
+全球宏观资产与美元融资反馈增强已按批准范围闭合，已完成路线图及01–03退出当前执行入口；[成果、保留限制和清理回源](#global-macro-asset-feedback-closeout)可回查。本次不新增研究或来源调用，不重开旧计划。
+
 全球宏观基本面 Agent Skill 的首版三阶段执行及历史对照／表旁释义增量已收尾；已完成计划退出当前执行入口，见[清理回源与有效边界](#global-macro-closeout)。研究、失败和漏登记修正原件保留，融资细项限制及历史监测例外不因清理消失，不追加运行。
 
 中国宏观历史数据对照与跨年化债的执行及授权增量补证已收尾，
@@ -84,6 +86,7 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 
 | 范围 | 结果与现行入口 |
 |---|---|
+| 全球宏观资产与美元融资反馈增强 | 全景默认五项、充分/受限/窄专题三项离线验证及六组代表性来源既定最小核验完成；[使用说明](../../docs/global-macro-skill-usage.md)、[总验收](../../.hetu/validation/global-macro-asset-feedback/acceptance.md)、[黄金补证](../../.hetu/validation/global-macro-asset-feedback/gold-source-closeout-20261025-133625/acceptance.md)及[清理回源](#global-macro-asset-feedback-closeout)。完整历史、未测接口、SAFE自身方法及main早段监测记录不足等限制保留，不认证全部来源或宿主 |
 | 全球宏观基本面 Agent Skill | 独立四文件、十二个材料选择及历史对照/表旁释义；[使用说明](../../docs/global-macro-skill-usage.md)、[首版验收](../../.hetu/validation/global-macro-fundamentals/acceptance.md)、[历史表增量验收](../../.hetu/validation/global-macro-history-tables-20261024/acceptance.md)及[清理回源](#global-macro-closeout)。LIVE01融资细项受限、历史监测例外未豁免，E17为事后补登记 |
 | 中国宏观 Skill 传导分析完善 | 四文件、21个材料选择，D1–D4按批准范围验收；CM11三项首次通过，公司股票分析0次；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-transmission-analysis/acceptance.md)及[计划清理回源](#china-macro-transmission-closeout)，旧通过结果及真实资料限制保持 |
 | 中国宏观 Skill 研究深度完善 | 四文件、16个材料选择及V1–V6按批准范围验收；CM09边界失败最小复验、官方日收盘补证已关闭；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-research-depth/acceptance.md)及[计划清理回源](#china-macro-depth-closeout)，旧宏观验收与更强命题限制继续有效 |
@@ -358,3 +361,23 @@ GM01–GM07十二个显式材料选择及两个输入测试文件保留。首版
 不扩大为公网历史覆盖认证。各阶段和增量账目分别保留，不因清理重跑。
 
 本轮只清理并提交现有工作区改动，不新增研究、模型复验、股票分析或网络调用；推送未授权、未执行。
+
+<a id="global-macro-asset-feedback-closeout"></a>
+
+### 全球宏观资产与美元融资反馈增强：计划与临时文件清理
+
+2026-10-25按用户授权，将已完成路线图与01–03共4份执行计划，以及2份一次性监测/执行末检脚本，
+逐字节归档后移出当前入口；另清理3个生成缓存目录。
+[归档清单、保护核对和恢复说明](../../.hetu/validation/global-macro-asset-feedback/closeout-20261025-135301/README.md)保留原文回源；
+原研究、证据、原始返回、失败、快照、监测记录、计算依据及两份数值复算脚本保持原样。
+
+本轮新增需求按批准范围闭合；六组代表性来源完成既定最小核验，完整历史、未测接口及其他已披露限制继续保留。
+[总验收](../../.hetu/validation/global-macro-asset-feedback/acceptance.md)、
+[BTC与汇率复评](../../.hetu/validation/global-macro-asset-feedback/review-correction-20261025/acceptance.md)及
+[黄金补证](../../.hetu/validation/global-macro-asset-feedback/gold-source-closeout-20261025-133625/acceptance.md)分别保留历史与当前结论。
+黄金采用IMF/IFS全球官方汇总替代路径，与SAFE中国月表分开；SAFE自身方法、跨版本/完整历史、即时流量、
+未测接口及其他宿主仍受限。main早段监测记录不足与历史偏差不补证、不豁免，不重新增设脚本预置门槛。
+
+正式离线研究3次、复验0；来源首次15调用/39子操作、BTC补证4/6、黄金补证8/16，累计27/61。
+本次仅清理与提交工作区，新增研究、行为试跑、代理、股票分析和联网调用均0；未获授权推送。
+测试材料、构造器与测试代码保留，清理不触发重跑。归档存于被忽略的本地.hetu目录，不强制纳入Git。

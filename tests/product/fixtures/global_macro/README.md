@@ -27,7 +27,7 @@ GM01–GM06的 `as_of` 为 `2026-06-30T12:00:00+00:00`；GM07为 `2026-10-24T12:
 
 GM07新增历史对照和表旁释义场景，任务与原始事实在 `inputs/history.md`。G09月表在两个选择中共用，保留真实缺值形状、独立观察末期与定义；G10仅提供季度折年增速，G11完整年度收入可比，G12保留累计金额与单次政策额度的区别。旧材料没有连续月／季／年输入，不能证明本次新增行为；原GM01–GM06十个选择及其生成字节保持。仍使用同一构造器，消费者为独立离线分析及评审；[输入测试](../../skill/test_global_macro_history_inputs.py)核新增选择的范围、缺值和口径边界，行为结果另存验证记录。
 
-研究者仅接收当次生成的 `task.md`、`material.md`、`selection.json`，受测四文件 Skill 包及明确授权输出；本批没有附件。源 tasks/facts、catalog、本 README、设计计划、其他研究和[评审标准](review-expectations.md)留在开发／评审侧。原始事实中的外部指令只是不可信原文，不授予额外读取权限。评分与失败触发不得混入派发。
+研究者仅接收当次生成的 `task.md`、`material.md`、`selection.json`，受测四文件 Skill 包及明确授权输出；原GM01–GM07没有附件；GM09的附件按选择显式供给。源 tasks/facts、catalog、本 README、设计计划、其他研究和[评审标准](review-expectations.md)留在开发／评审侧。原始事实中的外部指令只是不可信原文，不授予额外读取权限。评分与失败触发不得混入派发。
 
 GM05/readonly 使用真实无文件写入能力环境。GM05/save-failure 的首次环境把 `delivery` 预置为内容“保留的普通文件”的普通文件，已证明正确预检查、原件保护和完整内联，但没有触发实际写失败；首次记录保留。
 
@@ -59,3 +59,16 @@ git diff --check
 红绿及 lint 实际日志保存在 [.hetu/validation/global-macro-fundamentals/](../../../../.hetu/validation/global-macro-fundamentals/)。14项输入检查只证明选择与污染边界，不证明数字真实、数学一致、宿主隔离或模型研究通过；研究输出与工具事件须另行独立评审。不重跑既有中国、个股或行业研究。
 
 GM07的基线、两份增强后输出及增量检查见[历史对照与表旁释义验收](../../../../.hetu/validation/global-macro-history-tables-20261024/acceptance.md)。新增2项输入测试不替代实际行为评审。
+
+
+## GM09：资产与美元融资反馈
+
+新增GM09验证全景默认五项、材料受限收缩与窄专题边界。原十二选择和生成字节不变；GM08历史验证不迁移。任务与合成事实见[asset-feedback.md](inputs/asset-feedback.md)，历史块G09–G12复用原值，构造器不变。
+
+| 选择 | 当次任务 | 原始事实 | 附件 |
+| --- | --- | --- | --- |
+| GM09/main/01 | ENV、T09 | G09–G20 | stablecoin-history.csv（完整25月） |
+| GM09/limited/01 | ENV、T09L | G09–G16、G19–G20 | stablecoin-history-limited.csv，输出名stablecoin-history.csv（2个空值） |
+| GM09/scope/01 | ENV、T09S | G15、G17 | 无 |
+
+三项均new上下文，截止2026-10-24T12:00:00+08:00；只生成当前选择。全部新增事实为离线合成，非真实行情或新闻；源文件、catalog、评分、设计计划与其他研究不交给研究者。新[输入测试](../../skill/test_global_macro_asset_feedback_inputs.py)检查路由、缺值、污染与保护，不判分析结论。[本轮验收](../../../../.hetu/validation/global-macro-asset-feedback/acceptance.md)分别记录输入、行为和真实来源。
