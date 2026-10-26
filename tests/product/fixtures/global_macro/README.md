@@ -72,3 +72,37 @@ GM07的基线、两份增强后输出及增量检查见[历史对照与表旁释
 | GM09/scope/01 | ENV、T09S | G15、G17 | 无 |
 
 三项均new上下文，截止2026-10-24T12:00:00+08:00；只生成当前选择。全部新增事实为离线合成，非真实行情或新闻；源文件、catalog、评分、设计计划与其他研究不交给研究者。新[输入测试](../../skill/test_global_macro_asset_feedback_inputs.py)检查路由、缺值、污染与保护，不判分析结论。[本轮验收](../../../../.hetu/validation/global-macro-asset-feedback/acceptance.md)分别记录输入、行为和真实来源。
+
+## GM10：取证采用与历史比较
+
+新增GM10验证已得正文与多工作表的采用、逐指标历史比较、系列失败归属及行情窗口选择。
+原15个选择、生成字节、原评分及构造器保持；问题样本原件保留。
+复用[history.md](inputs/history.md)的G10季度折年增速、
+[asset-feedback.md](inputs/asset-feedback.md)的G14市场与融资事实；工作簿Fiscal复制G19年度收入／净利息原值，新增支出为合成值。
+
+| 选择 | 当次任务 | 原始事实 | 输出附件 |
+| --- | --- | --- | --- |
+| GM10/main/01 | ENV10、T10 | G10、G14、G21 | publisher.html、history.xlsx（完整）、request-results.json、prices.csv |
+| GM10/limited/01 | ENV10、T10 | G10、G21 | publisher.html、history.xlsx（3个局部缺值）、request-results.json、prices.csv |
+| GM10/scope/01 | ENV10、T10S | G14、G22 | prices.csv |
+
+三项均new上下文，截止2026-10-25T13:55:24+08:00。任务及G21／G22在
+[evidence-use.md](inputs/evidence-use.md)；合成发布页
+[evidence-current.html](inputs/evidence-current.html)链接当次输出的history.xlsx。
+main原件为[evidence-history.xlsx](inputs/evidence-history.xlsx)，limited原件为
+[evidence-history-limited.xlsx](inputs/evidence-history-limited.xlsx)，输出名相同。
+另提供[evidence-requests.json](inputs/evidence-requests.json)和
+[evidence-prices.csv](inputs/evidence-prices.csv)。全部新增资料均为离线合成，不冒充真实官方网页；
+G14的可比快照与SyntheticVenue成交保留不同来源、时点和用途，不能拼成同一价格序列。
+
+直接消费者为后续独立离线研究者与独立评审者。研究者只见当次生成目录、受测四文件包及授权输出，
+不能读取整个材料仓库、catalog、本说明、设计计划、旧报告或[独立评分](review-expectations.md)。
+未知选择、覆盖保护、评分路由、完整工作簿污染与附件边界由
+[输入测试](../../skill/test_global_macro_evidence_use_inputs.py)核验；不以输入通过代替研究行为通过。
+
+```bash
+.venv/bin/python -m pytest tests/product/skill/test_global_macro_evidence_use_inputs.py -q
+.venv/bin/ruff check tests/product/skill/test_global_macro_evidence_use_inputs.py
+```
+
+开发脚本、红绿结果和旧输入保护见[本轮验证目录](../../../../.hetu/validation/global-macro-evidence-and-history/)。

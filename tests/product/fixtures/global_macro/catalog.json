@@ -466,5 +466,129 @@
       "2026-10-24T12:00:00+08:00"
     ],
     "assets": []
+  },
+  "GM10/main/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "T10"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G14"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "G21"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-25T13:55:24+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/evidence-prices.csv",
+        "prices.csv"
+      ],
+      [
+        "inputs/evidence-current.html",
+        "publisher.html"
+      ],
+      [
+        "inputs/evidence-history.xlsx",
+        "history.xlsx"
+      ],
+      [
+        "inputs/evidence-requests.json",
+        "request-results.json"
+      ]
+    ]
+  },
+  "GM10/limited/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "T10"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "G21"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-25T13:55:24+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/evidence-prices.csv",
+        "prices.csv"
+      ],
+      [
+        "inputs/evidence-current.html",
+        "publisher.html"
+      ],
+      [
+        "inputs/evidence-history-limited.xlsx",
+        "history.xlsx"
+      ],
+      [
+        "inputs/evidence-requests.json",
+        "request-results.json"
+      ]
+    ]
+  },
+  "GM10/scope/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "T10S"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/asset-feedback.md",
+        "G14"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "G22"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-25T13:55:24+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/evidence-prices.csv",
+        "prices.csv"
+      ]
+    ]
   }
 }

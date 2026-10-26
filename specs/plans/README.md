@@ -71,6 +71,8 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 
 ## 当前执行计划
 
+全球宏观取证采用与历史比较已按用户批准的S2官方缺月有限例外完成验收；已完成路线图和01–03退出当前执行入口。[成果、保留限制和清理回源](#global-macro-evidence-and-history-closeout)可回查，本次不新增研究或来源调用。
+
 全球宏观资产与美元融资反馈增强已按批准范围闭合，已完成路线图及01–03退出当前执行入口；[成果、保留限制和清理回源](#global-macro-asset-feedback-closeout)可回查。本次不新增研究或来源调用，不重开旧计划。
 
 全球宏观基本面 Agent Skill 的首版三阶段执行及历史对照／表旁释义增量已收尾；已完成计划退出当前执行入口，见[清理回源与有效边界](#global-macro-closeout)。研究、失败和漏登记修正原件保留，融资细项限制及历史监测例外不因清理消失，不追加运行。
@@ -86,6 +88,7 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 
 | 范围 | 结果与现行入口 |
 |---|---|
+| 全球宏观取证采用与历史比较 | 01/02、GM10三项行为及S1–S5代表路径按批准范围通过；S2适用官方缺月有限例外、数据仍各11/12实值。[设计](../2026-10-25-global-macro-evidence-and-history-design.md)、[总验收§10](../../.hetu/validation/global-macro-evidence-and-history/acceptance.md#10-用户批准的官方缺月例外与当前验收结论)及[清理回源](#global-macro-evidence-and-history-closeout)保留数据与历史监测边界，不认证全部历史、来源、接口或宿主 |
 | 全球宏观资产与美元融资反馈增强 | 全景默认五项、充分/受限/窄专题三项离线验证及六组代表性来源既定最小核验完成；[使用说明](../../docs/global-macro-skill-usage.md)、[总验收](../../.hetu/validation/global-macro-asset-feedback/acceptance.md)、[黄金补证](../../.hetu/validation/global-macro-asset-feedback/gold-source-closeout-20261025-133625/acceptance.md)及[清理回源](#global-macro-asset-feedback-closeout)。完整历史、未测接口、SAFE自身方法及main早段监测记录不足等限制保留，不认证全部来源或宿主 |
 | 全球宏观基本面 Agent Skill | 独立四文件、十二个材料选择及历史对照/表旁释义；[使用说明](../../docs/global-macro-skill-usage.md)、[首版验收](../../.hetu/validation/global-macro-fundamentals/acceptance.md)、[历史表增量验收](../../.hetu/validation/global-macro-history-tables-20261024/acceptance.md)及[清理回源](#global-macro-closeout)。LIVE01融资细项受限、历史监测例外未豁免，E17为事后补登记 |
 | 中国宏观 Skill 传导分析完善 | 四文件、21个材料选择，D1–D4按批准范围验收；CM11三项首次通过，公司股票分析0次；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-transmission-analysis/acceptance.md)及[计划清理回源](#china-macro-transmission-closeout)，旧通过结果及真实资料限制保持 |
@@ -381,3 +384,25 @@ GM01–GM07十二个显式材料选择及两个输入测试文件保留。首版
 正式离线研究3次、复验0；来源首次15调用/39子操作、BTC补证4/6、黄金补证8/16，累计27/61。
 本次仅清理与提交工作区，新增研究、行为试跑、代理、股票分析和联网调用均0；未获授权推送。
 测试材料、构造器与测试代码保留，清理不触发重跑。归档存于被忽略的本地.hetu目录，不强制纳入Git。
+
+<a id="global-macro-evidence-and-history-closeout"></a>
+
+### 全球宏观取证采用与历史比较：计划与临时文件清理
+
+2026-10-26按用户清理并提交工作区的授权，移除已执行完成的路线图及01–03共4份计划，
+以及6份一次性派发／评审载体和2份组装／会话提取脚本。未提交原字节删除前已归档并逐份回读校验；
+[归档清单、保护核对与恢复说明](../../.hetu/validation/global-macro-evidence-and-history/closeout-20261026-121617/README.md)可回源。
+同时清理5个可再生成缓存目录，不删除正式测试材料、构造器或测试代码。
+
+当前[设计](../2026-10-25-global-macro-evidence-and-history-design.md)、[四文件Skill](../../skills/hetu-global-macro/SKILL.md)、
+[使用说明](../../docs/global-macro-skill-usage.md)、[总验收§10](../../.hetu/validation/global-macro-evidence-and-history/acceptance.md#10-用户批准的官方缺月例外与当前验收结论)
+及[补证原件](../../.hetu/validation/global-macro-evidence-and-history/source-closeout-20261025-205706/evidence.md)保留。
+01/02与三项独立行为已通过，S1/S3/S4/S5代表路径通过，S2按用户批准的官方缺月有限例外完成验收；
+2025-10—2026-09窗口仍各11/12实值、11组同比和10组月比，2025年10月值及受影响比较不补造。
+该缺月对2026年10月同比的影响、main/scope监测偏差、历史失败与当时部分通过记录继续保留。
+
+原记录中的计划路径、临时脚本及派发材料定位均指归档前版本，不是待执行入口。
+研究、原始来源、计算、监测、用量、正式评审与快照保持；数值复算和原件核对脚本保留。
+既有正式研究3次、复验0；两轮来源36调用/99子操作及各轮预算账不改。
+本次新增研究、行为验证、代理、股票分析、联网及旧研究重跑均0，只清理并提交现有工作区，不推送。
+归档按既有方式保留在被忽略的本地.hetu目录，不强制纳入Git。

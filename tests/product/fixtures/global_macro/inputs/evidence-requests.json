@@ -1,0 +1,23 @@
+{
+  "synthetic": true,
+  "records": [
+    {
+      "series": "SYN_CPI_ALL",
+      "path": "synthetic-api/cpi",
+      "period": "2024-09..2026-09",
+      "status": 503
+    },
+    {
+      "series": "SYN_PAYROLL_PAGE",
+      "path": "synthetic-site/employment",
+      "period": "2026-09",
+      "status": 403
+    },
+    {
+      "series": "SYN_STAT_RELEASE",
+      "path": "publisher.html",
+      "period": "2026-09",
+      "status": 200
+    }
+  ]
+}
