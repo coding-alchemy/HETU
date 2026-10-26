@@ -590,5 +590,53 @@
         "prices.csv"
       ]
     ]
+  },
+  "GM11/main/01": {
+    "task": [
+      [
+        "inputs/current-facts-and-credit-scope.md",
+        "ENV11"
+      ],
+      [
+        "inputs/current-facts-and-credit-scope.md",
+        "T11"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/current-facts-and-credit-scope.md",
+        "G23"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-26T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/current-scope-publisher.html",
+        "publisher.html"
+      ],
+      [
+        "inputs/current-scope-history.csv",
+        "history.csv"
+      ],
+      [
+        "inputs/current-scope-quotes.csv",
+        "quotes.csv"
+      ],
+      [
+        "inputs/current-scope-finance.html",
+        "finance-catalog.html"
+      ],
+      [
+        "inputs/current-scope-fiscal.csv",
+        "fiscal.csv"
+      ],
+      [
+        "inputs/current-scope-auctions.csv",
+        "auctions.csv"
+      ]
+    ]
   }
 }

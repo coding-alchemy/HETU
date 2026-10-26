@@ -106,3 +106,9 @@ G14的可比快照与SyntheticVenue成交保留不同来源、时点和用途，
 ```
 
 开发脚本、红绿结果和旧输入保护见[本轮验证目录](../../../../.hetu/validation/global-macro-evidence-and-history/)。
+
+## GM11：当前事实与贷款覆盖局部验证
+
+新增一个显式选择GM11/main/01，复用GM10 AFRE人民币贷款25月原值、Fiscal/G19年度值及G14两次拍卖倍数；只新增月均与更新日观察不同方向、总贷款覆盖及可读取财政目录的触发形状。任务与入口见[current-facts-and-credit-scope.md](inputs/current-facts-and-credit-scope.md)，附件current-scope-*由既有构造器映射为publisher.html、history.csv、quotes.csv、finance-catalog.html、fiscal.csv、auctions.csv。所有新增资料均明确合成，不代表真实官方数据。
+
+原18选择、源材料和构造器保持。研究者仅收到当次生成输入、受测四文件包及授权out；源catalog、本说明、[评审标准](review-expectations.md)、旧报告及失败原因不随输入提供。[直接输入检查](../../skill/test_global_macro_current_scope_inputs.py)核复用事实、目录/附件、覆盖与隔离；仅证明输入可用，行为须独立输出核验。
