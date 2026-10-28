@@ -638,5 +638,61 @@
         "auctions.csv"
       ]
     ]
+  },
+  "GM12/main/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/history-and-charts.md",
+        "T12"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history-and-charts.md",
+        "G24"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-27T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/history-and-charts.csv",
+        "history.csv"
+      ]
+    ]
+  },
+  "GM12/no-chart/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/history-and-charts.md",
+        "T12"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history-and-charts.md",
+        "G24"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-27T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/history-and-charts.csv",
+        "history.csv"
+      ]
+    ]
   }
 }

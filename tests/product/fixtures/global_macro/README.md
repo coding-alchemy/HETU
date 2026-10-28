@@ -112,3 +112,18 @@ G14的可比快照与SyntheticVenue成交保留不同来源、时点和用途，
 新增一个显式选择GM11/main/01，复用GM10 AFRE人民币贷款25月原值、Fiscal/G19年度值及G14两次拍卖倍数；只新增月均与更新日观察不同方向、总贷款覆盖及可读取财政目录的触发形状。任务与入口见[current-facts-and-credit-scope.md](inputs/current-facts-and-credit-scope.md)，附件current-scope-*由既有构造器映射为publisher.html、history.csv、quotes.csv、finance-catalog.html、fiscal.csv、auctions.csv。所有新增资料均明确合成，不代表真实官方数据。
 
 原18选择、源材料和构造器保持。研究者仅收到当次生成输入、受测四文件包及授权out；源catalog、本说明、[评审标准](review-expectations.md)、旧报告及失败原因不随输入提供。[直接输入检查](../../skill/test_global_macro_current_scope_inputs.py)核复用事实、目录/附件、覆盖与隔离；仅证明输入可用，行为须独立输出核验。
+
+
+## GM12：逐期历史与图形局部验证
+
+GM12验证窄专题中的逐期净流量比较、融资指标分化及关键序列配图。两个选择共享
+[history-and-charts.md](inputs/history-and-charts.md)中的任务／定义块与
+[history-and-charts.csv](inputs/history-and-charts.csv)附件；GM12/main/01用于具备绘图能力的
+研究，GM12/no-chart/01用于真实无绘图和文件能力的受限交付。两个选择均为新上下文，截止
+2026-10-27T12:00:00+08:00。全部数据为合成，不代表真实经济体或官方统计。
+
+直接消费者为后续独立离线研究者及评审者。研究者只接收当次`task.md`、`material.md`、
+`selection.json`、`history.csv`和受测四文件Skill包；本说明、catalog、计划及
+[独立评审标准](review-expectations.md)不随输入派发。输入边界由
+[GM12输入测试](../../skill/test_global_macro_history_chart_inputs.py)检查；测试仅证明
+选择、材料边界和附件可用，不证明研究行为、计算完整性、真实宿主能力或图形质量。

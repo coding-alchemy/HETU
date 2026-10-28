@@ -71,6 +71,8 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 
 ## 当前执行计划
 
+全球宏观逐期比较、历史来源与折线图的R1–R3增量需求已闭合；4份完成计划已退出当前执行入口。[成果、保留限制和清理回源](#global-macro-history-and-charts-closeout)可回查，本次不新增研究或验证。
+
 全球宏观取证采用与历史比较已按用户批准的S2官方缺月有限例外完成验收；已完成路线图和01–03退出当前执行入口。[成果、保留限制和清理回源](#global-macro-evidence-and-history-closeout)可回查，本次不新增研究或来源调用。
 
 全球宏观资产与美元融资反馈增强已按批准范围闭合，已完成路线图及01–03退出当前执行入口；[成果、保留限制和清理回源](#global-macro-asset-feedback-closeout)可回查。本次不新增研究或来源调用，不重开旧计划。
@@ -88,6 +90,7 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 
 | 范围 | 结果与现行入口 |
 |---|---|
+| 全球宏观逐期比较、历史来源与折线图 | R1逐期比较及B1转向解释、R2两组历史来源、R3实际图形与受限完整内联按批准范围完成；[设计](../2026-10-27-global-macro-history-and-charts-design.md)、[当前验收](../../.hetu/validation/global-macro-sign-transition-closeout-20261028/acceptance.md)及[清理回源](#global-macro-history-and-charts-closeout)。旧失败、监测偏差及原能力限制保持，不认证全部历史/来源/宿主 |
 | 全球宏观取证采用与历史比较 | 01/02、GM10三项行为及S1–S5代表路径按批准范围通过；S2适用官方缺月有限例外、数据仍各11/12实值。[设计](../2026-10-25-global-macro-evidence-and-history-design.md)、[总验收§10](../../.hetu/validation/global-macro-evidence-and-history/acceptance.md#10-用户批准的官方缺月例外与当前验收结论)及[清理回源](#global-macro-evidence-and-history-closeout)保留数据与历史监测边界，不认证全部历史、来源、接口或宿主 |
 | 全球宏观资产与美元融资反馈增强 | 全景默认五项、充分/受限/窄专题三项离线验证及六组代表性来源既定最小核验完成；[使用说明](../../docs/global-macro-skill-usage.md)、[总验收](../../.hetu/validation/global-macro-asset-feedback/acceptance.md)、[黄金补证](../../.hetu/validation/global-macro-asset-feedback/gold-source-closeout-20261025-133625/acceptance.md)及[清理回源](#global-macro-asset-feedback-closeout)。完整历史、未测接口、SAFE自身方法及main早段监测记录不足等限制保留，不认证全部来源或宿主 |
 | 全球宏观基本面 Agent Skill | 独立四文件、十二个材料选择及历史对照/表旁释义；[使用说明](../../docs/global-macro-skill-usage.md)、[首版验收](../../.hetu/validation/global-macro-fundamentals/acceptance.md)、[历史表增量验收](../../.hetu/validation/global-macro-history-tables-20261024/acceptance.md)及[清理回源](#global-macro-closeout)。LIVE01融资细项受限、历史监测例外未豁免，E17为事后补登记 |
@@ -406,3 +409,16 @@ GM01–GM07十二个显式材料选择及两个输入测试文件保留。首版
 既有正式研究3次、复验0；两轮来源36调用/99子操作及各轮预算账不改。
 本次新增研究、行为验证、代理、股票分析、联网及旧研究重跑均0，只清理并提交现有工作区，不推送。
 归档按既有方式保留在被忽略的本地.hetu目录，不强制纳入Git。
+
+<a id="global-macro-history-and-charts-closeout"></a>
+
+### 全球宏观逐期比较、历史来源与折线图：计划与临时文件清理
+
+2026-10-28按用户清理并提交工作区的明确授权，将路线图及01–03共4份已完成计划、9份一次性brief/评审差异载体和4份执行/检查脚本逐字节归档后移出当前入口；设计/索引更新前副本也已留存。
+[归档清单、保护核对与恢复说明](../../.hetu/validation/global-macro-history-and-charts/closeout-20261028-100021/README.md)可恢复未提交原字节。旧记录中的计划/载体/脚本路径及章节号指该归档，不是待执行入口。
+
+4个已结束临时工作区的35份文件与保留快照逐字节相同后清理，另清理4个可再生成缓存目录。正式材料、构造器、测试代码、研究/证据/图片、真实来源返回、失败、调用/用量/监测、计算依据及正式开发/评审报告保持。
+
+R1–R3增量需求已闭合：原逐期数值、两组历史来源、实际图形与真实受限完整内联继续有效；[B1局部补验](../../.hetu/validation/global-macro-sign-transition-closeout-20261028/acceptance.md)独立首次输出通过，[原总验收](../../.hetu/validation/global-macro-history-and-charts/acceptance.md)保留历史遗漏及初始化失败。CPI官方缺月例外、其他资料/来源覆盖/接口/宿主限制和监测偏差不因清理消失，不升级为全部能力认证。
+
+本次新增研究、模型验证、代理、联网取证、股票分析及旧通过项重跑均0；只做清理相关本地检查并提交工作区，未推送。归档沿既有方式留在被忽略的本地.hetu目录，不强制纳入Git。
