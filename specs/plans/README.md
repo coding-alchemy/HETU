@@ -71,7 +71,9 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 
 ## 当前执行计划
 
-当前没有继续执行中的计划。中国宏观历史数据对照与跨年化债的执行及授权增量补证已收尾，
+全球宏观各批已按批准范围收尾，已完成计划全部退出当前执行入口。需求、设计、实现与当前限制统一见[全球宏观实现文档](../2026-11-07-global-macro-fundamentals-implementation.md)；[历史清理回源](#global-macro-closeout)与[市场定价及融资收尾](#global-macro-pricing-and-financing-closeout)保留已完成与未证范围，不授权新增取证或重跑。
+
+中国宏观历史数据对照与跨年化债的执行及授权增量补证已收尾，
 部分数据覆盖仍未满足；[结果、剩余缺口及清理回源](#china-macro-history-closeout)保留原结论。
 
 中国宏观证据采用与季度判断01／02已通过，03已按次数边界结束，
@@ -82,6 +84,11 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 
 | 范围 | 结果与现行入口 |
 |---|---|
+| 全球宏观市场定价与融资 | 01、02规则及GM13三项行为有效；按用户批准的可得数据范围完成，S1／S3／S5具体缺口仍未完整验证。[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)、[当前验收](../../.hetu/validation/global-macro-pricing-and-financing/acceptance.md#approved-closeout-20261107)及[清理回源](#global-macro-pricing-and-financing-closeout)分别维护完成状态与来源限制 |
+| 全球宏观逐期比较、历史来源与折线图 | R1逐期比较及B1转向解释、R2两组历史来源、R3实际图形与受限完整内联按批准范围完成；[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)、[当前验收](../../.hetu/validation/global-macro-sign-transition-closeout-20261028/acceptance.md)及[清理回源](#global-macro-history-and-charts-closeout)。旧失败、监测偏差及原能力限制保持，不认证全部历史/来源/宿主 |
+| 全球宏观取证采用与历史比较 | 01/02、GM10三项行为及S1–S5代表路径按批准范围通过；S2适用官方缺月有限例外、数据仍各11/12实值。[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)、[总验收§10](../../.hetu/validation/global-macro-evidence-and-history/acceptance.md#10-用户批准的官方缺月例外与当前验收结论)及[清理回源](#global-macro-evidence-and-history-closeout)保留数据与历史监测边界，不认证全部历史、来源、接口或宿主 |
+| 全球宏观资产与美元融资反馈增强 | 全景默认五项、充分/受限/窄专题三项离线验证及六组代表性来源既定最小核验完成；[使用说明](../../docs/global-macro-skill-usage.md)、[总验收](../../.hetu/validation/global-macro-asset-feedback/acceptance.md)、[黄金补证](../../.hetu/validation/global-macro-asset-feedback/gold-source-closeout-20261025-133625/acceptance.md)及[清理回源](#global-macro-asset-feedback-closeout)。完整历史、未测接口、SAFE自身方法及main早段监测记录不足等限制保留，不认证全部来源或宿主 |
+| 全球宏观基本面 Agent Skill | 独立四文件、十二个材料选择及历史对照/表旁释义；[使用说明](../../docs/global-macro-skill-usage.md)、[首版验收](../../.hetu/validation/global-macro-fundamentals/acceptance.md)、[历史表增量验收](../../.hetu/validation/global-macro-history-tables-20261024/acceptance.md)及[清理回源](#global-macro-closeout)。LIVE01融资细项受限、历史监测例外未豁免，E17为事后补登记 |
 | 中国宏观 Skill 传导分析完善 | 四文件、21个材料选择，D1–D4按批准范围验收；CM11三项首次通过，公司股票分析0次；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-transmission-analysis/acceptance.md)及[计划清理回源](#china-macro-transmission-closeout)，旧通过结果及真实资料限制保持 |
 | 中国宏观 Skill 研究深度完善 | 四文件、16个材料选择及V1–V6按批准范围验收；CM09边界失败最小复验、官方日收盘补证已关闭；[统一实现](../2026-10-24-china-macro-fundamentals-implementation.md)、[验收](../../.hetu/validation/china-macro-research-depth/acceptance.md)及[计划清理回源](#china-macro-depth-closeout)，旧宏观验收与更强命题限制继续有效 |
 | 中国宏观基本面 Agent Skill | 01–06按已批准范围验收，四文件、13个材料选择及LIVE01–03/HIST01原件保留；[使用说明](../../docs/china-macro-skill-usage.md)、[首版验收](../../.hetu/validation/china-macro-fundamentals/acceptance.md)、[补齐验收](../../.hetu/validation/china-macro-fundamentals/completion/acceptance.md)；已完成计划见[清理回源](#china-macro-closeout)，更强全量命题与工具限制仍适用 |
@@ -336,3 +343,38 @@ china-macro-fundamentals/README.md及01–06六份阶段计划，共7份。
 [局部验收](../../.hetu/validation/china-macro-evidence-use-20261024/acceptance.md)保留一次独立离线输出的三个行为通过范围；13处验证附件URL注记误配已另存真实取得映射，原输入输出未改，不称来源注记全面通过，也不关闭旧报告的数据缺口。
 
 两份一次性组装／检查脚本归档后移除，计算依据、研究原件和验证记录保留；[清理回源及检查](../../.hetu/validation/china-macro-evidence-use-20261024/closeout-20261024/README.md)可回查。本次未追加研究或行为试跑，推送未授权。
+
+
+<a id="global-macro-closeout"></a>
+
+### 全球宏观规格与已完成计划清理
+
+2026-11-07按用户授权，将五份全球宏观需求／设计合并为[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)，移除市场定价与融资路线图及01–03四份已完成计划。旧规格与计划可从固定提交`eb74af7e5f88f27d377388ecf1f4e3cd2f5dc0e8`按原路径恢复；清理前原字节、一次性脚本归档与保护核对见[本次清理记录](../../.hetu/validation/global-macro-document-cleanup-20261107-020432/README.md)。历史引用中的旧路径及章节指原版本，不是当前待执行入口。
+
+首版四文件、地区机制、完整交付及历史表行为有效；[首版验收](../../.hetu/validation/global-macro-fundamentals/acceptance.md)及[原计划归档](../../.hetu/validation/global-macro-fundamentals/closeout-20261024/README.md)保留最初来源、失败和过程记录。正式输入材料／测试、计算脚本、研究／证据／图片／原始来源／用量／监测均保持；本次只清理文档与一次性载体，不新增模型、联网或研究。
+
+<a id="global-macro-asset-feedback-closeout"></a>
+
+### 全球宏观资产与美元融资反馈
+
+[总验收](../../.hetu/validation/global-macro-asset-feedback/acceptance.md)确认批准范围闭合、六组代表性来源完成最小核验；完整历史、即时流量、SAFE自身方法、跨版本和未测接口仍受限。[原计划及临时资料归档](../../.hetu/validation/global-macro-asset-feedback/closeout-20261025-135301/README.md)保持，旧失败、main监测不足与偏差不补造或触发重跑。现行要求与限制纳入统一实现。
+
+<a id="global-macro-evidence-and-history-closeout"></a>
+
+### 全球宏观取证采用与历史比较
+
+[总验收§10](../../.hetu/validation/global-macro-evidence-and-history/acceptance.md#10-用户批准的官方缺月例外与当前验收结论)保留用户批准的CPI官方缺月有限例外：2025-10—2026-09窗口各11/12实值、11组同比和10组月比，缺值及受影响比较不补造；就业、TIC、BTC与黄金代表路径保持有效，main／scope监测偏差和旧部分通过保留为历史。[原计划清理归档](../../.hetu/validation/global-macro-evidence-and-history/closeout-20261026-121617/README.md)继续可恢复。
+
+<a id="global-macro-history-and-charts-closeout"></a>
+
+### 全球宏观逐期比较、历史来源与折线图
+
+R1–R3按批准范围完成；[原总验收](../../.hetu/validation/global-macro-history-and-charts/acceptance.md)保留计算、两组历史来源、实际图形和受限完整内联，转向解释由[B1独立短输出](../../.hetu/validation/global-macro-sign-transition-closeout-20261028/acceptance.md)关闭，初始化失败不改写为模型失败或首次通过。[原计划与载体归档](../../.hetu/validation/global-macro-history-and-charts/closeout-20261028-100021/README.md)保持，旧原件与有效结果不因规格合并失效。
+
+<a id="global-macro-pricing-and-financing-closeout"></a>
+
+### 全球宏观市场定价与融资
+
+2026-11-07已按[用户批准的可得数据范围](../../.hetu/validation/global-macro-pricing-and-financing/acceptance.md#approved-closeout-20261107)完成：01、02规则、GM13三项行为及S4等已通过结果有效；S1第二日兼容报价／共同定义、S3八周三个月基差、S5实际共同报价时刻／报价侧／基准切券仍未完整验证，不改判来源通过，不作为本版本继续执行前置。[公开补证](../../.hetu/validation/global-macro-pricing-and-financing/public-closeout-20261107-005011/acceptance.md)保留已有数值、比较、图片和准确缺项。
+
+原路线图和01–03四份计划已退出工作区，原文从上述固定提交或本次归档回查；历史预算、调用／错误、失败、评审及监测偏差保留，不重置统计或追加研究。当前使用与限制由[使用说明](../../docs/global-macro-skill-usage.md)和[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)维护。

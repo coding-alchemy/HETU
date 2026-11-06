@@ -1,0 +1,826 @@
+{
+  "GM01/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T01"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G01"
+      ],
+      [
+        "inputs/facts.md",
+        "G02"
+      ],
+      [
+        "inputs/facts.md",
+        "G03"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM02/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T02"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G01"
+      ],
+      [
+        "inputs/facts.md",
+        "G03"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM03/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T03"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G05"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM04/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T04"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G06"
+      ],
+      [
+        "inputs/facts.md",
+        "G07"
+      ],
+      [
+        "inputs/facts.md",
+        "G08"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM04/main/02": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "T04B"
+      ]
+    ],
+    "material": [],
+    "context": "continue",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM04/missing/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T04"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G07"
+      ],
+      [
+        "inputs/facts.md",
+        "G08"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM05/readonly/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T05R"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G01"
+      ],
+      [
+        "inputs/facts.md",
+        "G03"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM05/save-failure/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T05F"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "G01"
+      ],
+      [
+        "inputs/facts.md",
+        "G03"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM06/excluded/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T06E"
+      ]
+    ],
+    "material": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM06/ambiguous/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "T06A"
+      ]
+    ],
+    "material": [],
+    "context": "new",
+    "as_of": [
+      "2026-06-30T12:00:00+00:00"
+    ],
+    "assets": []
+  },
+  "GM07/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/history.md",
+        "T07"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G09"
+      ],
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/history.md",
+        "G11"
+      ],
+      [
+        "inputs/history.md",
+        "G12"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": []
+  },
+  "GM07/window/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/history.md",
+        "T07W"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G09"
+      ],
+      [
+        "inputs/history.md",
+        "G11"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": []
+  },
+  "GM09/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "T09"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G09"
+      ],
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/history.md",
+        "G11"
+      ],
+      [
+        "inputs/history.md",
+        "G12"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G13"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G14"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G15"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G16"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G17"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G18"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G19"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G20"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/stablecoin-history.csv",
+        "stablecoin-history.csv"
+      ]
+    ]
+  },
+  "GM09/limited/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "T09L"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G09"
+      ],
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/history.md",
+        "G11"
+      ],
+      [
+        "inputs/history.md",
+        "G12"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G13"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G14"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G15"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G16"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G19"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G20"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/stablecoin-history-limited.csv",
+        "stablecoin-history.csv"
+      ]
+    ]
+  },
+  "GM09/scope/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "T09S"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/asset-feedback.md",
+        "G15"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G17"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-24T12:00:00+08:00"
+    ],
+    "assets": []
+  },
+  "GM10/main/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "T10"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/asset-feedback.md",
+        "G14"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "G21"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-25T13:55:24+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/evidence-prices.csv",
+        "prices.csv"
+      ],
+      [
+        "inputs/evidence-current.html",
+        "publisher.html"
+      ],
+      [
+        "inputs/evidence-history.xlsx",
+        "history.xlsx"
+      ],
+      [
+        "inputs/evidence-requests.json",
+        "request-results.json"
+      ]
+    ]
+  },
+  "GM10/limited/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "T10"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history.md",
+        "G10"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "G21"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-25T13:55:24+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/evidence-prices.csv",
+        "prices.csv"
+      ],
+      [
+        "inputs/evidence-current.html",
+        "publisher.html"
+      ],
+      [
+        "inputs/evidence-history-limited.xlsx",
+        "history.xlsx"
+      ],
+      [
+        "inputs/evidence-requests.json",
+        "request-results.json"
+      ]
+    ]
+  },
+  "GM10/scope/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "T10S"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/asset-feedback.md",
+        "G14"
+      ],
+      [
+        "inputs/evidence-use.md",
+        "G22"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-25T13:55:24+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/evidence-prices.csv",
+        "prices.csv"
+      ]
+    ]
+  },
+  "GM11/main/01": {
+    "task": [
+      [
+        "inputs/current-facts-and-credit-scope.md",
+        "ENV11"
+      ],
+      [
+        "inputs/current-facts-and-credit-scope.md",
+        "T11"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/current-facts-and-credit-scope.md",
+        "G23"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-26T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/current-scope-publisher.html",
+        "publisher.html"
+      ],
+      [
+        "inputs/current-scope-history.csv",
+        "history.csv"
+      ],
+      [
+        "inputs/current-scope-quotes.csv",
+        "quotes.csv"
+      ],
+      [
+        "inputs/current-scope-finance.html",
+        "finance-catalog.html"
+      ],
+      [
+        "inputs/current-scope-fiscal.csv",
+        "fiscal.csv"
+      ],
+      [
+        "inputs/current-scope-auctions.csv",
+        "auctions.csv"
+      ]
+    ]
+  },
+  "GM12/main/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/history-and-charts.md",
+        "T12"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history-and-charts.md",
+        "G24"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-27T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/history-and-charts.csv",
+        "history.csv"
+      ]
+    ]
+  },
+  "GM12/no-chart/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/history-and-charts.md",
+        "T12"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/history-and-charts.md",
+        "G24"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-10-27T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/history-and-charts.csv",
+        "history.csv"
+      ]
+    ]
+  },
+  "GM13/main/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "T13"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/pricing-and-financing.md",
+        "G25"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "G26"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "G28"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "G29"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-11-04T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/pricing-market.csv",
+        "market.csv"
+      ],
+      [
+        "inputs/pricing-quarters.csv",
+        "quarters.csv"
+      ]
+    ]
+  },
+  "GM13/limited/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "T13"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/pricing-and-financing.md",
+        "G25"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "G27"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "G28"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "G29"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-11-04T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/pricing-market-limited.csv",
+        "market.csv"
+      ],
+      [
+        "inputs/pricing-quarters-limited.csv",
+        "quarters.csv"
+      ]
+    ]
+  },
+  "GM13/scope/01": {
+    "task": [
+      [
+        "inputs/evidence-use.md",
+        "ENV10"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "T13S"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/pricing-and-financing.md",
+        "G25"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "G26"
+      ],
+      [
+        "inputs/pricing-and-financing.md",
+        "G29"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-11-04T12:00:00+08:00"
+    ],
+    "assets": [
+      [
+        "inputs/pricing-market.csv",
+        "market.csv"
+      ],
+      [
+        "inputs/pricing-quarters.csv",
+        "quarters.csv"
+      ]
+    ]
+  }
+}
