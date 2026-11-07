@@ -1,0 +1,763 @@
+{
+  "schema_version": 1,
+  "mode_values": [
+    "free",
+    "paid"
+  ],
+  "enabled_modes": [
+    "free",
+    "paid"
+  ],
+  "products": {
+    "cn_a_basic": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "BaoStock 官网声明免费使用（https://www.baostock.com/mainContent?file=home.md）；缓存与展示权限以实际核验为准；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "securities"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "query_stock_basic；实测 8995 行，代码映射/上市退市字段可用；北交所覆盖以证券类型字段为准"
+    },
+    "cn_trade_calendar": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "BaoStock 官网声明免费使用；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "calendar",
+      "requires_codes": false,
+      "tables": [
+        "calendar"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "query_trade_dates；实测 2024-06 共 30 个日历日、19 个交易日"
+    },
+    "cn_a_daily": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "BaoStock 官网声明免费使用；个股日线自 1990 年起；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "market",
+      "requires_codes": true,
+      "tables": [
+        "daily_bars"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "query_history_k_data_plus(adjustflag='3') 不复权原价；实测 volume 单位为股、amount 单位为元（600519 样本交叉核验）"
+    },
+    "cn_a_status_day": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "BaoStock 官网声明免费使用；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "security_status"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "BaoStock SDK 0.9.4 query_daily_history_k_AStock；单日无分页，实际行须有状态字段，不用缺席推停牌。",
+      "cross_section": "trade_day"
+    },
+    "cn_a_status": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "BaoStock 官网声明免费使用；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "market",
+      "requires_codes": true,
+      "tables": [
+        "security_status"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "query_history_k_data_plus 的 tradestatus/isST 字段实测可用；停牌（tradestatus=0）与缺采分行记录"
+    },
+    "cn_a_actions": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "BaoStock 官网声明免费使用；或由合法免费事件文件经 import_files 补入；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "event",
+      "requires_codes": true,
+      "tables": [
+        "corporate_actions"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "query_dividend_data 实测返回税前每股现金/送转股数/实施日（600519 2023 报告年度 3 条）；因子不能独自分解现金与非现金行动。查询口径 2026-10-16 实测（.hetu/quant/qualification/capability-gap-20261016/actions-year-semantics-verdict.json）：year 参数默认与 yearType=report 均匹配预案公告年，yearType=operate 匹配除权除息实施年；适配器已固定 operate，按实施年取数以匹配收益构建的事件窗口语义。既有快照（公告年 2023-2026 范围）对原范围继续有效；'2022 年及以前公告、之后实施'事件在其采集范围外，窗口内未发现实证个案（间隔分布 99.9%≤195 天，最大 553 天个案公告年 2024 在范围内），三码东财交叉核对一致。配股不在本接口字段内（600030 全史无 2022 配股行），东财股本结构变动原因可检测（601108 2022-04-12 配售A股上市），配股事件覆盖仍为限制项"
+    },
+    "csi300_price": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "BaoStock 官网声明免费使用；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "index",
+      "requires_codes": true,
+      "tables": [
+        "index_bars"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "沪深 300 价格指数；实测 2024-06 边界日 06-03/06-28、端午 06-10 缺席；return_basis=price；benchmark 代码 000300.SH"
+    },
+    "sw_l1_catalog": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "AKShare 公开免费接口文档（https://akshare.akfamily.xyz/data/index/index.html）；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "https://akshare.akfamily.xyz"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "boards"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "实测申万一级目录 31 个行业；index_realtime_sw 仅用于目录"
+    },
+    "sw_l1_index": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "AKShare 公开免费接口文档；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "https://akshare.akfamily.xyz"
+      },
+      "kind": "index",
+      "requires_codes": true,
+      "tables": [
+        "index_bars"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "index_hist_sw(period='day')；实测 bargainsum 单位为亿元（成员成交额下界交叉核验），标准化已 ×1e8 转 amount_cny；return_basis=price"
+    },
+    "sw_l1_members": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "AKShare 公开免费接口文档；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "https://akshare.akfamily.xyz"
+      },
+      "kind": "membership",
+      "requires_codes": true,
+      "tables": [
+        "memberships"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "index_component_sw 当前成员（801010 样本 103 行）；membership_kind=current_snapshot 不用于过去排名"
+    },
+    "em_theme_catalog": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "AKShare 公开免费接口文档（https://akshare.akfamily.xyz/data/stock/stock.html）；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "https://akshare.akfamily.xyz"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "boards"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "实测东财概念目录 506 个；保留原始代码与定义"
+    },
+    "em_theme_members": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "AKShare 公开免费接口文档；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "https://akshare.akfamily.xyz"
+      },
+      "kind": "membership",
+      "requires_codes": true,
+      "tables": [
+        "memberships"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "stock_board_concept_cons_em 当前快照（样本板块 42 行）；membership_kind=current_snapshot 不用于过去排名"
+    },
+    "em_theme_index": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "AKShare 公开免费接口文档；2026-10-14 小样本实测探查通过（.hetu/quant/qualification/probe-20261014T014143.json，16 次产品级数据请求，0 次股票分析）",
+        "source_url": "https://akshare.akfamily.xyz"
+      },
+      "kind": "index",
+      "requires_codes": true,
+      "tables": [
+        "index_bars"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "只作独立背景；实测部分板块（如 BK1185）2024-06 无 kline 记为覆盖缺口；amount 单位为元"
+    },
+    "em_theme_library": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "东方财富主题投资公开页面接口（https://quote.eastmoney.com/zhuti/ ），2026-10-15 实测探查（.hetu/quant/qualification/theme-basis/em-themelib-20261015-raw-hottheme.json；0 次股票分析）；2026-10-16 复测仍可用且 667 条内容与 10-15 完全一致（.hetu/quant/qualification/capability-gap-20261016/em-themelib-20261016-raw-hottheme.json）",
+        "source_url": "https://quote.eastmoney.com/zhuti/"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "theme_library"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "东财主题投资·题材库（AllThemes/hottheme）；分类依据材料而非排名目录，供 category.theme_basis 名称精确对齐；zhuti 详情网页已停维护（2026-10-15 实测 404），API 维持服务；未命中条目按未知排除"
+    },
+    "bj_basic": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "北交所官网公开接口（https://www.bse.cn/nqxxController/nqxxCnzq.do ，listedcompany.html 同源）；2026-10-16 实测 351 只、全部 920 号段（.hetu/quant/qualification/capability-gap-20261016/bj-coverage-probe.json）",
+        "source_url": "https://www.bse.cn/nq/listedcompany.html"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "markets": [
+        "BJ"
+      ],
+      "tables": [
+        "securities"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "北交所证券名录（上市日期/总股本/流通股本/所属行业/地区）；当前列表语义，无退市与期间状态字段；status=listed 仅表示在册"
+    },
+    "bj_daily": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "东方财富公开行情接口（push2his kline，get）免费；2026-10-16 实测 BJ secid=0.<纯数字>（akshare 1.19.1 的 0.920002.BJ 形态返回空），920002.BJ 25 个交易日与沪深日历完全一致（.hetu/quant/qualification/capability-gap-20261016/bj-kline-920002-raw.json、bj-daily-curl.json）",
+        "source_url": "https://quote.eastmoney.com"
+      },
+      "kind": "market",
+      "requires_codes": true,
+      "markets": [
+        "BJ"
+      ],
+      "tables": [
+        "daily_bars"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "东财 push2his 日线（不复权 fqt=0）；成交量单位手已 ×100 转股、成交额单位元；仅返回实际成交日，停牌/缺采不可区分（无 tradestatus 字段），历史 ST/停牌序列无源——对象资格按缺失处理，不填平"
+    },
+    "bj_actions": {
+      "provider": "akshare",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "东方财富数据中心公开接口（datacenter-web RPT_SHAREBONUS_DET）免费，覆盖 BJ；2026-10-16 实测 920002.BJ 5 个报告期（含预案公告日/除权除息日/方案进度，.hetu/quant/qualification/capability-gap-20261016/bj-coverage-probe.json）；600030/301059/000007 与 BaoStock 行动表交叉核对一致（actions-crosscheck.json）",
+        "source_url": "https://datacenter-web.eastmoney.com"
+      },
+      "kind": "event",
+      "requires_codes": true,
+      "markets": [
+        "BJ"
+      ],
+      "tables": [
+        "corporate_actions"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "东财分红送配详情；仅已实施（除权除息日非空）行成事件，每10股口径换算每股；配股不在字段内（与 cn_a_actions 相同限制）"
+    },
+    "cn_a_market_cap": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "上游来源 2026-10-16 小样本核验：东财股本结构 stock_zh_a_gbjg_em（datacenter-web，总股本阶梯精确到股，600519/300750 实测）与东财现货快照 f20 总市值字段；重建口径 market_cap=close_raw(BaoStock)×总股本(gbjg 阶梯)，百度估值(stock_zh_valuation_baidu)交叉核验一致（600519：1,250,081,601 股×收盘≈16,413 亿元=百度 2026-10-15 值）。证据 .hetu/quant/qualification/capability-gap-20261016/market-cap-probe.json。本状态只解除来源准入，导入仍经 import_files 逐文件登记 permission_basis/obtained_at；股本变动日≠公告日，available_at 语义按导入清单登记",
+        "source_url": "https://datacenter-web.eastmoney.com"
+      },
+      "kind": "fundamental",
+      "requires_codes": true,
+      "tables": [
+        "market_cap"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "02 低波动市值权重所需；上游核验 2026-10-16 完成，重建方法与单位换算见 permission.basis；历史 knowability 限制（变动原因无公告日）在导入清单中如实登记"
+    },
+    "cn_a_hist_securities": {
+      "provider": "baostock",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "历史身份事实经免费原始目录及官方披露核对；事件日与公告公开日分别登记，目录事件日期不能直接充当published_at。import_files逐文件登记原件、permission_basis/obtained_at和公开时点证明。",
+        "source_url": "http://www.baostock.com"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "markets": [
+        "SH",
+        "SZ"
+      ],
+      "tables": [
+        "historical_securities"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "二期历史宇宙仅经import_files导入：已核验官方原件与独立发布记录按版本登记；仅有当前目录摘录时不证明历史公开，不经prepare网络取数"
+    },
+    "cn_a_archive_no_trade": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "发行人或交易所公开披露的已核无交易事实，随原件依据经 import_files 登记。"
+      },
+      "kind": "event",
+      "requires_codes": true,
+      "tables": ["security_events"],
+      "notes": "仅解释对应对象日的档案量价缺口，不能推断完整交易状态、风险警示或账户退出处置。"
+    },
+    "cn_a_knowledge": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "knowledge_evidence 登记随各表导入进行（§3a/b 口径，.hetu/quant/qualification/phase2/data-acquisition-plan-20261017.md）；证据原件存数据根 evidence/，sha256 随记录登记",
+        "source_url": ""
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "knowledge_evidence"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "二期历史时点证据表：仅经 import_files 导入"
+    },
+    "cn_a_trading_rules": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "沪深交易所/中登/财政部税务总局官方公告人工整理（.hetu/quant/qualification/phase2/trading-rules-20261017/sources.md，含逐条来源 URL、摘录与核验强度分级）；官方公开文件，0 次 provider.fetch、0 费用；导入经 import_files 逐文件登记 permission_basis/obtained_at",
+        "source_url": ""
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "markets": [
+        "SH",
+        "SZ"
+      ],
+      "tables": [
+        "trading_rules"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "二期回测历史交易制度（T+1、整手、涨跌幅、印花税/过户费/股息税逐日期生效）：仅经 import_files 导入"
+    },
+    "cn_a_financial_reports": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "unverified",
+        "basis": "上游 2026-10-16 小样本核验结论：东财 F10 主要指标（RPT_F10_FINANCE_MAINFINADATA）提供每报告期扣非净利润 KCFJCXSYJLR（元）+ 公告日期 NOTICE_DATE，业绩报表 stock_yjbb_em 提供全市场每股指标+最新公告日期（20260630 期 11444 行含 BJ）；但两者每报告期仅保留一行最新值，不保留修订版本链，修订后原值不可回取——protocol ep_value 的'公告与修订时点合格'条件不满足，维持 unverified；证据 .hetu/quant/qualification/capability-gap-20261016/em-mainfina-600519.json、ep-financials-probe.json",
+        "source_url": ""
+      },
+      "kind": "fundamental",
+      "requires_codes": true,
+      "tables": [
+        "financial_reports"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "02 E/P 所需历史公告与修订时点；修订链不可证，E/P 维持 blocked（缺的是修订时点证据，非免费来源本身）"
+    },
+    "ts_a_basic": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "reference",
+      "requires_codes": true,
+      "tables": [
+        "securities"
+      ],
+      "source_api": "stock_basic",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。"
+    },
+    "ts_trade_calendar_sz": {
+      "fixed_market": "SZ",
+      "source_exchange": "SZSE",
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "calendar",
+      "requires_codes": false,
+      "tables": [
+        "calendar"
+      ],
+      "source_api": "trade_cal",
+      "markets": [
+        "SZ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "SZSE 日历，原 ts_trade_calendar 继续默认 SSE。"
+    },
+    "ts_trade_calendar": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "calendar",
+      "requires_codes": false,
+      "tables": [
+        "calendar"
+      ],
+      "source_api": "trade_cal",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。"
+    },
+    "ts_bse_mapping": {
+      "fixed_market": "BJ",
+      "cross_section": "catalog",
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "security_observations"
+      ],
+      "source_api": "bse_mapping",
+      "markets": [
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "北交所新旧代码与来源上市日期观察；观察日期不证明切换生效日。"
+    },
+    "ts_bak_basic": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "security_observations"
+      ],
+      "source_api": "bak_basic",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。"
+    },
+    "ts_a_daily": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "market",
+      "requires_codes": true,
+      "tables": [
+        "daily_bars"
+      ],
+      "source_api": "daily",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。",
+      "storage_layout": "year"
+    },
+    "ts_adj_factor_day": {
+      "cross_section": "trade_day",
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "adjustment_factors"
+      ],
+      "source_api": "adj_factor",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "官方 adj_factor 单交易日横截面；标准行仅发布获准对象，查询日期不等于逐对象实际行覆盖。"
+    },
+    "ts_adj_factor": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "market",
+      "requires_codes": true,
+      "tables": [
+        "adjustment_factors"
+      ],
+      "source_api": "adj_factor",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。"
+    },
+    "ts_a_market_cap": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "market",
+      "requires_codes": true,
+      "tables": [
+        "market_cap"
+      ],
+      "source_api": "daily_basic",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。",
+      "keys_by_table": {
+        "market_cap": [
+          "code",
+          "date",
+          "revision_id"
+        ]
+      }
+    },
+    "ts_action_versions": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "event",
+      "requires_codes": true,
+      "tables": [
+        "action_versions"
+      ],
+      "source_api": "dividend",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。"
+    },
+    "ts_a_actions": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "event",
+      "requires_codes": true,
+      "tables": [
+        "corporate_actions"
+      ],
+      "source_api": "dividend",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。",
+      "keys_by_table": {
+        "corporate_actions": [
+          "code",
+          "ex_date",
+          "action_type",
+          "revision_id"
+        ]
+      }
+    },
+    "ts_suspend_events": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "event",
+      "requires_codes": true,
+      "tables": [
+        "security_events"
+      ],
+      "source_api": "suspend_d",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。"
+    },
+    "ts_st_day": {
+      "cross_section": "trade_day",
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "security_events"
+      ],
+      "source_api": "stock_st",
+      "markets": [
+        "SH",
+        "SZ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "官方历史日风险警示列表观察；不发布完整逐日上市与停复牌状态。"
+    },
+    "ts_suspend_day": {
+      "cross_section": "trade_day",
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "security_events"
+      ],
+      "source_api": "suspend_d",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "官方 suspend_d 单交易日全市场事件。保留日内时段；成功空仅证明响应，不证明无停牌。"
+    },
+    "ts_price_limits": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "market",
+      "requires_codes": true,
+      "tables": [
+        "price_limits"
+      ],
+      "source_api": "stk_limit",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。"
+    },
+    "ts_sw_daily": {
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro",
+        "basis": "G2已批准的个人5000积分产品；实际操作仍须本机产品许可，不含永久保留权"
+      },
+      "kind": "index",
+      "requires_codes": true,
+      "tables": [
+        "index_bars"
+      ],
+      "source_api": "sw_daily",
+      "markets": [
+        "SI"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。"
+    }
+  }
+}

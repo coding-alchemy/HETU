@@ -31,6 +31,7 @@ E2 局部效果成立、经济性未证；Codex 外层截断及网络即时保�
 不将其写成全部由机械优化带来的节约。效果不再重验，历史材料缺口仍按原范围保留；G2从未启动。
 七份已执行或被最新方向替代的计划已清理，原文及状态去向见[清理记录](#standard-token-efficiency-closeout)。
 
+量化平台的一至三期已整合为[初始实现与交接](../2026-11-07-quant-research-platform-initial-implementation.md)，四、五期规格独立维护。
 七期“分层优化与 Quick／Standard 能力补全”已按最新批准范围验收完成；
 2026-10-14 按用户授权清理本批路线图及三份阶段计划，原文回源见[清理记录](#standard-scope-closeout)。
 
@@ -46,6 +47,16 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 产品测试材料清理三阶段已执行并评审通过，执行计划已按授权清理。
 后续维护遵循[测试材料复用与维护方法论](../../docs/engineering/test-fixtures-methodology.md)。
 
+量化初始建设统一保存真实两榜、回测软件、独立数据模块、数据接入与限定验收。档案 limited、原研究资格 blocked、真实研究预算 0/8。
+
+| 阶段 | 设计与现行入口 | 计划状态 |
+| --- | --- | --- |
+| 量化初始建设（原一至三期） | [初始实现](../2026-11-07-quant-research-platform-initial-implementation.md)、[统一使用手册](../../docs/quant-research-platform-usage.md) | 一期原范围、二期软件及三期修订范围验收保持；旧执行计划按原归档或固定提交回源 |
+| 新量化四期 | 后续规格单独交付 | 待设计批准后编独立计划；原八次协议与窗口不变 |
+| 新量化五期 | 后续规格单独交付 | 待设计批准后编独立计划；代表策略实际平台执行保留 |
+
+四、五期分别审阅与验收。三期已按 Tushare 和公开信息范围收口，移出能力的原归属、限制和原件见初始实现。新设计和计划按 AGENTS.md 分别获批，真实研究与旧结果重跑另按具体范围授权。
+
 六期已按用户批准的已证范围限定验收，正式全仓工程门禁与收尾交接已完成；
 2026-10-10 按用户授权删除六期路线图及六份编号计划，原文从本页的固定 Git 提交回溯。
 
@@ -56,6 +67,8 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 用户于 2026-10-02 决定不再投入五期性能验收，并批准清理已执行完的计划。第 5–7 组限定
 收口及阶段 05 本批汇总与复评成果保持有效；第 8 组性能数值未验收、五期整体未完成的事实
 保留，不安排新采样、配对或校准，不重复请求延期批准。
+
+本目录保留总索引。量化一至三期计划已退出执行入口，历史回源见[初始实现 §6](../2026-11-07-quant-research-platform-initial-implementation.md#6-附录原文件与有效条款去向)。
 
 已执行或停止执行的五期旧计划已清理。五期有效要求、实现行为、
 证据与未完成边界统一见[五期实现](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
@@ -100,6 +113,7 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 | 扩展与计量工具 | 实现、组内修复及四项阻断均已关闭；[扩展管理](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-extensions)、[计量工具](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-metering) |
 | 第 5–7 组验收 | 第 5 组限定接受、第 6 组原五运行限定闭合、第 7 组本批 4/5＝80% 限定认证；[批准例外与支持边界](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status) |
 | 预算与性能 | N7 默认及获批 X1／X4 已执行，额度用尽；三条性能线、全流程取样与实测校准未完成；[停止点](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-closeout) |
+| 量化初始建设 | [一至三期有效成果、限制与计划回源](../2026-11-07-quant-research-platform-initial-implementation.md) |
 | 六期资料完整性与证据闭合 | 已证范围获限定验收、工程收尾完成；[已交付范围与证据入口](../2026-10-04-stock-analysis-workflow-v1-phase-6-implementation.md#6-交付与验收结果)，剩余取得要求仍在长期清单 |
 | 七期分层优化与能力补全 | Q01–Q08／S01–S08及完整Standard交付按批准范围验收；[七期实现](../2026-10-12-stock-analysis-workflow-v1-phase-7-implementation.md#13-当前完成边界)维护需求、设计、实现与证据，Deep仅整理 |
 | Standard Token 机械优化与核账 | [实现范围与规则](../2026-10-15-standard-token-efficiency-design.md)、[局部验证](../../.hetu/validation/standard-token-efficiency-appendix-20261015/report.md)及[实际差额归因](../../.hetu/validation/standard-token-comparison-20261015/input-delta-attribution-20261017.md)；默认策略未切换，金额与分项纯因果贡献未证 |
@@ -318,6 +332,10 @@ china-macro-fundamentals/README.md及01–06六份阶段计划，共7份。
 原始报告、失败、输入、Skill快照、消息、工具返回、用量与验收均保留，原workspace.path只作历史定位。
 清理不重跑研究或旧通过项，不改变未完成事实；公司股票分析0次。本次提交已获授权，推送未授权。
 
+### 量化研究平台一期计划清理
+
+2026-10-17 按用户授权清理 `quant-research-platform-phase-1/` 的路线图及 01–05 五份编号计划，共六份。它们此前未提交，原字节已在本地 `.hetu/quant/acceptance/cleanup-20261017/originals/specs/plans/quant-research-platform-phase-1/` 保存，清单 `cleanup-20261017/manifest.json` 记录大小和 SHA256；该归档被 Git 忽略，不属于源码提交，不能从旧提交回源。现行入口见一期实现与验收（历史回源 `7d951a8948176a5a8bd44faf8971d07b7c42d892:specs/2026-10-17-quant-research-platform-phase-1-implementation.md`），历史失败、数据资产及验收原件保留。
+
 ## 新增计划约定
 
 1. 设计文档先按 `specs/YYYY-MM-DD-<topic>-design.md` 创建并获批。
@@ -388,3 +406,12 @@ R1–R3按批准范围完成；[原总验收](../../.hetu/validation/global-macr
 2026-11-07按用户要求合并需求与设计、清理四份已执行收尾计划及当次临时运行目录。当前行为、三项增强和验收边界由[行业基本面实现](../2026-11-07-industry-fundamentals-implementation.md)统一维护，[原文及清理记录](../../.hetu/validation/industry-fundamentals/cleanup-20261107-161420/README.md)保留需求、设计、计划原字节及替代关系。
 
 [原验收](../../.hetu/validation/industry-fundamentals/acceptance.md)及[三项增量验收](../../.hetu/validation/industry-demand-cash-inventory-20261107-154046/acceptance.md)继续有效。limited完整内联及用户错误摘要的属性／采用说明尚未验证，原初始化失败、能源续派消息留存不足和过程偏差保持，未改判全部通过。清理不重跑研究、不追加来源、不改变Skill或材料原值；本次提交按用户最新明确授权执行。
+
+2026-10-26维护工程交接：本次获准05.1维护计划、正式网页／JobService／worker及离线恢复验证，05.2有效证据盘点和两个交接包已完成，见实施§16（历史回源 `7d951a8948176a5a8bd44faf8971d07b7c42d892:specs/2026-10-22-quant-research-platform-phase-3-implementation.md`（原锚点 `#16-2026-10-26维护工程与现状交接`））。免费默认，逐操作授权与批准额度账本，累计／新增分别显示；外部请求0、原件本地重放3、研究0/8，未启动定时／采集、未提交。N3-1 partial、N3-2 blocked、N3-3 limited，N3-4/5限定工程机制通过且有来源限制；不等于三期整体通过，旧状态文字保留历史。
+
+
+2026-10-27维护复评三项P2已直接补修：完整来源回看／退出对象、有界日历刷新、登记其他根覆盖复用；原68证据保留，28项直接回归通过。见实施§16.6（历史回源 `7d951a8948176a5a8bd44faf8971d07b7c42d892:specs/2026-10-22-quant-research-platform-phase-3-implementation.md`（原锚点 `#166-2026-10-27维护复评三项p2修复`））。仍无新增请求／真实研究／提交，三期数据资格与整体完成结论不变。
+
+2026-11-05独立数据模块06–08工程交接见实施§20（历史回源 `7d951a8948176a5a8bd44faf8971d07b7c42d892:specs/2026-10-22-quant-research-platform-phase-3-implementation.md`（原锚点 `#20-2026-11-05独立数据模块工程交接`））：N3-6合成工程证据通过，最终总审经一次限定复评通过；N3-2 blocked、N3-3 limited、研究0/8，D/Q2保持、M不激活。
+
+2026-11-05最终收口：总审1项Important已修复，一次限定复评Spec／Quality PASS；短submission.lock与原worker.lock分离，原单队列及写入保护保持。首轮发现、红绿及5项直接回归见三期实施§20和本批验证索引；真实资格与能力限制不变，不授权提交或合并。

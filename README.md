@@ -12,6 +12,7 @@
 - `standard`：完整继承 Quick 数据与图表，完成主要经营、财务质量、行业风险、三情景、基础估值、反证与复查研究，使用十二章报告。
 - `hetu-stock skill`：安装、校验、诊断、回滚和卸载 Skill。
 - `hetu-stock helper`：提供可选的时点边界、授权检查、旧成果检查与导出辅助；不可用时，公开研究可用宿主等价工具继续。
+- 独立量化研究平台：行业／主题两榜、独立数据管理、回测软件和 Notebook，见[统一使用手册](docs/quant-research-platform-usage.md)及[初始实现与验收](specs/2026-11-07-quant-research-platform-initial-implementation.md)。
 
 研究由宿主 Agent 执行，命令行只暴露两个顶层组：`skill` 和 `helper`。
 
@@ -20,9 +21,9 @@ Deep 的原有研究能力与有效成果保持，本批次仅整理新目标及
 
 ## 支持范围
 
-仅支持单只中国 A 股，可提供明确公司名称、6 位代码或带 `.SH`、`.SZ`、`.BJ` 后缀的代码，
+个股 Skill 与 `hetu-stock` CLI 仅支持单只中国 A 股，可提供明确公司名称、6 位代码或带 `.SH`、`.SZ`、`.BJ` 后缀的代码，
 例如 `600519`、`000001.SZ`、`430047.BJ`。存在多个候选时，Agent 会请用户确认。
-行业、板块、多股票比较、组合和交易动作暂不支持。
+该流程不支持行业、板块、多股票比较、组合和交易动作。行业与主题候选研究使用独立的 `quant/` 网页入口。量化回测软件已完成限定验收，正式策略研究与经济验证尚未开展。
 
 ZCode 仅在已验收组合内获得研究认证；Codex、OpenCode、Claude Code 的完整研究仍为 `UNVERIFIED`。
 具体范围与限制见[支持与验收记录](specs/2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status)。

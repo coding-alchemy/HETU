@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "status": "preparation_only",
+  "economic_protocol_status": "preparation_only",
+  "note": "本期冻结信号规则、可用时点、样本与预热；正式数值阈值和成本/样本外划分由二期在看评价结果前补齐。未具备净收益与样本外证据不能判盈利，风险改善不等于收益目标达成。",
+  "frozen_at": "2026-10-14",
+  "market": "CN_A",
+  "low_volatility": {
+    "external_source": "Blitz, Hanauer, van Vliet (2021), The Volatility Effect in China",
+    "signal": "过去 36 个完整月收益的样本标准差（ddof=1），取合格池最低十分位",
+    "universe": "信号日历史登记仍上市的 A 股普通股票，再按数据/状态资格排除并披露覆盖",
+    "selection": "max(1, floor(N/10)) 且 N>=10；同波动按代码稳定截取（本地适配）",
+    "weighting": "以信号时点可知总市值归一化",
+    "rebalance": "monthly",
+    "warmup_months": 36,
+    "return_basis": "total_return",
+    "total_return_definition": "01 核验的税前除息日收盘再投资研究序列；非账户现金或税后净收益",
+    "currency": "CNY",
+    "signal_date_rule": "显式选择的已完成月末，收盘数据已可得；as_of 与 signal_date 为同一市场日期",
+    "missing_data": "缺口不填零、不前填；不足 36 个完整月收益的对象排除并记录 insufficient_36_month_returns"
+  },
+  "ep_value": {
+    "external_source": "Liu, Stambaugh, Yuan (2019), Size and Value in China",
+    "condition": "免费历史财务公告与修订时点合格才进入测试",
+    "signal": "最近已报告扣非净利润 / 总市值，按月末排序；只读时点资格合格的历史版本",
+    "universe": "剔除最小市值 30%（原文样本规则）",
+    "weighting": "一期不产生目标权重",
+    "fallback_forbidden": "不以当前 PE/TTM 静默替代，不用当前财务回填历史"
+  },
+  "dividend_low_volatility": {
+    "status": "reserve",
+    "source": "中证红利低波动指数 H30269 编制方案 v1.1（2020-12）",
+    "note": "年度调样；不新增第三套执行器；不与低波动当独立有效证据累加"
+  },
+  "economic_evaluation_preparation": {
+    "objectives": [
+      "检验成本后绝对收益",
+      "相对可比基准超额",
+      "回撤/风险改善"
+    ],
+    "required_evidence_for_phase2": [
+      "股票池与参数选择记录",
+      "训练/最终测试区间划分",
+      "成本（换手/成交）",
+      "可比基准",
+      "目标阈值/容忍范围与判断依据",
+      "样本外与压力检验"
+    ],
+    "formal_thresholds": "二期在看评价结果前补齐"
+  }
+}
