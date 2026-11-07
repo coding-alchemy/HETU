@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "hetu-data"
+version = "0.1.0"
+requires-python = "==3.11.*"
+dependencies = ["pandas==2.3.3", "pyarrow==24.0.0", "duckdb==1.5.6"]
+[tool.setuptools.packages.find]
+where = ["src"]
+[tool.setuptools.package-data]
+hetu_data = ["resources/*.json"]
+
+[project.optional-dependencies]
+web = ["streamlit==1.65.0"]
+sources = ["akshare==1.19.1", "baostock==0.9.4", "curl_cffi==0.16.3"]
+dev = ["pytest==9.1.1", "ruff==0.17.0"]
+
+[project.scripts]
+hetu-data = "hetu_data.cli:main"
+
+# 数据内核沿用原 quant 工程的 lint 标准。
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests"]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
