@@ -1,0 +1,7 @@
+period,revenue,operating_profit,net_profit,sales_cash_received,operating_cash_net,receivables_end
+2025-Q1,100,10,8,98,8,30
+2025-Q2,120,12,9,115,10,35
+2025-Q3,140,14,11,135,12,40
+2026-Q1,110,12,9,101,4,45
+2026-Q2,140,16,12,118,2,65
+2026-Q3,170,20,15,130,-1,90

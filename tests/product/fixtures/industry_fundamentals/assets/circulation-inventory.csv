@@ -1,0 +1,7 @@
+period,category,quantity_t,unit_cost_million_yuan_t,gross_million_yuan,allowance_million_yuan,allocated_t
+2025-09,raw_material,100,0.30,30,4,
+2025-09,work_in_progress,100,0.20,20,0,
+2025-09,finished_goods,50,0.60,30,0,20
+2026-09,raw_material,100,0.60,60,6,
+2026-09,work_in_progress,100,0.20,20,0,
+2026-09,finished_goods,40,0.60,24,0,10

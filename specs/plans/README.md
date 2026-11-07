@@ -71,6 +71,8 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 
 ## 当前执行计划
 
+行业基本面独立Skill已按预算执行收尾，四份已执行计划退出当前入口，需求与设计统一见[行业基本面实现](../2026-11-07-industry-fundamentals-implementation.md)。核心离线行为、美国原油六条代表来源与12期表图、后续需求兑现／资金周转／库存组成三项增量行为通过。**limited完整交付及最终报告对用户错误摘要的属性／采用说明仍为同一未验证场景**，首次环境限制、初始化失败、能源续派消息留存不足和历史过程偏差继续保留。清理范围与原件见[行业清理回源](#industry-fundamentals-closeout)，不登记全部行为通过，不新增研究或重跑授权。
+
 全球宏观各批已按批准范围收尾，已完成计划全部退出当前执行入口。需求、设计、实现与当前限制统一见[全球宏观实现文档](../2026-11-07-global-macro-fundamentals-implementation.md)；[历史清理回源](#global-macro-closeout)与[市场定价及融资收尾](#global-macro-pricing-and-financing-closeout)保留已完成与未证范围，不授权新增取证或重跑。
 
 中国宏观历史数据对照与跨年化债的执行及授权增量补证已收尾，
@@ -378,3 +380,11 @@ R1–R3按批准范围完成；[原总验收](../../.hetu/validation/global-macr
 2026-11-07已按[用户批准的可得数据范围](../../.hetu/validation/global-macro-pricing-and-financing/acceptance.md#approved-closeout-20261107)完成：01、02规则、GM13三项行为及S4等已通过结果有效；S1第二日兼容报价／共同定义、S3八周三个月基差、S5实际共同报价时刻／报价侧／基准切券仍未完整验证，不改判来源通过，不作为本版本继续执行前置。[公开补证](../../.hetu/validation/global-macro-pricing-and-financing/public-closeout-20261107-005011/acceptance.md)保留已有数值、比较、图片和准确缺项。
 
 原路线图和01–03四份计划已退出工作区，原文从上述固定提交或本次归档回查；历史预算、调用／错误、失败、评审及监测偏差保留，不重置统计或追加研究。当前使用与限制由[使用说明](../../docs/global-macro-skill-usage.md)和[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)维护。
+
+<a id="industry-fundamentals-closeout"></a>
+
+### 行业基本面独立Skill
+
+2026-11-07按用户要求合并需求与设计、清理四份已执行收尾计划及当次临时运行目录。当前行为、三项增强和验收边界由[行业基本面实现](../2026-11-07-industry-fundamentals-implementation.md)统一维护，[原文及清理记录](../../.hetu/validation/industry-fundamentals/cleanup-20261107-161420/README.md)保留需求、设计、计划原字节及替代关系。
+
+[原验收](../../.hetu/validation/industry-fundamentals/acceptance.md)及[三项增量验收](../../.hetu/validation/industry-demand-cash-inventory-20261107-154046/acceptance.md)继续有效。limited完整内联及用户错误摘要的属性／采用说明尚未验证，原初始化失败、能源续派消息留存不足和过程偏差保持，未改判全部通过。清理不重跑研究、不追加来源、不改变Skill或材料原值；本次提交按用户最新明确授权执行。
