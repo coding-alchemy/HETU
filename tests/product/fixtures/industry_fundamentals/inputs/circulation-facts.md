@@ -1,0 +1,10 @@
+<!-- fixture:CIRCULATION -->
+本组地区、行业、机构、企业、项目、数值均为合成，供离线研究，未对应真实公司或公网发布。研究对象为甲地区工业材料X。以下资料统一于2026-10-25发布，为同期可比版本；原始定位为所附CSV和本说明，公开URL不存在。
+
+合成统计局《工业材料X下游采购与使用表》和合成项目集团P《前三季度项目进度披露》整理于[下游与项目表](circulation-projects.csv)。每行覆盖对应年份1—9月；金额为人民币百万元，数量为吨，投运能力为MW，利用率为百分数，授信利率为年利率百分数。industry_purchase_t与industry_final_use_t分别为地区全行业下游实际采购量与最终使用量；project_customer_purchase_t为其中数据中心项目客户群的实际采购，other_customer_purchase_t为其他用途采购，分组互斥。资本开支指引为当年1月公开的全年计划，actual_capex为同年1—9月实付购建支出；credit_announced为本期披露授信额度，financing_received为本期实际提款到账。各指标不能作为一套完整现金收支平衡表。
+
+项目集团P的交付、安装和利用数据为企业披露，未经外部审计，范围为同一组项目。2026年1—9月X经销商向该项目采购平台交付700吨，平台向项目公司交付亦为同一批700吨，对应project_delivery_t；2025年同类批次为600吨。project_orders_t为当期新下单量，project_installed_t为当期安装验收用量。operating_capacity_mw为9月末已投运能力，actual_utilization_pct为已投运能力1—9月的平均利用率，非材料使用量。
+
+合成行业协会《固定10家生产企业季度披露汇总》提供[季度经营表](circulation-finance.csv)。样本两年不变、口径相同，均为X生产业务；来自企业披露汇总，未经独立审计，样本出货量占地区总量2025年1—9月为38%、2026年为40%，不能按该比例放大金额。收入revenue、营业利润operating_profit、净利润net_profit、销售收现sales_cash_received与经营现金流净额operating_cash_net均为单季流量，人民币百万元；receivables_end为季末应收账款账面余额，同币种单位。收现包括当季及前期销售结算，未提供逐笔税项与回款归属表。2026年7月起，样本部分项目客户付款条件由交付后30天改为90天，部分原料供应商付款条件由60天改为30天；未提供各合同金额占比或完整现金流调节表。
+
+同一10家企业的合成《存货及计量附注》提供[存货分类表](circulation-inventory.csv)，两期均为9月末同仓库、货权自有、同覆盖。原材料raw_material、在制品work_in_progress及产成品finished_goods分别列实物吨数quantity_t、每吨移动加权历史成本unit_cost_million_yuan_t、账面余额gross_million_yuan及减值准备allowance_million_yuan，金额单位为人民币百万元。净额为余额减准备，未改变会计政策或合并范围；原料同规格、两期采购批次不同，成本变化不来自按当前市价重估。在制品尚须加工，原料尚须投入生产。allocated_t仅对产成品有值，表示已被现有客户订单占用的数量；其余产成品经质检可在7日内交付，尚无客户订单。未给全行业库存、库龄、期后实际出售或客户取消数据。

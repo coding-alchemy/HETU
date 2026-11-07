@@ -1,0 +1,224 @@
+{
+  "IF01/main/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "MAIN"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "COMMON"
+      ],
+      [
+        "inputs/facts.md",
+        "HISTORY"
+      ],
+      [
+        "inputs/facts.md",
+        "STRUCTURE"
+      ],
+      [
+        "inputs/facts.md",
+        "COST_COMPETITION"
+      ],
+      [
+        "inputs/facts.md",
+        "LATE"
+      ],
+      [
+        "inputs/facts.md",
+        "BASE"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/history.csv",
+        "history.csv"
+      ],
+      [
+        "assets/comparison.csv",
+        "comparison.csv"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-11-01T12:00:00+08:00"
+    ]
+  },
+  "IF01/limited/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "MAIN"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "COMMON"
+      ],
+      [
+        "inputs/facts.md",
+        "HISTORY"
+      ],
+      [
+        "inputs/facts.md",
+        "STRUCTURE"
+      ],
+      [
+        "inputs/facts.md",
+        "COST_COMPETITION"
+      ],
+      [
+        "inputs/facts.md",
+        "LATE"
+      ],
+      [
+        "inputs/facts.md",
+        "USER"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/history.csv",
+        "history.csv"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-11-01T12:00:00+08:00"
+    ]
+  },
+  "IF01/price/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "PRICE"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/facts.md",
+        "COMMON"
+      ],
+      [
+        "inputs/facts.md",
+        "PRICE_DATA"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/prices.csv",
+        "prices.csv"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-11-01T12:00:00+08:00"
+    ]
+  },
+  "IF02/entry/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "ENTRY1"
+      ]
+    ],
+    "material": [],
+    "assets": [],
+    "context": "new",
+    "as_of": [
+      "2026-11-01T12:00:00+08:00"
+    ]
+  },
+  "IF02/entry/02": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "ENTRY2"
+      ]
+    ],
+    "material": [],
+    "assets": [],
+    "context": "continue",
+    "as_of": [
+      "2026-11-01T12:00:00+08:00"
+    ]
+  },
+  "IF02/entry/03": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/tasks.md",
+        "ENTRY3"
+      ]
+    ],
+    "material": [],
+    "assets": [],
+    "context": "continue",
+    "as_of": [
+      "2026-11-01T12:00:00+08:00"
+    ]
+  },
+  "IF03/circulation/01": {
+    "task": [
+      [
+        "inputs/tasks.md",
+        "ENV"
+      ],
+      [
+        "inputs/circulation-task.md",
+        "CIRCULATION"
+      ]
+    ],
+    "material": [
+      [
+        "inputs/circulation-facts.md",
+        "CIRCULATION"
+      ]
+    ],
+    "assets": [
+      [
+        "assets/circulation-projects.csv",
+        "circulation-projects.csv"
+      ],
+      [
+        "assets/circulation-finance.csv",
+        "circulation-finance.csv"
+      ],
+      [
+        "assets/circulation-inventory.csv",
+        "circulation-inventory.csv"
+      ]
+    ],
+    "context": "new",
+    "as_of": [
+      "2026-11-01T12:00:00+08:00"
+    ]
+  }
+}
