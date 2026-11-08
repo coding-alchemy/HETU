@@ -77,6 +77,8 @@ def test_archive_restore_preserves_readable_snapshot(tmp_path):
     from hetu_quant.data_archive import backup_archive, query_archive, verify_archive_backup
 
     store, ref = build_case_store(tmp_path / "source", make_backtest_case("coverage"))
+    for product in store.config["products"].values():
+        product["permission"]["allowed_operations"] = ["backup"]
     query = dict(codes=("SYN_EXIT.SZ",), start=date(2023, 12, 1), end=date(2024, 1, 4))
     expected = query_archive(store, ref, **query)["bars"]
     destination = tmp_path / "backup"
@@ -122,7 +124,7 @@ def test_archive_production_layout_range_and_evidence_restore(tmp_path, layout):
     from hetu_quant.data_archive import ARCHIVE_COLUMNS, backup_archive, open_archive_view, verify_archive_backup
     from test_data_sources import request, store
 
-    ds, adapter = store(tmp_path)
+    ds, adapter = store(tmp_path, allowed_operations=["read", "acquire", "backup"])
     ds.config["products"]["ts_a_daily"]["storage_layout"] = layout
     ref = ds.prepare(request())
     params = dict(codes=("SYNTH.SH",), start=date(2025, 1, 1), end=date(2025, 1, 2), columns=ARCHIVE_COLUMNS)
@@ -180,6 +182,8 @@ def test_archive_restore_includes_standalone_disposal_evidence(tmp_path):
         sha256=hashlib.sha256(original).hexdigest(),
     )]).to_csv(index=False)
     store, ref = build_case_store(tmp_path / "source", case)
+    for product in store.config["products"].values():
+        product["permission"]["allowed_operations"] = ["backup"]
     source = store.root / "evidence" / name
     source.write_bytes(original)
     restored = backup_archive(store, ref, tmp_path / "restored")
@@ -647,3 +651,346 @@ def test_archive_query_matches_audit_for_exact_values_from_two_sources(tmp_path,
     report = audit_archive(store, ref, requirements(case))
     row = next(r for r in report["coverage"] if r["code"] == code and r["domain"] == "daily_bars")
     assert row["conflicting_sessions"] == int(bool(amount_delta))
+
+
+def _raw_target(case, *, calendar_unknown=False, complete=True):
+    history = targets(case)
+    history["code_period_id"] = history.identity_id + "-first"
+    history.attrs["target_scope"].update(complete=complete, source_version="first", unknown_ranges=[])
+    calendar = pd.read_csv(io.StringIO(case["csvs"]["calendar"]), dtype=str)
+    calendar["product_id"] = "synthetic_calendar"
+    calendar["source_ref"] = "synthetic-exchange-calendar"
+    scopes = [dict(product_id="synthetic_calendar", market=market, valid_from="2023-01-04",
+                   valid_to="2024-01-04", source_ref="synthetic-market-calendar")
+              for market in ("SH", "SZ", "BJ")]
+    if calendar_unknown:
+        # The exit market lacks its last day; the other markets still have that date.
+        scopes[1]["valid_to"] = "2023-12-28"
+    return archive_requirements(history, calendar, date(2024, 1, 4), years=1, calendar_scopes=tuple(scopes))
+
+
+def _registered(store, ref):
+    return dict(root=str(store.root), snapshot_id=ref.snapshot_id,
+                tables=sorted({entry["table"] for entry in store.load_manifest(ref)["table_files"]}),
+                config_path=str(store.root.parent / "products.json"))
+
+
+def test_raw_archive_independent_segments_and_market_calendar(tmp_path):
+    from hetu_data.archive import audit_library
+    from hetu_data.library import publish_library
+
+    case = make_backtest_case("coverage")
+    bars = pd.read_csv(io.StringIO(case["csvs"]["daily_bars"]))
+    case["csvs"]["daily_bars"] = bars[~bars.code.eq("SYN_EXIT.SZ")].to_csv(index=False)
+    store, ref = build_case_store(tmp_path, case)
+    lib = publish_library(store, asset_snapshots=(_registered(store, ref),))
+    report = audit_library(store, lib, _raw_target(case))
+    assert report["coverage_counts"] == dict(
+        expected=8, qualified_bars=6, no_trade=0, unknown_or_conflict=2, outside_scope=0
+    )
+    exit_row = next(r for r in report["coverage"]
+                    if r["code"] == "SYN_EXIT.SZ" and r["domain"] == "daily_bars")
+    assert exit_row["data_gaps"] == [["2023-01-04", "2023-12-29"]]
+    unknown = _raw_target(case, calendar_unknown=True)
+    assert "2023-12-29" in unknown["expected_sessions_by_market"]["SH"]
+    assert "2023-12-29" not in unknown["expected_sessions_by_market"]["SZ"]
+    report = audit_library(store, lib, unknown)
+    assert report["coverage_ratio"] is None
+    assert report["raw_price_complete"] is False
+
+    # One reused historical code is acceptable only across disjoint proved periods.
+    history = targets(case)
+    first = history.iloc[0].to_dict()
+    history.loc[0, "valid_to"] = "2023-12-29"
+    history["code_period_id"] = ["old", "exited", "new"]
+    second = dict(first, identity_id="different-owner", code_period_id="reassigned", valid_from="2024-01-02")
+    history = pd.concat([history, pd.DataFrame([second])], ignore_index=True)
+    calendar = pd.read_csv(io.StringIO(case["csvs"]["calendar"])).assign(product_id="synthetic_calendar",
+                                                                        source_ref="calendar")
+    scope = dict(product_id="synthetic_calendar", market="SH", valid_from="2023-01-04",
+                 valid_to="2024-01-04", source_ref="calendar-scope")
+    req = archive_requirements(history, calendar, date(2024, 1, 4), years=1, calendar_scopes=(scope,))
+    same = [obj for obj in req["objects"] if obj["code"] == "SYN_A.SH"]
+    assert len(same) == 2 and all(obj["lifecycle_known"] for obj in same)
+    history.loc[history.code_period_id.eq("reassigned"), "valid_from"] = "2023-12-29"
+    req = archive_requirements(history, calendar, date(2024, 1, 4), years=1, calendar_scopes=(scope,))
+    assert any(not obj["lifecycle_known"] for obj in req["objects"] if obj["code"] == "SYN_A.SH")
+    history.loc[history.code.eq("SYN_NEW.BJ"), "code_period_id"] = ""
+    req = archive_requirements(history, calendar, date(2024, 1, 4), years=1, calendar_scopes=(scope,))
+    assert any(not obj["lifecycle_known"] for obj in req["objects"] if obj["code"] == "SYN_NEW.BJ")
+
+
+@pytest.mark.parametrize("missing_amount", [False, True])
+def test_raw_archive_counts_and_auxiliary_are_separate(tmp_path, missing_amount):
+    import json
+
+    from hetu_data.archive import audit_library, list_archive_targets, load_archive_coverage
+    from hetu_data.library import publish_library
+
+    case = make_backtest_case("coverage")
+    bars = pd.read_csv(io.StringIO(case["csvs"]["daily_bars"]))
+    if missing_amount:
+        bars.loc[0, "amount_cny"] = None
+    case["csvs"]["daily_bars"] = bars.to_csv(index=False)
+    store, ref = build_case_store(tmp_path / "base", case, tables=("daily_bars", "calendar"))
+    other, other_ref = build_case_store(tmp_path / "duplicate", case, tables=("daily_bars",))
+    registration = _registered(store, ref)
+    lib = publish_library(store, asset_snapshots=(registration, registration, _registered(other, other_ref)))
+    req = _raw_target(case)
+    report = audit_library(store, lib, req)
+    assert report["coverage_counts"] == dict(expected=8, qualified_bars=7 if missing_amount else 8,
+                                             no_trade=0, unknown_or_conflict=int(missing_amount), outside_scope=0)
+    assert report["raw_price_complete"] is (not missing_amount)
+    assert report["adjustment_complete"] is False
+    unknown = audit_library(store, lib, _raw_target(case, complete=False))
+    assert unknown["coverage_ratio"] is None and unknown["known_scope_ratio"] == (7 if missing_amount else 8) / 8
+    target = store.root / "archive/targets/synthetic.json"
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps(dict(target_id="synthetic", requirements=req)))
+    path = store.root / "archive/coverage" / lib.library_id / target.name
+    path.parent.mkdir(parents=True)
+    assert load_archive_coverage(store, lib, "synthetic") is None
+    path.write_text(json.dumps(report))
+    assert [row["target_id"] for row in list_archive_targets(store)] == ["synthetic"]
+    assert load_archive_coverage(store, lib, "synthetic") == report
+
+
+@pytest.mark.parametrize("with_bar, suspension, expected", [
+    (False, False, (7, 0, 1)), (False, True, (7, 1, 0)), (True, True, (7, 0, 1)),
+])
+def test_raw_archive_empty_and_trade_conflict_remain_open(tmp_path, with_bar, suspension, expected):
+    from hetu_data.archive import audit_library
+    from hetu_data.library import publish_library
+
+    case = make_backtest_case("coverage")
+    bars = pd.read_csv(io.StringIO(case["csvs"]["daily_bars"]))
+    row = bars.code.eq("SYN_A.SH") & bars.date.eq("2024-01-02")
+    if not with_bar:
+        case["csvs"]["daily_bars"] = bars[~row].to_csv(index=False)
+    states = pd.read_csv(io.StringIO(case["csvs"]["security_status"]), dtype=str)
+    row = states.code.eq("SYN_A.SH") & states.date.eq("2024-01-02")
+    states.loc[row, "is_suspended"] = str(suspension)
+    states.loc[row, "is_st"] = ""  # The archive purpose only needs the independently known halt.
+    case["csvs"]["security_status"] = states.to_csv(index=False)
+    store, ref = build_case_store(tmp_path, case)
+    lib = publish_library(store, asset_snapshots=(_registered(store, ref),))
+    counts = audit_library(store, lib, _raw_target(case))["coverage_counts"]
+    assert tuple(counts[k] for k in ("qualified_bars", "no_trade", "unknown_or_conflict")) == expected
+
+
+def test_coverage_plan_keeps_mode_and_unknown_cost(tmp_path):
+    from hetu_data.access import AccessDenied
+    from hetu_data.updates import plan_update
+
+    from test_data_sources import request
+    from test_data_sources import store as source_store
+
+    store, _ = source_store(tmp_path)
+    as_of = request().as_of
+    audit = dict(unknown_ranges=[{"reason": "scope unknown"}], coverage=[
+        dict(domain="daily_bars", code="SYNTH.SH", data_gaps=[["2026-01-05", "2026-01-05"]])
+    ])
+    args = dict(as_of=as_of, domain_products={"daily_bars": "ts_a_daily"})
+    contracts = dict(products={"ts_a_daily": {"max_days": 30}})
+    with pytest.raises(AccessDenied):
+        plan_coverage_gaps([audit], store, contracts=contracts, **args)
+    for fees in ({}, {"new_data_fee_cny": 0}):
+        contract = {**contracts, **fees}
+        proposed = plan_coverage_gaps([audit], store, contracts=contract, mode="paid", **args)
+        assert proposed["counts"]["data_fee_cny"] is fees.get("new_data_fee_cny")
+        assert proposed["new_data_fee_cny"] is fees.get("new_data_fee_cny")
+        frozen = plan_update(request(), store, contract, audited_segments=proposed["requests"])
+        assert frozen["counts"]["data_fee_cny"] is fees.get("new_data_fee_cny")
+        assert proposed["unknown_ranges"] == audit["unknown_ranges"]
+
+
+def _backup_library_fixture(tmp_path):
+    import json
+
+    from hetu_data.library import publish_library
+
+    from test_data_sources import request
+    from test_data_sources import store as source_store
+
+    owners = []
+    for name, day in (("history", "2026-01-05"), ("increment", "2026-01-06")):
+        root = tmp_path / name
+        root.mkdir()
+        owner, _ = source_store(root)
+        ref = owner.prepare(request(start=day, end=day))
+        config = root / "products.json"
+        products = owner.config
+        products["products"]["ts_a_daily"]["token"] = "SYNTHETIC-DO-NOT-COPY-TOKEN"
+        products["products"]["ts_a_daily"]["headers"] = {"Authorization": "SYNTHETIC-DO-NOT-COPY-HEADER"}
+        config.write_text(json.dumps(products))
+        owners.append((owner, ref))
+    store = owners[0][0]
+    return store, publish_library(store, asset_snapshots=tuple(_registered(o, r) for o, r in owners)), owners
+
+
+def _permit_backup(store, *, expired=False):
+    import json
+
+    path = store.root / "data-entitlements.json"
+    doc = json.loads(path.read_text())
+    for grant in doc["grants"]:
+        grant["allowed_operations"].append("backup")
+        if expired:
+            grant.update(acquire_until="2000-01-01", retained_use=True)
+    path.write_text(json.dumps(doc))
+
+
+def test_library_backup_permissions_and_manifest_restore(tmp_path):
+    from hetu_data import DataStore
+    from hetu_data.access import AccessDenied
+    from hetu_data.archive import backup_library, verify_library_backup
+    from hetu_data.library import query_library
+
+    store, lib, owners = _backup_library_fixture(tmp_path)
+    query = dict(codes=("SYNTH.SH",), start=date(2026, 1, 5), end=date(2026, 1, 6))
+    before = query_library(store, lib, **query)["bars"]
+    dest = tmp_path / "backup"
+    with pytest.raises(AccessDenied, match="backup|grant"):
+        backup_library(store, lib, dest)
+    assert not dest.exists()
+    _permit_backup(owners[0][0])
+    _permit_backup(owners[1][0], expired=True)
+    assert len(query_library(store, lib, **query)["bars"]) == 2
+    with pytest.raises(AccessDenied, match="ended|backup"):
+        backup_library(store, lib, dest)
+    assert not dest.exists()
+    entitlement = owners[1][0].root / "data-entitlements.json"
+    # Restore the normal acquisition deadline using the structured grant, not the serialized order.
+    import json
+
+    doc = json.loads(entitlement.read_text())
+    doc["grants"][0]["acquire_until"] = "2099-12-31"
+    entitlement.write_text(json.dumps(doc))
+    restored = backup_library(store, lib, dest)
+    assert restored.library_id == lib.library_id
+    for owner, _ in owners:
+        owner.root.rename(owner.root.with_name("offline"))
+    for file in dest.rglob("*.json"):
+        assert "SYNTHETIC-DO-NOT-COPY" not in file.read_text()
+    assert verify_library_backup(dest) == restored
+    after = query_library(DataStore(dest), restored, **query)["bars"]
+    pd.testing.assert_frame_equal(before, after)
+    entitlement = next(dest.rglob("data-entitlements.json"))
+    doc = json.loads(entitlement.read_text())
+    doc["grants"][0]["allowed_operations"].remove("read")
+    entitlement.write_text(json.dumps(doc))
+    with pytest.raises(AccessDenied):
+        query_library(DataStore(dest), restored, **query)
+
+
+@pytest.mark.parametrize("kind", ["library", "snapshot", "raw", "evidence"])
+def test_library_restore_rejects_missing_registered_asset(tmp_path, kind):
+    from hetu_data.archive import backup_library, verify_library_backup
+    from hetu_data.library import load_library
+    from hetu_data.store import SnapshotTamperedError
+
+    store, lib, owners = _backup_library_fixture(tmp_path)
+    for owner, _ in owners:
+        _permit_backup(owner)
+    dest = tmp_path / "backup"
+    backup_library(store, lib, dest)
+    pattern = {"library": "libraries/*/manifest.json", "snapshot": "**/snapshots/*/manifest.json",
+               "raw": "**/raw/**/*.*", "evidence": "**/evidence/*"}[kind]
+    file = next(dest.glob(pattern))
+    file.unlink()
+    with pytest.raises(SnapshotTamperedError, match=file.name):
+        verify_library_backup(dest)
+    assert load_library(store, lib)["library_id"] == lib.library_id
+
+
+@pytest.mark.parametrize("allow_entire_query", [False, True])
+def test_paid_backup_authorizes_raw_query_not_bounded_import(tmp_path, allow_entire_query):
+    import json
+
+    from hetu_data.access import AccessDenied
+    from hetu_data.archive import backup_archive, backup_library
+    from hetu_data.library import publish_library
+
+    from source_cases import response
+    from test_data_sources import request
+    from test_data_sources import store as source_store
+
+    day, later = "2026-01-05", "2026-01-06"
+    ds, _ = source_store(
+        tmp_path, start=day, end=later if allow_entire_query else day,
+        allowed_operations=["read", "import", "backup"],
+    )
+    body = json.loads(response())
+    body["data"]["items"] += json.loads(response(day="20260106"))["data"]["items"]
+    original = tmp_path / "source.json"
+    original.write_text(json.dumps(body))
+    req = request(start=day, end=day)
+    description = tmp_path / "import.json"
+    description.write_text(json.dumps(dict(mode="paid", items=[dict(
+        product_id="ts_a_daily", table="daily_bars", files=[original.name], format="provider_json",
+        query=dict(api="daily", params=dict(ts_code="SYNTH.SH", start_date="20260105", end_date="20260106")),
+        request=data_request_to_dict(req),
+        source=dict(name="tushare", fee_class="paid", permission_basis="synthetic",
+                    obtained_at="2026-01-07T18:00:00+08:00"),
+    )])))
+    snap = ds.import_files(description, (original,))
+    assert ds.read_table(snap, "daily_bars").date.tolist() == [day]
+    lib = publish_library(ds, asset_snapshots=(dict(
+        root=str(ds.root), snapshot_id=snap.snapshot_id, tables=["daily_bars"],
+    ),))
+    for key, function, ref in (("snapshot", backup_archive, snap), ("library", backup_library, lib)):
+        destination = tmp_path / key
+        if allow_entire_query:
+            restored = function(ds, ref, destination)
+            assert any("20260106" in path.read_text() for path in restored.root.rglob("source.json"))
+        else:
+            with pytest.raises(AccessDenied, match="backup|granted period"):
+                function(ds, ref, destination)
+            assert not destination.exists()
+
+
+def test_library_audit_uses_only_scoped_primary_source_basis(tmp_path):
+    import json
+
+    from hetu_data.archive import audit_library
+    from hetu_data.library import publish_library, query_library
+
+    case = make_backtest_case("coverage")
+    primary, snapshot = build_case_store(tmp_path / "primary", case, tables=("daily_bars",))
+    other_case = make_backtest_case("coverage")
+    code, day = "SYN_A.SH", "2024-01-02"
+    bars = pd.read_csv(io.StringIO(case["csvs"]["daily_bars"]))
+    bars = bars[bars.code.eq(code) & bars.date.eq(day)].copy()
+    original_amount = float(bars.iloc[0].amount_cny)
+    bars["amount_cny"] += 1
+    other_case["csvs"]["daily_bars"] = bars.to_csv(index=False)
+    product, kind = case["table_products"]["daily_bars"]
+    other_case["table_products"]["daily_bars"] = ("second_source", kind)
+    other, other_snapshot = build_case_store(tmp_path / "other", other_case, tables=("daily_bars",))
+    assets = [_registered(primary, snapshot), _registered(other, other_snapshot)]
+    req = _raw_target(case)
+    unproved = publish_library(primary, asset_snapshots=assets)
+    assert audit_library(primary, unproved, req)["coverage_counts"]["qualified_bars"] == 7
+
+    rel = "evidence/synthetic-source-policy.json"
+    basis = dict(purpose="daily_archive", primary_product_id=product, compared_product_ids=["second_source"],
+                 codes=[code], start=day, end=day, fields=["amount_cny"], basis="合成主源口径批准")
+    (primary.root / rel).write_text(json.dumps(basis))
+    assets[0]["source_policy"] = dict(primary_product_id=product, basis_ref=rel)
+    chosen = publish_library(primary, asset_snapshots=assets)
+    report = audit_library(primary, chosen, req)
+    assert report["coverage_counts"]["qualified_bars"] == 8
+    assert report["raw_price_complete"] is True
+    diff, = report["source_differences"]
+    assert (diff["code"], diff["date"], diff["fields"], diff["basis_ref"]) == (code, day, ["amount_cny"], rel)
+    assert {row["amount_cny"] for row in diff["rows"]} == {original_amount, original_amount + 1}
+    on = date.fromisoformat(day)
+    query = query_library(primary, chosen, codes=(code,), start=on, end=on)
+    assert set(query["bars"].amount_cny) == {original_amount, original_amount + 1}
+
+    # Subsequent edits cannot widen the already published rule.
+    basis["codes"] = ["SYN_EXIT.SZ"]
+    (primary.root / rel).write_text(json.dumps(basis))
+    assert audit_library(primary, chosen, req)["coverage_counts"]["qualified_bars"] == 7
+    out_of_scope = publish_library(primary, asset_snapshots=assets)
+    assert audit_library(primary, out_of_scope, req)["coverage_counts"]["qualified_bars"] == 7

@@ -20,6 +20,8 @@ python -m pip install --no-index --find-links /absolute/wheelhouse -c data/requi
 
 每个 CLI 入口显式指定数据根。`query`、网页查询和导出均为本地操作。`plan` 预览，`submit` 入队，获准后才由 `worker` 执行。`worker --once` 排空可执行队列后退出。研究侧可消费同一数据根及任务机制。
 
+`hetu-data libraries --root <数据根>` 列出已发布的库版本。`query --library <库版本>` 按固定清单查询历史和增量分片，也可指定市场和数值条件。`query --snapshot <快照>` 继续用于单快照。库引用可读与全历史覆盖分别验收。
+
 - [统一使用手册](../docs/quant-research-platform-usage.md)提供配置、命令和 Python／SQL 示例。
 - [数据字典与维护合同](../quant/DATA.md)说明字段、单位、读取权限、存储和恢复。
 - [初始实现与验收](../specs/2026-11-07-quant-research-platform-initial-implementation.md)区分工程可用、档案覆盖和研究资格。

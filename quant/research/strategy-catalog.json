@@ -1,0 +1,134 @@
+[
+  {
+    "strategy_id": "low_volatility",
+    "name": "低波动多头",
+    "markets": [
+      "CN_A"
+    ],
+    "hypothesis": "低波动",
+    "frequency": "monthly",
+    "rules_ref": "low-volatility.md",
+    "source_refs": [
+      "https://link.springer.com/article/10.1057/s41260-021-00218-0"
+    ],
+    "statuses": {},
+    "code_refs": [
+      "low_volatility.py"
+    ],
+    "study_ids": [
+      "phase2-lowvol"
+    ],
+    "data_refs": [
+      "phase2-protocol.json"
+    ],
+    "adaptation_refs": [
+      "phase2-candidates.md"
+    ]
+  },
+  {
+    "strategy_id": "ep_value",
+    "name": "E/P 价值",
+    "markets": [
+      "CN_A"
+    ],
+    "hypothesis": "价值",
+    "frequency": "monthly",
+    "rules_ref": "ep-value.md",
+    "source_refs": [
+      "https://rodneywhitecenter.wharton.upenn.edu/wp-content/uploads/2019/04/01-18-Stambaugh.Published.BlumePrize.pdf"
+    ],
+    "statuses": {}
+  },
+  {
+    "strategy_id": "dividend_low_volatility",
+    "name": "红利低波",
+    "markets": [
+      "CN_A"
+    ],
+    "hypothesis": "股息与波动",
+    "frequency": "annual",
+    "rules_ref": "dividend-low-volatility.md",
+    "source_refs": [
+      "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/H30269_Index_Methodology_cn.pdf"
+    ],
+    "statuses": {}
+  },
+  {
+    "strategy_id": "weekly_reversal",
+    "name": "周频多头反转",
+    "markets": [
+      "CN_A"
+    ],
+    "hypothesis": "反转",
+    "frequency": "weekly",
+    "rules_ref": "phase2-candidates.md",
+    "source_refs": [
+      "https://rodneywhitecenter.wharton.upenn.edu/wp-content/uploads/2019/04/01-18-Stambaugh.Published.BlumePrize.pdf"
+    ],
+    "statuses": {}
+  },
+  {
+    "strategy_id": "medium_momentum",
+    "name": "中期截面动量",
+    "markets": [
+      "CN_A"
+    ],
+    "hypothesis": "动量",
+    "frequency": null,
+    "rules_ref": "phase2-candidates.md",
+    "source_refs": [
+      "https://www.nber.org/papers/w7159"
+    ],
+    "statuses": {}
+  },
+  {
+    "strategy_id": "industry_rotation",
+    "name": "行业轮动",
+    "markets": [
+      "CN_A"
+    ],
+    "hypothesis": "行业动量",
+    "frequency": null,
+    "rules_ref": "phase2-candidates.md",
+    "source_refs": [
+      "https://onlinelibrary.wiley.com/doi/10.1111/0022-1082.00146"
+    ],
+    "statuses": {}
+  },
+  {
+    "strategy_id": "quality_value",
+    "name": "质量与价值",
+    "markets": [
+      "CN_A"
+    ],
+    "hypothesis": "质量与价值",
+    "frequency": null,
+    "rules_ref": "phase2-candidates.md",
+    "source_refs": [],
+    "statuses": {}
+  },
+  {
+    "strategy_id": "universe_vw",
+    "name": "透明市值基准",
+    "markets": [
+      "CN_A"
+    ],
+    "hypothesis": "市值权重",
+    "frequency": "weekly/monthly",
+    "rules_ref": "phase2-protocol.json",
+    "source_refs": [],
+    "statuses": {},
+    "code_refs": [
+      "../src/hetu_quant/strategies.py"
+    ],
+    "study_ids": [
+      "phase2-lowvol"
+    ],
+    "data_refs": [
+      "phase2-protocol.json"
+    ],
+    "adaptation_refs": [
+      "phase2-candidates.md"
+    ]
+  }
+]

@@ -255,6 +255,11 @@ def test_backtest_page_lifecycle_and_free_boundary(tmp_path, monkeypatch) -> Non
     reopened = AppTest.from_file(str(APP_PATH)).run()
     table = reopened.dataframe[0].value
     assert first.job_id in set(table["任务号"].astype(str))
+    reopened.selectbox(key="job_detail").set_value(newest.job_id).run()
+    details = [json.loads(item.value) for item in reopened.json]
+    assert any(value.get("definition", {}).get("snapshot_id") == ref.snapshot_id for value in details)
+    reopened.button(key="job_open").click().run()
+    assert reopened.selectbox(key="bt_result_select").value == "bt-fake-1"
     reopened.sidebar.radio[0].set_value("回测").run()
     assert "bt-fake-1" in "\n".join(
         str(item.value) for item in reopened.selectbox
@@ -591,3 +596,99 @@ def test_mechanism_page_selects_only_transparent_benchmark(tmp_path, monkeypatch
     with pytest.raises(ValueError, match="universe_vw"):
         _build_definition(dict(stage="mechanism", strategy_id="low_volatility"))
     assert frozen.snapshot_id == ref.snapshot_id
+
+
+def test_existing_results_remain_readable(tmp_path, monkeypatch):
+    ref = _publish_fake_backtest(tmp_path)
+    monkeypatch.setenv("HETU_QUANT_ROOT", str(tmp_path))
+    app = AppTest.from_file(str(APP_PATH)).run()
+    app.sidebar.radio[0].set_value("回测").run()
+    assert any("尚无已发布快照" in item.value for item in app.warning)
+    assert app.selectbox(key="bt_result_select").value == ref.run_id
+    app.button(key="bt_export_zip").click().run()
+    assert app.session_state["bt_export_payload"][0] == ref.run_id
+    assert _jobs(tmp_path) == []
+
+
+def test_comparison_uses_actual_sample(tmp_path):
+    a, b = (_publish_fake_backtest(tmp_path, f"synthetic-{suffix}") for suffix in ("a", "b"))
+
+    def publish_sample(ref, codes):
+        bundle = tmp_path / "backtests" / ref.run_id / "bundle"
+        bundle.mkdir(exist_ok=True)
+        pd.DataFrame({"signal_date": ["2024-01-03"] * len(codes), "code": codes}).to_parquet(
+            bundle / "universe.parquet", index=False,
+        )
+
+    assert not compare_backtests(a, b)["mixed_ranking_allowed"]
+    publish_sample(a, ["SYN_A", "SYN_B"])
+    publish_sample(b, ["SYN_A", "SYN_C"])
+    comparison = compare_backtests(a, b)
+    assert not comparison["mixed_ranking_allowed"]
+    assert any("actual_historical_universe" in item for item in comparison["differences"])
+    publish_sample(b, ["SYN_B", "SYN_A"])
+    assert compare_backtests(a, b)["mixed_ranking_allowed"]
+
+
+def test_formal_comparison_requires_same_published_benchmark(tmp_path):
+    a, b = (_publish_fake_backtest(tmp_path, f"synthetic-{suffix}") for suffix in ("a", "b"))
+    paths = []
+    for ref in (a, b):
+        published = tmp_path / "backtests" / ref.run_id
+        paths.append(published)
+        manifest_path = published / "backtest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["definition"]["protocol"] = {"stage": "formal", "benchmark_id": "universe_vw"}
+        manifest_path.write_text(json.dumps(manifest))
+        bundle = published / "bundle"
+        bundle.mkdir()
+        pd.DataFrame({"signal_date": ["2024-01-03"], "code": ["SYN_A"]}).to_parquet(bundle / "universe.parquet")
+    assert compare_backtests(a, b)["mixed_ranking_allowed"]
+
+    second_nav = paths[1] / "nav.parquet"
+    original = pd.read_parquet(second_nav)
+    original.assign(benchmark_nav=1234.0).to_parquet(second_nav)
+    changed = compare_backtests(a, b)
+    assert not changed["mixed_ranking_allowed"]
+    assert any("actual_benchmark_nav" in row for row in changed["differences"])
+
+    original.assign(date="2024-01-04").to_parquet(second_nav)
+    assert not compare_backtests(a, b)["mixed_ranking_allowed"]
+    original.assign(benchmark_nav=None).to_parquet(second_nav)
+    assert not compare_backtests(a, b)["mixed_ranking_allowed"]
+
+
+def test_strategy_configuration_without_json(tmp_path, monkeypatch):
+    root, ref, _ = _seed_root(tmp_path)
+    monkeypatch.setenv("HETU_QUANT_ROOT", str(root))
+    app = AppTest.from_file(str(APP_PATH)).run()
+    app.sidebar.radio[0].set_value("回测").run()
+    assert not app.exception
+    assert not any("JSON" in widget.label for widget in app.text_area)
+    app.selectbox(key="bt_trial").set_value("dev_main").run()
+    definition = next(json.loads(item.value) for item in app.json if '"strategy_id"' in item.value)
+    assert definition["snapshot_id"] == ref.snapshot_id
+    assert definition["protocol"]["research_execution"]["trial_id"] == "dev_main"
+    assert definition["protocol"]["trial_budget"]["max_runs"] == 8
+
+
+def test_copy_definition_preserves_protocol_and_budget(tmp_path):
+    from hetu_quant.ui.backtest_page import _build_formal_definition, copy_backtest_definition
+
+    payload = json.loads((REPO_ROOT / "quant/research/phase2-protocol.json").read_text())
+    definition = _build_formal_definition(payload, "development_validation", "dev_main")
+    experiments = ExperimentStore(tmp_path)
+    key = experiments.save_definition("backtest", definition)
+    path = experiments.definitions_dir / f"{key}.json"
+    original = path.read_bytes()
+    copied, differences = copy_backtest_definition(experiments, key, {"protocol.costs.commission_rate": .001})
+    assert differences == [{"path": "protocol.costs.commission_rate", "before": .0003, "after": .001}]
+    assert copied.protocol["research_execution"] == definition.protocol["research_execution"]
+    assert copied.protocol["trial_budget"] == definition.protocol["trial_budget"]
+    assert copied.protocol["universe"] == definition.protocol["universe"]
+    assert copied.protocol["execution"] == definition.protocol["execution"]
+    assert copied.snapshot_id == definition.snapshot_id and copied.mode == definition.mode
+    assert path.read_bytes() == original
+    assert experiments.list_definitions("backtest")[0]["definition_id"] == key
+    with pytest.raises(ValueError, match="unsupported"):
+        copy_backtest_definition(experiments, key, {"protocol.trial_budget.max_runs": 80})

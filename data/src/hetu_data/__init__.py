@@ -1,4 +1,4 @@
-from .models import DataRequest, JobRecord, QualityReport, SnapshotRef
+from .models import DataRequest, JobRecord, LibraryRef, QualityReport, SnapshotRef
 from .store import DataStore
 
-__all__ = ['DataRequest', 'DataStore', 'JobRecord', 'QualityReport', 'SnapshotRef']
+__all__ = ['DataRequest', 'DataStore', 'JobRecord', 'LibraryRef', 'QualityReport', 'SnapshotRef']

@@ -141,7 +141,10 @@ def test_maintenance_input_change_requires_preview(tmp_path, monkeypatch):
     from streamlit.testing.v1 import AppTest
 
     plan = dict(
-        request={"mode": "free"},
+        request=dict(
+            mode="free", product_ids=["cn_a_status"], codes=["SYNTH.SH"],
+            start="2026-01-01", end="2026-01-02", as_of="2026-01-02T12:00:00+08:00", purpose="daily_archive",
+        ),
         start="2026-01-01",
         target="2026-01-02",
         domains=[],
@@ -149,7 +152,7 @@ def test_maintenance_input_change_requires_preview(tmp_path, monkeypatch):
         limits={"approved_scope_ref": "synthetic"},
         target_scope={},
         unresolved=[],
-        segments=[{}],
+        segments=[dict(product_id="cn_a_status", codes=["SYNTH.SH"], start="2026-01-01", end="2026-01-02")],
     )
     monkeypatch.setattr("hetu_data.updates.maintenance_plan", lambda *a, **k: plan)
     (tmp_path / "maintenance-contracts.json").write_text('{"products": {}}')
@@ -170,6 +173,101 @@ def test_maintenance_input_change_requires_preview(tmp_path, monkeypatch):
     (tmp_path / "maintenance-contracts.json").write_text('{"products": {}, "changed": true}')
     app.run()
     assert app.button(key="maintenance_submit").disabled
+
+
+def test_ordinary_maintenance_form_freezes_scope_and_proposal(tmp_path, monkeypatch):
+    import json
+    import sys
+    from datetime import date
+
+    from streamlit.testing.v1 import AppTest
+
+    from hetu_data.catalog import DataTaskStore
+    from hetu_data.jobs import JobService
+    from hetu_data.store import DataStore
+    from hetu_data.ui import app as app_module
+
+    product = "ts_action_versions"
+    history = [
+        dict(code=code, market=market, security_type="stock", valid_from="2020-01-01",
+             source_ref="synthetic-independent-history")
+        for code, market in [("SYNTH.SH", "SH"), ("OTHER.SH", "SH"), ("OUTSIDE.SZ", "SZ")]
+    ]
+    scope = dict(complete=False, source_ref="synthetic-independent-history")
+    limits = dict(
+        approved_scope_ref="synthetic-batch", provider_fetch=3, upstream_product_requests=3,
+        network_attempts=3, daily_limits={"network_attempts": 1},
+        quota_scope_ref="synthetic-account", quota_timezone="Asia/Shanghai",
+    )
+    contract = dict(
+        products={product: dict(max_days=15, time_basis="natural_days", table="action_versions")},
+        limits=limits,
+        maintenance=dict(start="2026-01-05", history_records=history, target_scope=scope),
+    )
+    path = tmp_path / "maintenance-contracts.json"
+    path.write_text(json.dumps(contract))
+    entitlement = tmp_path / "data-entitlements.json"
+    grant = dict(
+        product_id=product, approved_scope_ref="synthetic-product", license_ref="synthetic",
+        allowed_operations=["read", "acquire"], markets=["SH"], codes=["SYNTH.SH"],
+        start="2026-01-01", end="2026-01-31", acquire_until="2099-12-31",
+    )
+    entitlement.write_text(json.dumps({"grants": [grant]}))
+    monkeypatch.setattr(DataStore, "_provider", lambda *_: pytest.fail("maintenance page called a provider"))
+    monkeypatch.setattr(sys, "argv", ["app.py", "--root", str(tmp_path)])
+    app = AppTest.from_file(app_module.__file__).run()
+    app.selectbox(key="maintenance_mode").set_value("paid")
+    app.date_input(key="maintenance_target").set_value(date(2026, 1, 6))
+    app.multiselect(key="maintenance_markets").set_value(["SH"])
+    app.text_input(key="maintenance_codes").set_value("SYNTH.SH")
+    app.number_input(key="maintenance_budget_network_attempts").set_value(4)
+    app.button(key="maintenance_preview").click().run()
+    assert not app.exception
+    assert app.button(key="maintenance_submit").disabled
+    preview = app.session_state["maintenance_plan"]
+    assert preview["requested_budget"] == {"network_attempts": 4}
+    assert preview["limits"] == limits
+
+    app.number_input(key="maintenance_budget_network_attempts").set_value(3)
+    app.button(key="maintenance_preview").click().run()
+    assert not app.button(key="maintenance_submit").disabled
+    app.number_input(key="maintenance_budget_network_attempts").set_value(2).run()
+    assert app.button(key="maintenance_submit").disabled
+    assert app.session_state["maintenance_plan"]["requested_budget"] == {"network_attempts": 3}
+    app.number_input(key="maintenance_budget_network_attempts").set_value(3)
+    app.text_input(key="maintenance_codes").set_value("SYNTH.SH, OTHER.SH").run()
+    assert app.button(key="maintenance_submit").disabled
+    app.button(key="maintenance_preview").click().run()
+    assert app.button(key="maintenance_submit").disabled
+    app.text_input(key="maintenance_codes").set_value("SYNTH.SH, UNREGISTERED.SH")
+    app.button(key="maintenance_preview").click().run()
+    assert app.button(key="maintenance_submit").disabled
+    app.text_input(key="maintenance_codes").set_value("SYNTH.SH")
+    app.multiselect(key="maintenance_markets").set_value(["SZ"])
+    app.button(key="maintenance_preview").click().run()
+    assert app.button(key="maintenance_submit").disabled
+    app.multiselect(key="maintenance_markets").set_value(["SH"])
+    app.button(key="maintenance_preview").click().run()
+
+    entitlement.write_text(json.dumps({"grants": [dict(grant, allowed_operations=["read"])]}))
+    app.run()
+    assert app.button(key="maintenance_submit").disabled
+    tasks = DataTaskStore(tmp_path)
+    assert not JobService(tasks).list()
+    entitlement.write_text(json.dumps({"grants": [grant]}))
+    app.run()
+    assert not app.button(key="maintenance_submit").disabled
+    app.button(key="maintenance_submit").click().run()
+    job, = JobService(tasks).list()
+    frozen = tasks.read_definition(job.definition_id)
+    assert frozen["object_filter"] == {"markets": ["SH"], "codes": ["SYNTH.SH"]}
+    assert frozen["request"]["codes_by_product"] == {product: ["SYNTH.SH"]}
+    assert [segment["codes"] for segment in frozen["segments"]] == [["SYNTH.SH"]]
+    assert frozen["requested_budget"] == {"network_attempts": 3}
+    assert frozen["limits"] == limits
+    assert frozen["target_scope"] == scope
+    assert frozen["maintenance_contracts"]["maintenance"]["history_records"] == history
+    assert json.loads(path.read_text()) == contract
 
 
 def test_web_launches_package_app_with_explicit_root(tmp_path, monkeypatch):
@@ -482,3 +580,130 @@ assert any('本地读取失败' in item.value for item in app.error)
 assert not calls
 """
     run(env, script)
+
+
+def _library_web_fixture(tmp_path, source_facts):
+    import json
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+
+    from hetu_data.library import publish_library
+    from hetu_data.models import DataRequest
+    from hetu_data.providers.tushare import TushareProvider
+    from hetu_data.store import DataStore
+
+    store = DataStore(tmp_path)
+    assets = []
+    for day in (5, 6):
+        root = tmp_path / f"source-{day}"
+        owner = DataStore(root, providers={"tushare": TushareProvider(client=source_facts.SourceClient())})
+        grant = dict(product_id="ts_a_daily", approved_scope_ref="synthetic", license_ref="synthetic",
+                     allowed_operations=["read", "acquire"], markets=["SH"], codes=["SYNTH.SH"],
+                     start="2026-01-01", end="2026-12-31", acquire_until="2099-12-31")
+        (root / "data-entitlements.json").write_text(json.dumps({"grants": [grant]}))
+        ref = owner.prepare(DataRequest(
+            ("ts_a_daily",), ("SYNTH.SH",), date(2026, 1, day), date(2026, 1, day),
+            datetime(2026, 11, 8, tzinfo=ZoneInfo("Asia/Shanghai")), "daily_archive", mode="paid",
+        ))
+        assets.append(dict(root=str(root), snapshot_id=ref.snapshot_id, tables=["daily_bars"]))
+    first = publish_library(store, asset_snapshots=tuple(assets))
+    return store, first, assets
+
+
+def test_library_web_pins_submitted_selection(tmp_path, monkeypatch, source_facts):
+    import io
+    import json
+    import sys
+    from datetime import date
+    from pathlib import Path
+
+    from streamlit.testing.v1 import AppTest
+
+    from hetu_data.library import publish_library, query_library_sql
+    from hetu_data.ui import app as app_module
+
+    store, ref, assets = _library_web_fixture(tmp_path, source_facts)
+    def no_wire(*args, **kwargs):
+        raise AssertionError("query must not contact the provider")
+
+    monkeypatch.setattr("hetu_data.providers.tushare.TushareProvider._query", no_wire)
+    monkeypatch.setattr(sys, "argv", ["app.py", "--root", str(tmp_path)])
+    exports = {}
+    monkeypatch.setattr("streamlit.download_button",
+                        lambda label, content, **kw: exports.update({kw["key"]: content}))
+    app = AppTest.from_file(app_module.__file__).run()
+    assert any(widget.key == "library_version" for widget in app.selectbox)
+    app.selectbox(key="library_version").set_value(ref.library_id)
+    app.multiselect(key="library_markets").set_value(["SH"])
+    app.text_input(key="library_codes").set_value("SYNTH.SH")
+    app.date_input(key="library_start").set_value(date(2026, 1, 5))
+    app.date_input(key="library_end").set_value(date(2026, 1, 6))
+    app.button(key="library_query").click().run()
+    old = exports["library_csv"]
+    frame = pd.read_csv(io.BytesIO(old))
+    assert frame.date.tolist() == ["2026-01-05", "2026-01-06"]
+    selection = app.session_state["library_submitted_selection"]
+    sql = query_library_sql(store, selection, "SELECT * FROM daily_bars")
+    pd.testing.assert_frame_equal(frame, pd.read_csv(io.StringIO(sql.to_csv(index=False))))
+    selection_path = tmp_path / "selection.json"
+    selection_path.write_bytes(exports["library_notebook"])
+    monkeypatch.setenv("HETU_ARCHIVE_SELECTION", str(selection_path))
+    notebook = Path(__file__).parents[2] / "quant/notebooks/data_archive.ipynb"
+    namespace = {}
+    for cell in json.loads(notebook.read_text())["cells"]:
+        if cell["cell_type"] == "code":
+            exec(compile("".join(cell["source"]), str(notebook), "exec"), namespace)
+    assert namespace["csv_bytes"] == old
+    new = publish_library(store, asset_snapshots=(assets[-1],))
+    app.run()
+    assert old == exports["library_csv"]
+    app.selectbox(key="library_version").set_value(new.library_id)
+    app.text_input(key="library_codes").set_value("OTHER.SZ").run()
+    assert not app.exception
+    assert old == exports["library_csv"]
+    assert app.session_state["library_submitted_selection"]["library_id"] == ref.library_id
+
+    from hetu_quant.ui import app as research_app
+
+    monkeypatch.setenv("HETU_QUANT_ROOT", str(tmp_path))
+    research = AppTest.from_file(research_app.__file__).run()
+    research.sidebar.radio[0].set_value("数据").run()
+    research.selectbox(key="library_version").set_value(ref.library_id)
+    research.multiselect(key="library_markets").set_value(["SH"])
+    research.text_input(key="library_codes").set_value("SYNTH.SH")
+    research.date_input(key="library_start").set_value(date(2026, 1, 5))
+    research.date_input(key="library_end").set_value(date(2026, 1, 6))
+    research.button(key="library_query").click().run()
+    assert not research.exception
+    assert old == exports["library_csv"]
+
+
+def test_workbench_coverage_and_maintenance_states(tmp_path, monkeypatch, source_facts):
+    import json
+    import sys
+
+    from streamlit.testing.v1 import AppTest
+
+    from hetu_data.ui import app as app_module
+
+    store, ref, _ = _library_web_fixture(tmp_path, source_facts)
+    targets = store.root / "archive" / "targets"
+    targets.mkdir(parents=True)
+    target = "synthetic"
+    (targets / f"{target}.json").write_text(json.dumps({
+        "target_id": target, "requirements": {"start": "2026-01-05", "end": "2026-01-06", "target_scope": {}},
+    }))
+    report = store.root / "archive" / "coverage" / ref.library_id
+    report.mkdir(parents=True)
+    (report / f"{target}.json").write_text(json.dumps({
+        "target_start": "2026-01-05", "target_end": "2026-01-06", "target_scope_complete": False,
+        "raw_price_complete": False, "adjustment_complete": False, "coverage_ratio": None,
+        "known_scope_ratio": 1.0, "latest_available_date": "2026-01-06",
+    }))
+    monkeypatch.setattr(sys, "argv", ["app.py", "--root", str(tmp_path)])
+    app = AppTest.from_file(app_module.__file__).run()
+    app.selectbox(key="library_version").set_value(ref.library_id).run()
+    assert any(widget.key == "library_target" for widget in app.selectbox)
+    app.selectbox(key="library_target").set_value(target).run()
+    assert any("全集未证" in item.value for item in app.warning)
+    assert any("2026-01-06" in item.value for item in app.caption)

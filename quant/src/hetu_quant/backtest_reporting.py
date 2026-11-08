@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import zipfile
 from pathlib import Path
@@ -124,8 +125,38 @@ def _describe(field: str, value_a: Any, value_b: Any) -> str:
     return f"{field}: {value_a!r} ↔ {value_b!r}"
 
 
+def _actual_sample(ref: BacktestRef) -> set[tuple[str, str]] | None:
+    path = _run_dir(ref) / "bundle" / "universe.parquet"
+    if not path.is_file():
+        return None
+    try:
+        rows = pd.read_parquet(path, columns=["signal_date", "code"])
+    except (OSError, ValueError, KeyError):
+        return None
+    if rows.empty or rows.isna().any().any():
+        return None
+    return set(rows.astype(str).itertuples(index=False, name=None))
+
+
+def _actual_benchmark_nav(ref: BacktestRef) -> dict[str, float] | None:
+    path = _run_dir(ref) / "nav.parquet"
+    if not path.is_file():
+        return None
+    try:
+        rows = pd.read_parquet(path, columns=["date", "benchmark_nav"])
+        dates = pd.to_datetime(rows["date"], errors="coerce").dt.strftime("%Y-%m-%d")
+        values = pd.to_numeric(rows["benchmark_nav"], errors="coerce")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return None
+    if rows.empty or dates.isna().any() or dates.duplicated().any():
+        return None
+    if values.isna().any() or not values.map(math.isfinite).all():
+        return None
+    return dict(zip(dates, values, strict=True))
+
+
 def compare_backtests(ref_a: BacktestRef, ref_b: BacktestRef) -> dict[str, Any]:
-    """并列比较两个已发布回测的定义口径，不读取或改写表值。
+    """并列比较两个已发布回测的定义口径、实际历史样本及正式基准。
 
     返回 ``{"differences": list[str], "mixed_ranking_allowed": bool}``：
     股票池（universe）、区间（start/end）、执行口径（execution，含信号/
@@ -141,6 +172,24 @@ def compare_backtests(ref_a: BacktestRef, ref_b: BacktestRef) -> dict[str, Any]:
 
     differences: list[str] = []
     incompatible = False
+    sample_a, sample_b = _actual_sample(ref_a), _actual_sample(ref_b)
+    if sample_a is None or sample_b is None:
+        differences.append("actual_historical_universe: 已发布样本证据不足")
+        incompatible = True
+    elif sample_a != sample_b:
+        differences.append(
+            f"actual_historical_universe: 仅本结果 {len(sample_a - sample_b)} 个对象日，"
+            f"仅对比结果 {len(sample_b - sample_a)} 个对象日"
+        )
+        incompatible = True
+    if "formal" in (protocol_a.get("stage"), protocol_b.get("stage")):
+        benchmark_a, benchmark_b = _actual_benchmark_nav(ref_a), _actual_benchmark_nav(ref_b)
+        if benchmark_a is None or benchmark_b is None:
+            differences.append("actual_benchmark_nav: 已发布基准日期或净值证据不足")
+            incompatible = True
+        elif benchmark_a != benchmark_b:
+            differences.append("actual_benchmark_nav: 已发布基准日期或净值不同")
+            incompatible = True
     for field in _COMPARABLE_DEFINITION_FIELDS:
         if definition_a.get(field) != definition_b.get(field):
             differences.append(

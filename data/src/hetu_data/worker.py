@@ -54,6 +54,48 @@ def approved_usage_ledger(root: Path, approved_scope_ref: str) -> Path:
     return root / "updates" / "approved-usage" / scope_id / "usage.jsonl"
 
 
+def _publish_update_library(data, ledger, definition, result):
+    from hetu_data.library import load_library, publish_library
+    from hetu_data.models import LibraryRef, SnapshotRef
+    from hetu_data.updates import _read_events, _write
+
+    previous_ref = definition.get("library_ref")
+    for event in reversed(_read_events(ledger)):
+        if event["type"] == "library_published":
+            previous_ref = dict(library_id=event["library_id"], root=event["root"])
+            break
+    result["library_ref"] = previous_ref
+    previous = LibraryRef(**previous_ref) if previous_ref else None
+    prior = load_library(data, previous) if previous else {}
+    root = str(data.root.resolve())
+    known = {asset["snapshot_id"] for asset in prior.get("asset_snapshots", ()) if asset["root"] == root}
+    registered = known | set(result["snapshot_ids"])
+    assets = []
+    for sid in dict.fromkeys(result["snapshot_ids"]):
+        if sid in known:
+            continue
+        manifest = data.load_manifest(SnapshotRef(sid, data.root))
+        tables = sorted({entry["table"] for entry in manifest["table_files"]})
+        raw_products = sorted({item["product_id"] for item in manifest["items"] if item.get("raw_files")})
+        revisions = [
+            dict(
+                root=root, product_id=pid, table="calendar", superseded_snapshot_id=parent, selected_snapshot_id=sid,
+                codes=[], start=span["start"], end=span["end"], evidence_ref=f"snapshots/{sid}/manifest.json",
+            )
+            for pid, span in manifest.get("calendar_refresh", {}).items()
+            for parent in span["supersedes"] if parent in registered
+        ]
+        assets.append(dict(
+            root=root, snapshot_id=sid, tables=tables, raw_products=raw_products, revision_selections=revisions,
+        ))
+    if not assets:
+        return previous_ref
+    published = publish_library(data, asset_snapshots=tuple(assets), previous=previous)
+    ref = dict(library_id=published.library_id, root=str(published.root))
+    _write(ledger, dict(type="library_published", **ref, snapshot_ids=[a["snapshot_id"] for a in assets]))
+    return ref
+
+
 def run_maintenance_job(job_id, tasks, data):
     with worker_lock(data.root, reentrant=True):
         service = JobService(tasks)
@@ -94,6 +136,15 @@ def run_maintenance_job(job_id, tasks, data):
                 cancelled=lambda: service.get(job_id).state == "cancel_requested",
                 progress=update_progress,
             )
+            result["approved_usage_ledger"] = str(ledger)
+            if "library_ref" in definition:
+                try:
+                    result["library_ref"] = _publish_update_library(data, ledger, definition, result)
+                except Exception:
+                    # The next explicit attempt can retry publication using the successful snapshots.
+                    publish("update.json", result)
+                    raise
+            publish("update.json", result)
             if "maintenance_contracts" in definition and service.get(job_id).state != "cancel_requested":
                 contracts = json.loads(json.dumps(definition["maintenance_contracts"]))
                 selected = contracts["maintenance"].get("coverage_snapshot_ids")
@@ -114,11 +165,11 @@ def run_maintenance_job(job_id, tasks, data):
                 result["maintenance"]["semantics"] = (
                     "请求完成不等于内容/PIT齐备；refresh为以后显式维护的回看需求，不自动执行"
                 )
-            result["approved_usage_ledger"] = str(ledger)
-            publish("update.json", result)
+                publish("update.json", result)
             _raise_if_cancelled(service, job_id)
             if result["pending"] or result["failures"]:
-                raise RuntimeError("maintenance limited: pending/failed segments; see update.json")
+                reason = result["stop_reason"] or "pending/failed segments"
+                raise RuntimeError(f"maintenance limited: {reason}; see update.json")
             limited = any(
                 d["missing"] or d["unknown"] or d["unrecoverable"]
                 for d in result.get("maintenance", {}).get("domains", [])

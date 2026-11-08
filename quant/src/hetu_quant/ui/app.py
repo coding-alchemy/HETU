@@ -32,11 +32,17 @@ from hetu_quant.models import (
     ranking_definition_to_dict,
 )
 from hetu_quant.reporting import export_result
-from hetu_quant.ui.data_page import render_archive, render_maintenance, render_maintenance_job
+from hetu_quant.ui.data_page import (
+    render_archive,
+    render_library,
+    render_maintenance,
+    render_maintenance_job,
+    submit_data_plan,
+)
 
 CN = ZoneInfo("Asia/Shanghai")
 
-_PAGES = ("任务列表", "数据", "研究提交", "回测", "结果与导出")
+_PAGES = ("任务列表", "数据", "研究提交", "策略目录", "回测", "结果与导出")
 
 _DEFINITION_ENCODERS = {
     "data": data_request_to_dict,
@@ -75,6 +81,7 @@ def _parse_cn(text: str) -> datetime:
 def _page_data(root: Path, store: DataStore) -> None:
     st.header("数据")
     st.info("更新入口默认 free；本地查询按所选快照的来源及当前读取授权核验，paid 不等于已获授权。")
+    render_library(store)
     archives = [sid for sid, manifest in store._published_manifests()
                 if any(e["table"] == "daily_bars" for e in manifest.get("table_files", []))]
     if archives:
@@ -82,7 +89,7 @@ def _page_data(root: Path, store: DataStore) -> None:
         render_archive(store, SnapshotRef(snapshot_id=selected, root=root))
     else:
         st.caption("尚无已发布日线档案；导入或更新完成后可在此查询。")
-    render_maintenance(store, lambda plan: _submit(ExperimentStore(root), "maintenance", plan))
+    render_maintenance(store, lambda plan: submit_data_plan(ExperimentStore(root), plan))
     st.subheader("产品与来源")
     rows = []
     for product_id, product in sorted(store.config.get("products", {}).items()):
@@ -380,6 +387,24 @@ def _page_jobs(root: Path) -> None:
             }
         )
     st.dataframe(pd.DataFrame(rows), hide_index=True, key="jobs_table")
+    if jobs:
+        by_id = {job.job_id: job for job in jobs}
+        chosen = st.selectbox("查看任务详情", by_id, index=None, key="job_detail",
+                              format_func=lambda job_id: f"{by_id[job_id].state} · {job_id}")
+        if chosen is not None:
+            job = by_id[chosen]
+            try:
+                definition = experiments.read_definition(job.definition_id)
+                kind = experiments.definition_kind(job.definition_id)
+                details = _DEFINITION_ENCODERS[kind](definition)
+                st.json({"definition": details, "state": job.state, "reason": job.reason,
+                         "attempts": [row for row in rows if by_id[row["任务号"]].definition_id == job.definition_id]})
+                if job.output and kind in ("ranking", "backtest") and st.button("打开已发布产物", key="job_open"):
+                    st.session_state["next_page"] = "回测" if kind == "backtest" else "结果与导出"
+                    st.session_state["suggested_result"] = job.output.name
+                    st.rerun()
+            except (OSError, ValueError, KeyError, TypeError) as error:
+                st.warning(f"已冻结定义读取受限：{error}")
     st.caption("取消：queued直接取消，running记cancel_requested，worker在执行边界确认停止；"
                "重试仅 failed/cancelled/interrupted，生成新任务号与提交标识。")
     for job in jobs:
@@ -490,6 +515,9 @@ def _page_results(root: Path) -> None:
     if not result_ids:
         st.info("尚无已发布结果。")
         return
+    suggested = st.session_state.pop("suggested_result", None)
+    if suggested in result_ids:
+        st.session_state["result_select"] = suggested
     result_id = st.selectbox("结果", result_ids, key="result_select")
     ref = experiments.get_result(result_id)
     result_dir = root / "results" / result_id
@@ -634,10 +662,14 @@ def _page_results(root: Path) -> None:
         except Exception as error:  # noqa: BLE001
             st.error(f"导出失败：{type(error).__name__}: {error}")
         else:
-            st.session_state["export_payload"] = (payload, zip_path.name)
+            st.session_state["export_payload"] = (result_id, payload, zip_path.name)
             st.success(f"已生成 {zip_path.name}")
-    if "export_payload" in st.session_state:
-        payload, name = st.session_state["export_payload"]
+    cached = st.session_state.get("export_payload")
+    if cached and (len(cached) != 3 or cached[0] != result_id):
+        st.session_state.pop("export_payload")
+        cached = None
+    if cached:
+        _, payload, name = cached
         st.download_button(
             "下载 ZIP",
             data=payload,
@@ -656,6 +688,9 @@ def main() -> None:
         "免费模式 free（paid 未启用）；网页只组织交互与读取，"
         "执行由本地 worker 完成；关闭网页后任务可从磁盘找回。"
     )
+    next_page = st.session_state.pop("next_page", None)
+    if next_page in _PAGES:
+        st.session_state["page_nav"] = next_page
     page = st.sidebar.radio("页面", _PAGES, index=0, key="page_nav")
     if page == "任务列表":
         _page_jobs(root)
@@ -663,6 +698,10 @@ def main() -> None:
         _page_data(root, store)
     elif page == "研究提交":
         _page_research(root, store)
+    elif page == "策略目录":
+        from hetu_quant.ui.strategy_page import render_strategy_page
+
+        render_strategy_page(root, store)
     elif page == "回测":
         from hetu_quant.ui.backtest_page import render_backtest_page
 

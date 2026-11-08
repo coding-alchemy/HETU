@@ -98,6 +98,19 @@ class SnapshotRef:
 
 
 @dataclass(frozen=True)
+class LibraryRef:
+    library_id: str
+    root: Path
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.library_id, str) or not self.library_id or self.library_id.startswith(".") or (
+            Path(self.library_id).name != self.library_id
+        ):
+            _fail("invalid library id")
+        object.__setattr__(self, "root", Path(self.root))
+
+
+@dataclass(frozen=True)
 class DataRequest:
     product_ids: tuple[str, ...]
     codes: tuple[str, ...]

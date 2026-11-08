@@ -5,12 +5,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import time
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from hetu_data.locking import worker_lock
 from hetu_data.models import data_request_from_dict, data_request_to_dict
@@ -27,6 +28,88 @@ METERS = (
     "data_fee_cny",
 )
 
+
+_DAILY_METERS = frozenset(METERS[:6])
+
+
+class _QuotaLimit(PermissionError):
+    def __init__(self, reason, meter, *, resume_after=None):
+        super().__init__(f"{meter}: {reason} reached")
+        self.reason = reason
+        self.resume_after = resume_after
+
+
+def _quota_now(zone):
+    return datetime.now(zone)
+
+
+class _DailyQuota:
+    def __init__(self, root, ledger, limits, events):
+        self.limits = limits.get("daily_limits", {})
+        self.scope = limits.get("quota_scope_ref")
+        self.zone = ZoneInfo(limits["quota_timezone"] if self.limits else "Asia/Shanghai")
+        self.days = {}
+        if not self.limits:
+            return
+        root = Path(root) / "updates" / "approved-usage"
+        recorded = [events]
+        recorded.extend(
+            _read_events(path)
+            for path in root.glob("*/usage.jsonl")
+            if path.resolve() != ledger.resolve()
+        )
+        for batch in recorded:
+            approval = next((e["limits"] for e in batch if e["type"] == "approval_limits"), None)
+            if not approval or approval.get("quota_scope_ref") != self.scope:
+                continue
+            if any(approval.get(k) != limits[k] for k in ("daily_limits", "quota_timezone")):
+                raise PermissionError("inconsistent daily quota contract for the same account scope")
+            for event in batch:
+                deltas = event.get("usage")
+                if not deltas:
+                    continue
+                stamp = datetime.fromisoformat(event["at"]) if event.get("at") else None
+                if stamp is None or stamp.utcoffset() is None:
+                    raise PermissionError("usage date unknown for the shared quota scope")
+                day = stamp.astimezone(self.zone).date()
+                if event.get("quota_date", day.isoformat()) != day.isoformat() or event.get(
+                    "quota_timezone", self.zone.key
+                ) != self.zone.key:
+                    raise PermissionError("usage date conflicts with the shared quota scope")
+                self.add(day, deltas)
+
+    def add(self, day, increments):
+        usage = self.days.setdefault(day, dict.fromkeys(_DAILY_METERS, 0))
+        for name, increment in increments.items():
+            if name in usage and increment is not None:
+                usage[name] += increment
+
+    def check(self, day, increments):
+        usage = self.days.get(day, {})
+        for name, increment in increments.items():
+            if increment is not None and name in self.limits and usage.get(name, 0) + increment > self.limits[name]:
+                tomorrow = datetime.combine(day + timedelta(days=1), datetime.min.time(), tzinfo=self.zone)
+                raise _QuotaLimit("daily_limit", name, resume_after=tomorrow.isoformat())
+
+    def report(self):
+        if not self.limits:
+            return None
+        day = _quota_now(self.zone).date()
+        return dict(
+            date=day.isoformat(),
+            timezone=self.zone.key,
+            quota_scope_ref=self.scope,
+            usage=dict(self.days.get(day, dict.fromkeys(_DAILY_METERS, 0))),
+        )
+
+
+def _read_events(ledger):
+    return [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.exists() else []
+
+
+def _data_fee(contracts):
+    # Only an explicit no-additional-fee contract can be aggregated without pricing assumptions.
+    return 0 if type(contracts.get("new_data_fee_cny")) in (int, float) and contracts["new_data_fee_cny"] == 0 else None
 
 def plan_update(request, store, contracts, *, audited_segments=None):
     if audited_segments is None:
@@ -48,6 +131,7 @@ def plan_update(request, store, contracts, *, audited_segments=None):
     segments, unresolved = [], []
     counts = dict.fromkeys(METERS, 0)
     counts["quota_bytes"] = None
+    counts["data_fee_cny"] = _data_fee(contracts)
     for segment in base["segments"]:
         pid = segment["product_id"]
         if "local_cross_section_codes" in segment:
@@ -89,6 +173,8 @@ def plan_update(request, store, contracts, *, audited_segments=None):
         segments=segments,
         reused_coverage=base["reused_coverage"],
         counts=counts,
+        new_data_fee_cny=counts["data_fee_cny"],
+        library_ref=copy.deepcopy(contracts.get("library_ref")),
         limits=dict(contracts.get("limits", {})),
         unresolved=unresolved,
         planning_basis="audited_missing_rows" if audited_segments is not None else "store_query_coverage",
@@ -97,12 +183,12 @@ def plan_update(request, store, contracts, *, audited_segments=None):
 
 
 def _write(ledger, event):
+    record = {"at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(), **event}
     with ledger.open("a") as stream:
-        stream.write(
-            json.dumps({"at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(), **event}, ensure_ascii=False) + "\n"
-        )
+        stream.write(json.dumps(record, ensure_ascii=False) + "\n")
         stream.flush()
         os.fsync(stream.fileno())
+    return record
 
 
 def validate_update_plan(plan):
@@ -118,10 +204,37 @@ def validate_update_plan(plan):
         ):
             raise ValueError("update segment outside frozen request")
     for name, amount in plan.get("limits", {}).items():
-        if name in METERS and (not isinstance(amount, (int, float)) or amount < 0):
+        if name in METERS and (type(amount) not in (int, float) or not math.isfinite(amount) or amount < 0):
             raise ValueError("update limit must be a nonnegative known amount")
         if name == "requests_per_minute" and (type(amount) is not int or not 1 <= amount <= 500):
             raise ValueError("approved requests_per_minute must be an integer from 1 to 500")
+    limits = plan.get("limits", {})
+    for name, amount in plan.get("requested_budget", {}).items():
+        if (
+            name not in METERS or type(amount) not in (int, float) or not math.isfinite(amount)
+            or amount < 0 or amount != limits.get(name)
+        ):
+            raise PermissionError(f"申请额度与当前批准额度不一致（{name}）")
+    if "daily_limits" in limits:
+        daily = limits["daily_limits"]
+        scope = limits.get("quota_scope_ref")
+        if not isinstance(daily, dict) or not daily or not isinstance(scope, str) or not scope.strip():
+            raise ValueError("daily limits require a nonempty quota scope and daily meters")
+        if any(
+            name not in _DAILY_METERS or type(amount) not in (int, float) or not math.isfinite(amount) or amount < 0
+            for name, amount in daily.items()
+        ):
+            raise ValueError("daily limit must reserve a supported meter with a nonnegative known amount")
+        try:
+            ZoneInfo(limits["quota_timezone"])
+        except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as error:
+            raise ValueError("daily limits require a known quota timezone") from error
+    library_ref = plan.get("library_ref")
+    if library_ref is not None and (
+        not isinstance(library_ref, dict) or set(library_ref) != {"library_id", "root"}
+        or not all(isinstance(value, str) and value.strip() for value in library_ref.values())
+    ):
+        raise ValueError("invalid frozen library reference")
 
 
 def execute_update(plan, store, ledger: Path, *, cancelled, progress):
@@ -131,10 +244,11 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
             raise ValueError("unresolved contract or missing scope approval")
         ledger = Path(ledger)
         ledger.parent.mkdir(parents=True, exist_ok=True)
-        events = [json.loads(x) for x in ledger.read_text().splitlines()] if ledger.exists() else []
+        events = _read_events(ledger)
         recorded_limits = [e["limits"] for e in events if e["type"] == "approval_limits"]
         if recorded_limits and recorded_limits[0] != plan["limits"]:
             raise PermissionError("approved ledger limits changed; a new explicit approval is required")
+        quota = _DailyQuota(store.root, ledger, plan["limits"], events)
         if not recorded_limits:
             _write(ledger, dict(type="approval_limits", limits=plan["limits"]))
         usage = dict.fromkeys(METERS, 0)
@@ -147,6 +261,8 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
         completed = [e["segment"] for e in events if e["type"] == "completed"]
         snapshots = [e["snapshot_id"] for e in events if e["type"] == "completed"]
         failures, pending = [], []
+        stop_reason = resume_after = None
+        last_success_at = next((e.get("at") for e in reversed(events) if e["type"] == "completed"), None)
         original_request = data_request_from_dict(plan["request"])
         limits = plan["limits"]
         interval = 60 / limits["requests_per_minute"] if "requests_per_minute" in limits else 2.05
@@ -168,14 +284,20 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 identity["local_cross_section_codes"] = local_scope
             if identity in completed:
                 continue
+            if stop_reason in {"daily_limit", "batch_limit", "cancelled"}:
+                pending.append({**identity, "reason": stop_reason})
+                continue
             if failures and limits.get("stop_on_failure"):
                 pending.append({**identity, "reason": "earlier segment failed"})
                 continue
             if cancelled():
-                pending.append(identity)
+                stop_reason = stop_reason or "cancelled"
+                pending.append({**identity, "reason": "cancelled"})
                 continue
             starts = sum(e["type"] == "started" and e["segment"] == identity for e in events)
-            ends = sum(e["type"] in ("failed", "completed") and e["segment"] == identity for e in events)
+            ends = sum(
+                e["type"] in ("failed", "completed", "quota_paused") and e["segment"] == identity for e in events
+            )
             saved_responses = [
                 e["response"] for e in events
                 if e["type"] == "response" and e.get("segment") == identity
@@ -189,20 +311,26 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 and saved_responses[0].get("rows") == 0
             )
             if starts > ends and not resume_empty:
+                stop_reason = stop_reason or "uncertain"
                 pending.append({**identity, "reason": "previous attempt uncertain; no automatic repeat"})
                 continue
-            failures_before = [e for e in events if e["type"] == "failed" and e["segment"] == identity]
-            had_upstream_attempt = any(
-                e.get("usage", {}).get("network_attempts", 0) > 0 for e in events if e.get("segment") == identity
+            segment_events = [e for e in events if e.get("segment") == identity]
+            last_failure = next(
+                (index for index in reversed(range(len(segment_events))) if segment_events[index]["type"] == "failed"),
+                None,
             )
-            resume_retry = bool(failures_before and had_upstream_attempt and not resume_empty)
+            had_upstream_attempt = any(e.get("usage", {}).get("network_attempts", 0) > 0 for e in segment_events)
+            resume_retry = last_failure is not None and had_upstream_attempt and not resume_empty and not any(
+                e.get("usage", {}).get("retries", 0) > 0 for e in segment_events[last_failure + 1 :]
+            )
             if resume_retry:
-                kind = failures_before[-1]["failure"]["error_type"]
+                failure = segment_events[last_failure]["failure"]
+                kind = failure["error_type"]
                 recoverable = kind in {"ConnectionError", "TimeoutError", "OSError"} or (
-                    kind == "InterruptedError"
-                    and failures_before[-1]["failure"].get("cancelled_before_request") is True
+                    kind == "InterruptedError" and failure.get("cancelled_before_request") is True
                 )
                 if not recoverable or usage["retries"] >= limits.get("retries", 0):
+                    stop_reason = stop_reason or "failure"
                     pending.append({**identity, "reason": "failed segment retry not authorized or not recoverable"})
                     continue
             req = replace(
@@ -226,30 +354,46 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
             old_usage = getattr(adapter, "on_usage", None)
             old_resume = getattr(adapter, "resume_responses", [])
             cancelled_before_wire = False
+            blocked = None
+            pending_fetch = False
 
             def reserve(increments, identity=identity):
-                for name, increment in increments.items():
-                    if increment is None or usage.get(name) is None:
-                        continue
-                    if name in limits and usage[name] + increment > limits[name]:
-                        raise PermissionError(f"{name}: approved limit reached")
+                nonlocal blocked
+                now = _quota_now(quota.zone)
+                day = now.date()
+                try:
+                    for name, increment in increments.items():
+                        if name in limits and increment is not None and usage.get(name) is not None:
+                            if usage[name] + increment > limits[name]:
+                                raise _QuotaLimit("batch_limit", name)
+                    quota.check(day, increments)
+                except _QuotaLimit as error:
+                    blocked = error
+                    raise
+                event = dict(type="usage", segment=identity, usage=increments, at=now.isoformat())
+                if quota.limits:
+                    event.update(quota_date=day.isoformat(), quota_timezone=quota.zone.key)
+                _write(ledger, event)
+                if quota.limits:
+                    quota.add(day, increments)
                 for name, increment in increments.items():
                     if increment is not None and usage.get(name) is not None:
                         usage[name] += increment
-                _write(ledger, {"type": "usage", "segment": identity, "usage": increments})
                 progress(
                     dict(
                         completed=len(completed),
                         segments=len(plan["segments"]),
                         actual_usage=dict(usage),
+                        daily_usage=quota.report(),
                         incremental_usage={
                             k: usage[k] - initial_usage[k] if usage[k] is not None else None for k in METERS
                         },
                     )
                 )
 
-            def before(event, old_before=old_before, reserve=reserve, resume_empty=resume_empty):
-                nonlocal previous_call, cancelled_before_wire
+            def before(event, old_before=old_before, reserve=reserve, resume_empty=resume_empty,
+                       resume_retry=resume_retry):
+                nonlocal previous_call, cancelled_before_wire, pending_fetch
                 if resume_empty:
                     raise PermissionError("saved empty response must recover without upstream requests")
                 if cancelled():
@@ -264,7 +408,11 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 if cancelled():
                     cancelled_before_wire = True
                     raise InterruptedError("cancelled during throttle wait")
+                if pending_fetch:
+                    increments["provider_fetch"] = 1
+                    increments["retries"] += int(resume_retry)
                 reserve(increments)
+                pending_fetch = False
                 previous_call = time.monotonic()
                 if old_before:
                     old_before(event)
@@ -320,10 +468,16 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 if not resume_empty and local_scope is None and any(
                     "local_cross_section_codes" not in s for s in store.plan(req)["segments"]
                 ):
-                    if resume_retry:
-                        reserve({"retries": 1})
-                    reserve({"provider_fetch": 1})
+                    if quota.limits:
+                        # A blocked send does not use a new fetch/retry allocation.
+                        pending_fetch = True
+                    else:
+                        if resume_retry:
+                            reserve({"retries": 1})
+                        reserve({"provider_fetch": 1})
                 ref = store.prepare(req, allow_acquire=False) if local_scope is not None else store.prepare(req)
+                if blocked:
+                    raise blocked
                 manifest = store.load_manifest(ref)
                 proved_empty_status = any(
                     raw.get("query_observation") == "success_empty"
@@ -342,11 +496,21 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 done = {"type": "completed", "segment": identity, "snapshot_id": ref.snapshot_id}
                 if proved_empty_status:
                     done["query_observation"] = "success_empty"
-                _write(ledger, done)
+                last_success_at = _write(ledger, {**done, "at": _quota_now(quota.zone).isoformat()})["at"]
                 progress(
                     {"completed": len(completed), "segments": len(plan["segments"]), "snapshot_id": ref.snapshot_id}
                 )
             except Exception as error:
+                if blocked:
+                    stop_reason, resume_after = blocked.reason, blocked.resume_after
+                    if stop_reason == "daily_limit":
+                        pending.append({**identity, "reason": stop_reason})
+                        _write(ledger, dict(type="quota_paused", segment=identity, reason=stop_reason))
+                        continue
+                elif cancelled_before_wire:
+                    stop_reason = stop_reason or "cancelled"
+                else:
+                    stop_reason = stop_reason or "failure"
                 failure = {
                     **identity,
                     "error_type": segment_failure_type or type(error).__name__,
@@ -355,11 +519,16 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 }
                 failures.append(failure)
                 pending.append(identity)
-                _write(ledger, {"type": "failed", "segment": identity, "failure": failure})
+                if blocked:
+                    _write(ledger, dict(type="quota_paused", segment=identity, reason=stop_reason))
+                else:
+                    _write(ledger, {"type": "failed", "segment": identity, "failure": failure})
             finally:
                 adapter.before_request, adapter.on_usage = old_before, old_usage
                 if hasattr(adapter, "resume_responses"):
                     adapter.resume_responses = old_resume
+        if stop_reason is None and cancelled():
+            stop_reason = "cancelled"
         incremental = {key: usage[key] - initial_usage[key] if usage[key] is not None else None for key in METERS}
         return dict(
             snapshot_ids=snapshots,
@@ -368,6 +537,11 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
             failures=failures,
             actual_usage=usage,
             incremental_usage=incremental,
+            daily_usage=quota.report(),
+            stop_reason=stop_reason,
+            resume_after=resume_after,
+            last_success_at=last_success_at,
+            library_ref=copy.deepcopy(plan.get("library_ref")),
         )
 
 
@@ -381,6 +555,9 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
     from hetu_data.store import DataStore
 
     settings = contracts.get("maintenance", {})
+    object_filter = settings.get("object_filter", {})
+    selected_markets = set(object_filter.get("markets", ()))
+    selected_codes = set(object_filter.get("codes", ()))
     start = date.fromisoformat(settings["start"])
     if start > target_date:
         raise ValueError("maintenance start exceeds target")
@@ -451,12 +628,16 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         (owner, sid, manifest, owner._coverage_index([(sid, manifest)])) for owner, sid, manifest in sources
     ]
     domains, segments, reused, global_unknown = [], [], [], []
+    matched_codes = set()
+    uses_object_scope = False
     codes_by_product = {}
     limits = dict(contracts.get("limits", {}))
     counts = dict.fromkeys(METERS, 0)
     counts["quota_bytes"] = None
+    counts["data_fee_cny"] = _data_fee(contracts)
     for pid in products:
         product = store.product(pid)
+        requires_codes = product.get("requires_codes", True)
         contract = contracts.get("products", {}).get(pid, {})
         basis = contract.get("time_basis")
         lookback = int(contract.get("revision_lookback_days", 0))
@@ -464,6 +645,14 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         objects = (
             _history_objects(history, product_start.isoformat(), target_date.isoformat())[0] if len(history) else []
         )
+        if requires_codes:
+            uses_object_scope = True
+            objects = [
+                obj for obj in objects
+                if (not selected_markets or obj["market"] in selected_markets or obj["market"] == "unknown")
+                and (not selected_codes or obj["code"] in selected_codes)
+            ]
+            matched_codes.update(obj["code"] for obj in objects)
         calendar_gaps = [d for d in unknown_calendar if d >= product_start.isoformat()]
         domain = dict(
             product_id=pid,
@@ -487,8 +676,12 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
             continue
         if basis == "trading_days" and calendar_gaps:
             domain["unknown"].append(dict(reason="calendar_unknown", ranges=_ranges(calendar_gaps)))
-        if not objects and product.get("requires_codes", True):
-            domain["unknown"].append(dict(reason="independent_historical_target_missing"))
+        if not objects and requires_codes:
+            reason = (
+                "no_independent_historical_objects_match_filter"
+                if len(history) else "independent_historical_target_missing"
+            )
+            domain["unknown"].append(dict(reason=reason))
             continue
         allowed = []
         for obj in objects:
@@ -500,7 +693,7 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
                 and obj["required"][0] <= obj["required"][1]
             ):
                 allowed.append(obj)
-        if not product.get("requires_codes", True):
+        if not requires_codes:
             allowed = [dict(code="", required=[product_start.isoformat(), target_date.isoformat()], market="")]
         domain["target_codes"] = [o["code"] for o in allowed if o["code"]]
         codes_by_product[pid] = tuple(domain["target_codes"])
@@ -676,6 +869,10 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         domain["failures"] = [f for _, m in published for f in m.get("failures", []) if f.get("product_id") == pid]
         if contract.get("historical_revisions") is False:
             domain["version_limitation"] = "source_does_not_prove_complete_historical_versions"
+    if uses_object_scope and selected_codes - matched_codes:
+        global_unknown.append(
+            f"证券代码不在本次市场的独立历史目标内：{', '.join(sorted(selected_codes - matched_codes))}"
+        )
     request = DataRequest(
         tuple(products),
         tuple(dict.fromkeys(c for cs in codes_by_product.values() for c in cs)),
@@ -697,10 +894,13 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         segments=segments,
         reused_coverage=reused,
         counts=counts,
+        new_data_fee_cny=counts["data_fee_cny"],
+        library_ref=copy.deepcopy(contracts.get("library_ref")),
         limits=limits,
         unresolved=global_unknown,
         acquisition_grant_required=True,
         planning_basis="maintenance_actual_rows_and_query_evidence",
         target_scope=settings.get("target_scope", {}),
+        object_filter=copy.deepcopy(object_filter),
         maintenance_contracts=frozen_contracts,
     )

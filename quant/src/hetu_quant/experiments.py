@@ -69,6 +69,15 @@ class ExperimentStore(DataTaskStore):
             payload = ranking_definition_to_dict(definition)
         return self._save_payload(kind, payload)
 
+    def list_definitions(self, kind: str | None = None) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT definition_id, kind, created_at FROM definitions "
+                "WHERE ? IS NULL OR kind = ? ORDER BY created_at DESC, definition_id",
+                (kind, kind),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def read_definition(self, definition_id: str) -> DataRequest | RankingDefinition:
         path = self.definitions_dir / f"{definition_id}.json"
         if not path.exists():
