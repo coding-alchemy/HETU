@@ -52,7 +52,7 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 | 阶段 | 设计与现行入口 | 计划状态 |
 | --- | --- | --- |
 | 量化初始建设（原一至三期） | [初始实现](../2026-11-07-quant-research-platform-initial-implementation.md)、[统一使用手册](../../docs/quant-research-platform-usage.md) | 一期原范围、二期软件及三期修订范围验收保持；旧执行计划按原归档或固定提交回源 |
-| 量化系统完善 | [需求](../2026-11-07-quant-system-improvement-requirements.md)、[设计](../2026-11-07-quant-system-improvement-design.md)、[计划组](quant-system-improvement/README.md) | 01–03 工程收口，五项复评关闭；04 活动，已交付离线预检和有界回读，档案 limited。见[实施交接](../2026-11-07-quant-system-improvement-implementation.md) |
+| 量化系统完善 | [需求](../2026-11-07-quant-system-improvement-requirements.md)、[设计](../2026-11-07-quant-system-improvement-design.md)、[计划组](quant-system-improvement/README.md) | 01–03 工程已验收。04 已交付正式日线库及三份覆盖总账，第三步本轮已收尾，第四步使用交接完成，档案 limited。见[实施交接](../2026-11-07-quant-system-improvement-implementation.md#83-2026-11-13-第三步集中收尾) |
 | 策略研究与验证 | [需求](../2026-11-07-quant-strategy-research-requirements.md)、[设计](../2026-11-07-quant-strategy-research-design.md) | 原四期及原五期剩余策略任务；原八次协议与窗口不变，代表策略正式平台真实执行保留；计划未编写 |
 
 两条需求分别审阅与验收，工作台工程不以策略盈利为前置，完整日线库也不自动赋予研究资格。三期已按Tushare和公开信息范围收口；用户新提出的完整日线库目标与尚未恢复的外部能力按[初始交接§4](../2026-11-07-quant-research-platform-initial-implementation.md#4-当前限制及后续归属)分别记录。旧四、五期文档从Git `1832734f94fe1425b933c47a4850d5e0bc38e449` 原路径回源。新设计和计划按AGENTS.md分别获批，真实研究与旧结果重跑另按具体范围授权。
@@ -84,7 +84,9 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 
 ## 当前执行计划
 
-量化系统完善 [01–04 计划组](quant-system-improvement/README.md)保留原路径。01–03 已实现并验收收口。04 仍为活动计划，依赖前序合同。离线预检为 0 段，有界回读继续有效；历史全集、特殊代码绑定、331 项成交额差异和生产交接仍待闭合。完整二十年目标保持，原研究 `blocked`、预算 0/8，例行 M 未启用。
+量化系统完善新增[04.3.3的T7备份接续计划](quant-system-improvement/2026-11-07-04-data-delivery-acceptance.md#41-任务0433接续t7打包增量备份与独立恢复)：首次全量打包，T7仅备份时接入、手动补齐增量，完成独立恢复验证。目的地位于T7的 `data/HETU-backups/a-share-daily/`。获准标准表及恢复元数据已完成生产首备与独立恢复，供应商响应原件仍列例外。
+
+量化系统完善 [01–04 计划组](quant-system-improvement/README.md)保留原路径。04 第三步本轮已收尾，第四步正式库使用交接完成。档案仍为 `limited`，生产恢复为 `passed_scoped`。固定库及三份覆盖总账已发布，[统一缺口清单](../2026-11-07-quant-system-improvement-implementation.md#84-统一缺口清单)保留历史全集、特殊代码、早期日历和来源冲突。原研究 `blocked`、预算 0/8，例行 M 未启用。
 
 行业基本面独立Skill已按预算执行收尾，四份已执行计划退出当前入口，需求与设计统一见[行业基本面实现](../2026-11-07-industry-fundamentals-implementation.md)。核心离线行为、美国原油六条代表来源与12期表图、后续需求兑现／资金周转／库存组成三项增量行为通过。**limited完整交付及最终报告对用户错误摘要的属性／采用说明仍为同一未验证场景**，首次环境限制、初始化失败、能源续派消息留存不足和历史过程偏差继续保留。清理范围与原件见[行业清理回源](#industry-fundamentals-closeout)，不登记全部行为通过，不新增研究或重跑授权。
 

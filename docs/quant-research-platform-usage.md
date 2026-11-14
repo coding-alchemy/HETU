@@ -29,58 +29,69 @@ quant/.venv/bin/python -m pip install -e './quant[dev]'
 
 现行来源边界为 Tushare 与公开信息，免费模式无收费回退。原资产保留已登记来源与权限，Q1 已取消。接口权限、账本额度和本次执行批准分别检查。
 
+本机正式日线根为 `/Users/nan/data/hetu/a-share/daily/`。查询第三步交付数据时，选择固定库 `lib-4940ba04874044eeb61ddcc7893b33de`，既有库仍可选择。覆盖、读取期限和来源限制见[第三步实施记录](../specs/2026-11-07-quant-system-improvement-implementation.md#83-2026-11-13-第三步集中收尾)。现有研究根、旧单快照及结果入口见[正式库交付](../specs/2026-11-07-quant-system-improvement-implementation.md#6-第一步正式日线库交付)。
+
 ## 3. 启动网页
 
 ```bash
 # 独立数据页
-.venv-data/bin/hetu-data web --root .hetu/quant
+.venv-data/bin/hetu-data web --root "$HOME/data/hetu/a-share/daily"
 
-# 研究页，默认根为 .hetu/quant
-quant/.venv/bin/python -m streamlit run quant/src/hetu_quant/ui/app.py
+# HETU 的“数据”页用正式根，研究和旧结果仍用原根
+HETU_DATA_ROOT="$HOME/data/hetu/a-share/daily" \
+  quant/.venv/bin/python -m streamlit run quant/src/hetu_quant/ui/app.py
 ```
 
 独立数据页用来查询档案和管理数据任务。研究页另有“任务列表”“数据”“研究提交”“策略目录”“回测”“结果与导出”。打开、刷新、查看任务和查询已发布数据不会启动 worker 或触发外部取数。
 
 ## 4. 查询、筛选和导出
 
-若数据根已发布库版本，在“本地日线库”选择固定版本及市场、代码、日期、字段和数值条件，点击“查询日线库”。历史和增量片共用该固定选择。修改表单尚未提交时，当前表格和 CSV 仍对应上次已提交的版本和筛选。导出时重新核对读取权限。用“导出 Notebook 查询选择”下载固定选择，将 `HETU_ARCHIVE_SELECTION` 指向该文件，即可在[档案 Notebook](../quant/notebooks/data_archive.ipynb)重放同一选择。选择固定档案目标后可查看已存覆盖报告，库版本未审计时仍可查询其获准原价。维护预览为 0 段时表示当前无新增可证补取清单，完整二十年覆盖仍需单独验收。
+在正式根的“本地日线库”选所需的固定库版本，填市场、代码、日期、字段和数值条件，点击“查询日线库”。历史和增量片共用该固定选择。修改表单尚未提交时，当前表格和 CSV 仍对应上次已提交的版本和筛选。导出时重新核对读取权限。用“导出 Notebook 查询选择”下载固定选择，将 `HETU_ARCHIVE_SELECTION` 指向该文件，即可在[档案 Notebook](../quant/notebooks/data_archive.ipynb)重放同一选择。选择“固定档案目标”可分别查看二十年子集、更早历史和已存增量的覆盖与限制。总账区分证据不足、已证应有但缺失和冲突；完整历史全集未证时，全市场覆盖率为空。固定库尚无对应审计时，仍可查询获准原价。详见[正式库覆盖总账](../specs/2026-11-07-quant-system-improvement-implementation.md#7-正式库覆盖总账)。
 
 在“数据”页选择档案快照，填写证券代码、日期和所需字段或过滤条件，点击“查询本地数据”。页内可查看原价、量额、来源和空段解释。改筛选后重新查询，CSV 下载使用已提交筛选的结果。出现空段时，根据提示区分停牌、未上市、缺行、字段未知和来源冲突。
 
-CLI 同样按快照读本地行。例如，把 `SNAPSHOT_ID` 和日期换成已知有权读取的范围：
+页面分别显示固定目标起止、最晚合格原价日和数据根最近成功更新时间。更新时间取自产品处理记录，所选库的实际数据日期看覆盖报告。切换库后重新提交才会更新当前结果及导出。查询中的停牌、来源冲突、范围外和权限限制分别显示。
+
+CLI 可复用网页导出的选择。将下载的文件保存为 `selection.json`，从仓库根执行：
 
 ```bash
-.venv-data/bin/hetu-data query --root .hetu/quant --snapshot SNAPSHOT_ID \
-  --codes 600519.SH --start 2026-01-05 --end 2026-01-05 \
-  --columns code,date,close_raw,source_ref --output bars.csv
+.venv-data/bin/python - <<'PY'
+import json
+from pathlib import Path
+from hetu_data.cli import main
+
+s = json.loads(Path("selection.json").read_text())
+raise SystemExit(main([
+    "query", "--root", s["root"], "--library", s["library_id"],
+    "--codes", ",".join(s["codes"]), "--markets", ",".join(s["markets"]),
+    "--start", s["start"], "--end", s["end"], "--columns", ",".join(s["columns"]),
+    "--predicates", json.dumps(s["predicates"]), "--output", "bars.csv",
+]))
+PY
 ```
 
 ## 5. Python 与 SQL
 
 ```python
+import json
 from datetime import date
 from pathlib import Path
+from hetu_data import DataStore, LibraryRef
+from hetu_data.library import query_library, query_library_sql
 
-from hetu_data import DataStore, SnapshotRef
-from hetu_data.archive import open_archive_view
-
-store = DataStore(Path(".hetu/quant"))
-ref = SnapshotRef("SNAPSHOT_ID", store.root)
-bars = store.read_range(
-    ref, "daily_bars", codes=("600519.SH",),
-    start=date(2026, 1, 5), end=date(2026, 1, 5),
-    columns=("code", "date", "close_raw", "source_ref"),
+s = json.loads(Path("selection.json").read_text())
+store = DataStore(Path(s["root"]))
+ref = LibraryRef(s["library_id"], store.root)
+result = query_library(
+    store, ref, codes=tuple(s["codes"]), markets=tuple(s["markets"]),
+    start=date.fromisoformat(s["start"]), end=date.fromisoformat(s["end"]),
+    columns=tuple(s["columns"]), predicates=tuple(s["predicates"]),
 )
-
-with open_archive_view(store, ref) as con:
-    rows = con.execute(
-        "SELECT code, date, close_raw, source_ref FROM daily_bars "
-        "WHERE code = ? AND date BETWEEN ? AND ? ORDER BY date",
-        ["600519.SH", "2026-01-05", "2026-01-05"],
-    ).fetchall()
+bars, gaps = result["bars"], result["gaps"]
+sql_bars = query_library_sql(store, result["selection"], "SELECT * FROM daily_bars")
 ```
 
-`open_archive_view` 需要对该快照全视图有读取许可。仅授权部分行时用 `read_range`。SQL 视图指向同一 Parquet 快照，连接需要关闭。可复用[档案 Notebook](../quant/notebooks/data_archive.ipynb)及[数据手册 §4–5](../quant/DATA.md)中的调用和样本备份说明。
+在 [档案 Notebook](../quant/notebooks/data_archive.ipynb) 的 Python 内核中设置 `HETU_ARCHIVE_SELECTION` 为该 JSON 的绝对路径。旧单快照入口仍可用，使用 `--snapshot` 或 `SnapshotRef`；`open_archive_view` 需要对该快照全视图有读取许可。字段和单位见[数据手册](../quant/DATA.md)。
 
 ## 6. 预览、提交与管理数据任务
 
@@ -88,6 +99,8 @@ with open_archive_view(store, ref) as con:
 2. **提交**。只有范围和额度获准后才冻结计划。网页或 CLI 会将它放进持久队列，返回定义号和任务号。同一提交标识幂等，新提交使用新标识并沿用对应的批准额度账本。
 3. **执行与追踪**。获得执行授权后才启动对应 worker。独立数据 worker 处理数据维护，研究 worker 还处理研究任务。同根只运行一个 worker。`--once` 排空可执行的队列后退出。当前采集仍暂停，例行 M 未启用。
 4. **取消或恢复**。在任务列表选取已有任务，查看冻结定义、进度、失败原因、产物、当日用量、整批累计和本次新增。取消先提出请求，由 worker 在请求边界确认。对失败、取消或中断任务显式重开，保留旧记录与累计额度，已成功的分片继续复用。达到日额度后，可在显示的可恢复时间后显式接续，整批批准上限仍有效。传输结果不确定时保留待核。
+
+正式数据根尚未配置例行维护合同。获准后按数据根、产品和期间登记合同及额度，再预览和提交。历史获取额度已结案。获准标准表及恢复元数据的生产备份和独立恢复已通过。供应商响应原件列为例外，后续备份仍需对应操作许可。
 
 以下为接口示例，第二、三行只在任务及执行已获准时使用：
 
@@ -98,6 +111,8 @@ with open_archive_view(store, ref) as con:
 ```
 
 研究队列入口为 `quant/.venv/bin/python -m hetu_quant.worker --root .hetu/quant --once`，默认不加 `--once` 时常驻轮询。两种队列均需先确认其中等待执行的任务。
+
+T7 备份采用手动预览、打包、校验和独立恢复。已发布获准标准表及恢复元数据的生产恢复点。命令和接续方式见 [T7 手动打包备份](../quant/DATA.md#51-t7-手动打包备份)。
 
 ## 7. 查看研究产物
 

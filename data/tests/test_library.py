@@ -113,6 +113,52 @@ def test_listing_reads_small_published_summaries(tmp_path, source_facts, monkeyp
     assert list_libraries(store)[0]["library_id"] == ref.library_id
 
 
+def test_library_read_has_own_expiry(tmp_path, source_facts):
+    root = tmp_path / "history"
+    shard = _shard(root, source_facts, START)
+    store = DataStore(root)
+    ref = publish_library(store, asset_snapshots=(shard,))
+    path = root / "data-entitlements.json"
+    document = json.loads(path.read_text())
+    grant = document["grants"][0]
+    grant.update(acquire_until="2000-01-01", read_until="2099-12-31")
+    path.write_text(json.dumps(document))
+    selection = dict(codes=CODES, start=START, end=START)
+    assert query_library(DataStore(root), ref, **selection)["bars"].close_raw.tolist() == [10]
+    with pytest.raises(AccessDenied):
+        store.check_access("paid", store.product("ts_a_daily"), operation="acquire")
+    grant["read_until"] = "2000-01-01"
+    grant["acquire_until"] = "2099-12-31"
+    path.write_text(json.dumps(document))
+    with pytest.raises(AccessDenied):
+        query_library(DataStore(root), ref, **selection)
+
+
+def test_library_reads_full_day_events_without_hiding_trade(tmp_path, source_facts):
+    root = tmp_path / "history"
+    shard = _shard(root, source_facts, START)
+    path = root / "data-entitlements.json"
+    document = json.loads(path.read_text())
+    product = "ts_suspend_events"
+    document["grants"].append(dict(document["grants"][0], product_id=product, allowed_operations=["read", "import"]))
+    path.write_text(json.dumps(document))
+    raw = tmp_path / "events.csv"
+    raw.write_text(f"code,date,event_type,suspend_timing\n{CODES[0]},{START},S,\n{CODES[0]},{END},S,\n")
+    import_path = tmp_path / "import.json"
+    import_path.write_text(json.dumps(dict(mode="paid", items=[dict(product_id=product, table="security_events",
+        files=[raw.name], source=dict(name="synthetic", fee_class="paid", obtained_at="2026-01-07T00:00:00+08:00",
+                                      permission_basis="synthetic"))])))
+    store = DataStore(root, providers={})
+    event = store.import_files(import_path, (raw,))
+    ref = publish_library(store, asset_snapshots=(shard, dict(root=str(root), snapshot_id=event.snapshot_id,
+                                                             tables=["security_events"])))
+    result = query_library(store, ref, codes=CODES, start=START, end=END)
+    assert result["bars"].close_raw.tolist() == [10]
+    gaps = set(zip(result["gaps"].reason, result["gaps"].start, strict=True))
+    assert ("conflicting_trade_evidence", START.isoformat()) in gaps
+    assert ("suspended", END.isoformat()) in gaps
+
+
 def test_restored_library_can_republish_verified_revision(tmp_path, source_facts):
     from hetu_data.archive import backup_library
 

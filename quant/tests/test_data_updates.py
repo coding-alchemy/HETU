@@ -193,6 +193,27 @@ def test_year_copy_refresh_reopen_keeps_evidence(tmp_path):
     assert all(hashlib.sha256((parent / p).read_bytes()).hexdigest() == h for p, h in before.items())
 
 
+def test_prepare_does_not_expand_unrelated_yearly_object_coverage(tmp_path, monkeypatch):
+    from hetu_data import store as store_module
+
+    ds, adapter = store(tmp_path, codes=["SYNTH.SH", "OTHER.SH"])
+    unrelated = replace(request(start="2025-01-06", end="2025-01-06"), codes=("OTHER.SH",))
+    ds.prepare(unrelated)
+    month_keys = store_module._month_keys
+
+    def only_relevant_months(start, end):
+        assert start.year != 2025, "planning one code must not expand another code's yearly coverage"
+        return month_keys(start, end)
+
+    monkeypatch.setattr(store_module, "_month_keys", only_relevant_months)
+    requested = request(end="2026-01-05")
+    first = ds.prepare(requested)
+    assert set(ds.read_table(first, "daily_bars").code) == {"SYNTH.SH"}
+    calls = len(adapter.client.calls)
+    assert ds.prepare(requested) == first
+    assert len(adapter.client.calls) == calls
+
+
 def test_failed_resume_counts_retry_once_and_never_repeats_success(tmp_path):
     from source_cases import SourceClient
 
@@ -208,6 +229,30 @@ def test_failed_resume_counts_retry_once_and_never_repeats_success(tmp_path):
     assert second["actual_usage"]["network_attempts"] == 2
     assert second["completed"]
     module.execute_update(plan, ds, ledger, cancelled=lambda: False, progress=lambda _: None)
+    assert len(adapter.client.calls) == 2
+
+
+def test_explicit_resend_preserves_limits_and_cannot_send_twice(tmp_path):
+    from source_cases import SourceClient
+
+    ds, adapter = store(tmp_path, SourceClient(fail=True))
+    module = updates_module()
+    plan = module.plan_update(request(), ds, contracts(retries=0))
+    ledger = tmp_path / "usage.jsonl"
+
+    def run(selected):
+        return module.execute_update(selected, ds, ledger, cancelled=lambda: False, progress=lambda _: None)
+
+    run(plan)
+    failure = next(row for row in map(json.loads, ledger.read_text().splitlines()) if row["type"] == "failed")
+    assert run(plan)["actual_usage"]["network_attempts"] == 1
+    resend = {**plan, "authorized_resends": [{"segment": failure["segment"], "failed_at": failure["at"]}]}
+    result = run(resend)
+    assert result["actual_usage"]["authorized_resends"] == 1
+    assert result["actual_usage"]["retries"] == 0
+    assert result["actual_usage"]["network_attempts"] == 2
+    adapter.client.fail = False
+    assert run(resend)["actual_usage"]["network_attempts"] == 2
     assert len(adapter.client.calls) == 2
 
 

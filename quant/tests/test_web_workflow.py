@@ -441,3 +441,20 @@ def test_result_export_is_bound_to_selection(tmp_path, monkeypatch):
     archive = zipfile.ZipFile(io.BytesIO(payload))
     assert json.loads(archive.read("limitations.json")) == ["synthetic second result limitation"]
     assert _jobs(root) == []
+
+
+def test_formal_data_root_is_separate_from_the_research_root(tmp_path, monkeypatch):
+    research, _ = _seed_root(tmp_path / "research")
+    formal = tmp_path / "formal"
+    formal.mkdir()
+    (formal / "last_success.json").write_text(json.dumps({"cn_a_daily": "2026-11-05T15:00:00+08:00"}))
+    monkeypatch.setenv("HETU_QUANT_ROOT", str(research))
+    monkeypatch.setenv("HETU_DATA_ROOT", str(formal))
+
+    app = AppTest.from_file(str(APP_PATH)).run()
+    app.sidebar.radio[0].set_value("数据").run()
+    assert not app.exception
+    assert any("2026-11-05T15:00:00+08:00" in str(item.value) for item in app.markdown)
+    assert any(str(formal) in str(item.value) for item in app.caption)
+    assert _jobs(research) == []
+    assert not (formal / "catalog.sqlite").exists()

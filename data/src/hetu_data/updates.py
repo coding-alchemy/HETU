@@ -26,6 +26,7 @@ METERS = (
     "rows",
     "quota_bytes",
     "data_fee_cny",
+    "authorized_resends",
 )
 
 
@@ -195,6 +196,15 @@ def validate_update_plan(plan):
     if not isinstance(plan, dict):
         raise TypeError("maintenance requires a concrete update plan")
     request = data_request_from_dict(plan["request"])
+    segment_fields = ("product_id", "codes", "start", "end", "refresh")
+    identities = [{k: segment[k] for k in segment_fields} for segment in plan["segments"]]
+    resends = plan.get("authorized_resends", [])
+    if not isinstance(resends, list) or any(
+        not isinstance(item, dict) or set(item) != {"segment", "failed_at"}
+        or item["segment"] not in identities or not isinstance(item["failed_at"], str) or not item["failed_at"]
+        for item in resends
+    ):
+        raise ValueError("explicit resend must name a frozen segment and its previous failure")
     for segment in plan["segments"]:
         pid = segment["product_id"]
         if (
@@ -323,13 +333,23 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
             resume_retry = last_failure is not None and had_upstream_attempt and not resume_empty and not any(
                 e.get("usage", {}).get("retries", 0) > 0 for e in segment_events[last_failure + 1 :]
             )
+            resend_failure_at = None
             if resume_retry:
-                failure = segment_events[last_failure]["failure"]
+                failed_event = segment_events[last_failure]
+                failure = failed_event["failure"]
                 kind = failure["error_type"]
                 recoverable = kind in {"ConnectionError", "TimeoutError", "OSError"} or (
                     kind == "InterruptedError" and failure.get("cancelled_before_request") is True
                 )
-                if not recoverable or usage["retries"] >= limits.get("retries", 0):
+                failed_at = failed_event.get("at")
+                authorized_resend = (
+                    recoverable and {"segment": identity, "failed_at": failed_at} in plan.get("authorized_resends", [])
+                    and not any(e.get("authorized_failure_at") == failed_at for e in segment_events)
+                )
+                if authorized_resend:
+                    resend_failure_at = failed_at
+                    resume_retry = False
+                elif not recoverable or usage["retries"] >= limits.get("retries", 0):
                     stop_reason = stop_reason or "failure"
                     pending.append({**identity, "reason": "failed segment retry not authorized or not recoverable"})
                     continue
@@ -357,7 +377,7 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
             blocked = None
             pending_fetch = False
 
-            def reserve(increments, identity=identity):
+            def reserve(increments, identity=identity, resend_failure_at=resend_failure_at):
                 nonlocal blocked
                 now = _quota_now(quota.zone)
                 day = now.date()
@@ -371,6 +391,8 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                     blocked = error
                     raise
                 event = dict(type="usage", segment=identity, usage=increments, at=now.isoformat())
+                if increments.get("authorized_resends"):
+                    event["authorized_failure_at"] = resend_failure_at
                 if quota.limits:
                     event.update(quota_date=day.isoformat(), quota_timezone=quota.zone.key)
                 _write(ledger, event)
@@ -392,7 +414,7 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 )
 
             def before(event, old_before=old_before, reserve=reserve, resume_empty=resume_empty,
-                       resume_retry=resume_retry):
+                       resume_retry=resume_retry, resend_failure_at=resend_failure_at):
                 nonlocal previous_call, cancelled_before_wire, pending_fetch
                 if resume_empty:
                     raise PermissionError("saved empty response must recover without upstream requests")
@@ -411,6 +433,8 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 if pending_fetch:
                     increments["provider_fetch"] = 1
                     increments["retries"] += int(resume_retry)
+                    if resend_failure_at:
+                        increments["authorized_resends"] = 1
                 reserve(increments)
                 pending_fetch = False
                 previous_call = time.monotonic()
@@ -474,6 +498,8 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                     else:
                         if resume_retry:
                             reserve({"retries": 1})
+                        if resend_failure_at:
+                            reserve({"authorized_resends": 1})
                         reserve({"provider_fetch": 1})
                 ref = store.prepare(req, allow_acquire=False) if local_scope is not None else store.prepare(req)
                 if blocked:
@@ -489,7 +515,9 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                         f for f in manifest.get("failures", []) if f.get("product_id") == segment["product_id"]
                     ]
                     if own_failures:
-                        segment_failure_type = own_failures[0].get("error", "").partition(":")[0]
+                        segment_failure_type, _, detail = own_failures[0].get("error", "").partition(":")
+                        if detail.strip():
+                            raise RuntimeError(detail.strip())
                     raise RuntimeError("segment remains failed or incomplete; no completed coverage")
                 completed.append(identity)
                 snapshots.append(ref.snapshot_id)

@@ -80,6 +80,7 @@ def _parse_cn(text: str) -> datetime:
 
 def _page_data(root: Path, store: DataStore) -> None:
     st.header("数据")
+    st.caption(f"数据根：{root.resolve()}")
     st.info("更新入口默认 free；本地查询按所选快照的来源及当前读取授权核验，paid 不等于已获授权。")
     render_library(store)
     archives = [sid for sid, manifest in store._published_manifests()
@@ -682,7 +683,6 @@ def _page_results(root: Path) -> None:
 def main() -> None:
     st.set_page_config(page_title="HETU 量化研究平台（一期）")
     root = _data_root()
-    store = _make_store(root)
     st.title("HETU 量化研究平台（一期）")
     st.caption(
         "免费模式 free（paid 未启用）；网页只组织交互与读取，"
@@ -695,17 +695,18 @@ def main() -> None:
     if page == "任务列表":
         _page_jobs(root)
     elif page == "数据":
-        _page_data(root, store)
+        data_root = Path(os.environ.get("HETU_DATA_ROOT") or root).expanduser()
+        _page_data(data_root, _make_store(data_root))
     elif page == "研究提交":
-        _page_research(root, store)
+        _page_research(root, _make_store(root))
     elif page == "策略目录":
         from hetu_quant.ui.strategy_page import render_strategy_page
 
-        render_strategy_page(root, store)
+        render_strategy_page(root, _make_store(root))
     elif page == "回测":
         from hetu_quant.ui.backtest_page import render_backtest_page
 
-        render_backtest_page(root, store)
+        render_backtest_page(root, _make_store(root))
     else:
         _page_results(root)
 

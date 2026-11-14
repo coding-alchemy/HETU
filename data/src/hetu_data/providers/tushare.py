@@ -219,8 +219,13 @@ class TushareProvider:
         if api in {"suspend_d", "adj_factor", "stock_st"} and "trade_date" in params and len(raw):
             if not raw.trade_date.map(_day).eq(_day(params["trade_date"])).all():
                 raise IncompleteResponse("market response outside requested day")
-            if api == "suspend_d" and not raw.suspend_type.isin(("S", "R")).all():
+        if api == "suspend_d" and len(raw):
+            if not raw.suspend_type.isin(("S", "R")).all():
                 raise IncompleteResponse("unrecognized suspension event type")
+            if "start_date" in params and "end_date" in params and not raw.trade_date.map(_day).between(
+                _day(params["start_date"]), _day(params["end_date"]),
+            ).all():
+                raise IncompleteResponse("suspension response outside requested period")
         if api == "bse_mapping" and len(raw):
             for field in ("o_code", "n_code"):
                 if not raw[field].astype(str).str.endswith(".BJ").all() or raw[field].duplicated().any():

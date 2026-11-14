@@ -709,6 +709,20 @@ def test_sz_calendar_validates_exchange_and_keeps_legacy_default(tmp_path):
                                 obtained_at="2026-10-25T09:00:00+08:00")
 
 
+@pytest.mark.parametrize(("day", "kind", "error"), [
+    ("20260104", "S", "outside requested period"),
+    ("20260105", "X", "unrecognized suspension event type"),
+])
+def test_per_code_suspension_response_enforces_date_and_type(day, kind, error):
+    adapter = provider_module().TushareProvider()
+    packet = dict(code=0, data=dict(fields=["ts_code", "trade_date", "suspend_timing", "suspend_type"],
+                                  items=[["SYNTH.SH", day, None, kind]]))
+    params = {"ts_code": "SYNTH.SH", "start_date": "20260105", "end_date": "20260106"}
+    with pytest.raises(ValueError, match=error):
+        adapter.decode_response(json.dumps(packet).encode(), api="suspend_d", params=params,
+                                obtained_at="2026-10-25T09:00:00+08:00")
+
+
 def test_market_st_list_preserves_positive_observation_without_filling_status(tmp_path):
     from dataclasses import replace
 

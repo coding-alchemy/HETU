@@ -4,8 +4,9 @@ import hashlib
 import json
 import uuid
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
@@ -44,8 +45,7 @@ def _library_label(libraries, key):
     return f"{created} · {'可读' if item['status'] == 'readable' else '受限'} · {key}"
 
 
-def _render_coverage(store, ref):
-    targets = {row["target_id"]: row for row in list_archive_targets(store)}
+def _render_coverage(store, ref, targets):
     if not targets:
         st.caption("尚无已登记的档案目标；库引用可读状态不表示覆盖完整。")
         return
@@ -57,8 +57,32 @@ def _render_coverage(store, ref):
         return
     st.caption(f"固定目标 {report['target_start']} 至 {report['target_end']}；"
                f"最晚合格原价 {report.get('latest_available_date') or '未知'}，不代表此前连续覆盖。")
+    updates = []
+    try:
+        records = store._last_success()
+        for product_id, value in records.items():
+            timestamp = datetime.fromisoformat(value)
+            if timestamp.utcoffset() is not None:
+                updates.append((timestamp, product_id))
+    except (OSError, ValueError, TypeError, AttributeError):
+        updates.clear()
+    if updates:
+        latest, product = max(updates)
+        stamp = latest.astimezone(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds")
+        st.caption(f"数据根最近成功更新时间 {stamp}（{product}）。"
+                   "这是该产品的处理成功记录，所选库的实际数据日期见上方。")
+    else:
+        st.caption("数据根最近成功更新时间：暂无可用记录。")
     if not report["target_scope_complete"]:
         st.warning("历史对象全集未证，仅显示已知范围覆盖。")
+    split = report.get("unknown_split")
+    if split is not None:
+        st.caption(
+            f"已证应有但缺失 {split['confirmed_missing']:,} · "
+            f"证据不足 {split['insufficient_evidence']:,} · 冲突 {split['conflicts']:,}"
+        )
+    if report.get("detail_ref"):
+        st.caption(f"对象与期间明细 `{report['detail_ref']}`")
     st.write({
         "原价覆盖完整": report["raw_price_complete"],
         "复权辅助完整": report["adjustment_complete"],
@@ -75,6 +99,12 @@ def render_library(store: DataStore) -> None:
     libraries = _library_choices(store)
     if not libraries:
         return
+    try:
+        targets = {row["target_id"]: row for row in list_archive_targets(store)}
+        earliest_target = min((date.fromisoformat(row["start"]) for row in targets.values()), default=None)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        targets, earliest_target = {}, None
+        st.warning(f"档案目标读取受限：{error}。仍可查询获准原价。")
     st.subheader("本地日线库")
     st.caption("原价；成交量为股，成交额为元。选择固定版本，查询不取数。")
     preferred = st.session_state.pop("library_suggested", None)
@@ -86,8 +116,10 @@ def render_library(store: DataStore) -> None:
         markets = st.multiselect("市场", ("SH", "SZ", "BJ"), key="library_markets")
         codes = st.text_input("证券代码（逗号分隔）", key="library_codes")
         left, right = st.columns(2)
-        start = left.date_input("查询开始", date(2026, 1, 1), key="library_start")
-        end = right.date_input("查询结束", date(2026, 10, 13), key="library_end")
+        start_min = min(earliest_target, date(2016, 1, 1)) if earliest_target else None
+        end_min = min(earliest_target, date(2016, 10, 13)) if earliest_target else None
+        start = left.date_input("查询开始", date(2026, 1, 1), min_value=start_min, key="library_start")
+        end = right.date_input("查询结束", date(2026, 10, 13), min_value=end_min, key="library_end")
         columns = st.multiselect("字段", ARCHIVE_COLUMNS, default=list(ARCHIVE_COLUMNS), key="library_columns")
         field, op, value = st.columns(3)
         predicate_field = field.selectbox("数值筛选字段", ARCHIVE_COLUMNS[2:-2], index=None, key="library_field")
@@ -133,9 +165,9 @@ def render_library(store: DataStore) -> None:
                 st.dataframe(result["gaps"], hide_index=True)
             for limitation in result["auxiliary_limits"]:
                 st.warning(f"辅助表 {limitation['table']} 读取受限：{limitation['reason']}")
-            _render_coverage(store, ref)
+            _render_coverage(store, ref, targets)
         elif selected:
-            _render_coverage(store, LibraryRef(selected, store.root))
+            _render_coverage(store, LibraryRef(selected, store.root), targets)
     except (ValueError, PermissionError, RuntimeError, OSError, KeyError) as error:
         st.error(f"本地库读取受限：{error}。可重新选择其他获准的库或快照。")
 

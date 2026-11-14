@@ -681,6 +681,7 @@ def test_library_web_pins_submitted_selection(tmp_path, monkeypatch, source_fact
 def test_workbench_coverage_and_maintenance_states(tmp_path, monkeypatch, source_facts):
     import json
     import sys
+    from datetime import date
 
     from streamlit.testing.v1 import AppTest
 
@@ -691,15 +692,17 @@ def test_workbench_coverage_and_maintenance_states(tmp_path, monkeypatch, source
     targets.mkdir(parents=True)
     target = "synthetic"
     (targets / f"{target}.json").write_text(json.dumps({
-        "target_id": target, "requirements": {"start": "2026-01-05", "end": "2026-01-06", "target_scope": {}},
+        "target_id": target, "requirements": {"start": "1990-12-10", "end": "2026-01-06", "target_scope": {}},
     }))
     report = store.root / "archive" / "coverage" / ref.library_id
     report.mkdir(parents=True)
     (report / f"{target}.json").write_text(json.dumps({
-        "target_start": "2026-01-05", "target_end": "2026-01-06", "target_scope_complete": False,
+        "target_start": "1990-12-10", "target_end": "2026-01-06", "target_scope_complete": False,
         "raw_price_complete": False, "adjustment_complete": False, "coverage_ratio": None,
         "known_scope_ratio": 1.0, "latest_available_date": "2026-01-06",
+        "unknown_split": {"confirmed_missing": 2, "insufficient_evidence": 3, "conflicts": 4},
     }))
+    (tmp_path / "last_success.json").write_text(json.dumps({"ts_a_daily": "2026-01-08T09:00:00+08:00"}))
     monkeypatch.setattr(sys, "argv", ["app.py", "--root", str(tmp_path)])
     app = AppTest.from_file(app_module.__file__).run()
     app.selectbox(key="library_version").set_value(ref.library_id).run()
@@ -707,3 +710,27 @@ def test_workbench_coverage_and_maintenance_states(tmp_path, monkeypatch, source
     app.selectbox(key="library_target").set_value(target).run()
     assert any("全集未证" in item.value for item in app.warning)
     assert any("2026-01-06" in item.value for item in app.caption)
+    assert any(
+        "数据根最近成功更新时间" in item.value and "2026-01-08T09:00:00+08:00" in item.value
+        and "ts_a_daily" in item.value and "产品的处理成功记录" in item.value
+        for item in app.caption
+    )
+    assert any("已证应有但缺失 2" in item.value and "证据不足 3" in item.value and "冲突 4" in item.value
+               for item in app.caption)
+    assert app.date_input(key="library_start").proto.min == "1990-12-10"
+    assert app.date_input(key="library_end").proto.min == "1990-12-10"
+    app.text_input(key="library_codes").set_value("SYNTH.SH")
+    app.date_input(key="library_start").set_value(date(1999, 11, 10))
+    app.date_input(key="library_end").set_value(date(1999, 11, 11))
+    app.button(key="library_query").click().run()
+    selection = app.session_state["library_submitted_selection"]
+    assert (selection["start"], selection["end"]) == ("1999-11-10", "1999-11-11")
+
+    (targets / "misnamed.json").write_bytes((targets / f"{target}.json").read_bytes())
+    reopened = AppTest.from_file(app_module.__file__).run()
+    assert not reopened.exception
+    assert any("档案目标读取受限" in item.value for item in reopened.warning)
+    reopened.selectbox(key="library_version").set_value(ref.library_id)
+    reopened.text_input(key="library_codes").set_value("SYNTH.SH")
+    reopened.button(key="library_query").click().run()
+    assert reopened.session_state["library_submitted_selection"]["library_id"] == ref.library_id

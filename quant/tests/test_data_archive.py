@@ -994,3 +994,21 @@ def test_library_audit_uses_only_scoped_primary_source_basis(tmp_path):
     assert audit_library(primary, chosen, req)["coverage_counts"]["qualified_bars"] == 7
     out_of_scope = publish_library(primary, asset_snapshots=assets)
     assert audit_library(primary, out_of_scope, req)["coverage_counts"]["qualified_bars"] == 7
+
+
+def test_audit_library_reuses_same_fixed_library_inventory(tmp_path, monkeypatch):
+    from hetu_data import archive
+    from hetu_data.library import publish_library
+
+    case = make_backtest_case("coverage")
+    store, ref = build_case_store(tmp_path, case)
+    library = publish_library(store, asset_snapshots=(_registered(store, ref),))
+    requirements = _raw_target(case)
+    inventory = archive._scan_library_coverage(store, library)
+    expected = archive.audit_library(store, library, requirements)
+
+    def forbid_rescan(*args):
+        raise AssertionError("reuse should not reopen the partitions")
+
+    monkeypatch.setattr(archive, "_scan_library_coverage", forbid_rescan)
+    assert archive.audit_library(store, library, requirements, inventory=inventory) == expected

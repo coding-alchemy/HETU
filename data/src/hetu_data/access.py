@@ -33,7 +33,11 @@ def check_product_access(
     ):
         raise AccessDenied("product or operation grant missing")
     until = grant.get("acquire_until")
-    if operation == "read" and grant.get("retained_use") is True:
-        return
+    if operation == "backup":
+        until = grant.get("backup_until", until)
+    if operation == "read":
+        if grant.get("retained_use") is True:
+            return
+        until = grant.get("read_until", until)
     if not until or datetime.now(ZoneInfo("Asia/Shanghai")).date() > date.fromisoformat(str(until)):
         raise AccessDenied("current-use permission ended or validity unknown; retained use is not established")

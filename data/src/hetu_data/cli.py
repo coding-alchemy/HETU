@@ -44,6 +44,23 @@ def main(argv: list[str] | None = None) -> int:
     submit.add_argument("--root", type=Path, required=True)
     submit.add_argument("--plan", type=Path, required=True)
     submit.add_argument("--submission-id", required=True)
+    backup = commands.add_parser("backup").add_subparsers(dest="backup_command", required=True)
+    for action in ("plan", "run", "verify", "restore"):
+        step = backup.add_parser(action)
+        if action in {"plan", "run"}:
+            step.add_argument("--root", type=Path, required=True)
+        if action != "run":
+            step.add_argument("--repository", type=Path, required=True)
+        if action in {"verify", "restore"}:
+            step.add_argument("--point", required=True)
+        if action == "restore":
+            step.add_argument("--destination", type=Path, required=True)
+        elif action == "run":
+            step.add_argument("--plan", type=Path, required=True)
+        elif action == "plan":
+            step.add_argument("--output", type=Path, required=True)
+            step.add_argument("--library")
+            step.add_argument("--exclude-raw-originals", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "web":
         try:
@@ -62,6 +79,23 @@ def main(argv: list[str] | None = None) -> int:
         from hetu_data.worker import main as worker_main
         return worker_main(["--root", str(args.root)] + (["--once"] if args.once else []))
     try:
+        if args.command == "backup":
+            from hetu_data import packed_backup
+
+            if args.backup_command == "verify":
+                result = packed_backup.verify_packed_backup(args.repository, args.point)
+            elif args.backup_command == "restore":
+                result = packed_backup.restore_packed_backup(args.repository, args.point, args.destination)
+            elif args.backup_command == "plan":
+                path = packed_backup.plan_packed_backup(
+                    DataStore(args.root), args.repository, output=args.output, library_id=args.library,
+                    exclude_raw_originals=args.exclude_raw_originals,
+                )
+                result = {"plan": str(path)}
+            else:
+                result = packed_backup.execute_packed_backup(DataStore(args.root), args.plan)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
         store = DataStore(args.root)
         if args.command == "submit":
             from hetu_data.catalog import DataTaskStore

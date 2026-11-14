@@ -9,7 +9,7 @@ Python 3.11。发行名 `hetu-data`，导入名 `hetu_data`。基础包使用 pa
 ```bash
 python3.11 -m venv .venv-data
 .venv-data/bin/python -m pip install -e './data[web,sources]'
-.venv-data/bin/hetu-data web --root .hetu/quant
+.venv-data/bin/hetu-data web --root "$HOME/data/hetu/a-share/daily"
 ```
 
 只需 Python／SQL 时可安装基础包 `./data`。基础锁见 [requirements.lock](requirements.lock)，网页、来源及开发依赖的既有锁见 [quant/requirements.lock](../quant/requirements.lock)。从已有 wheelhouse 安装时可用：
@@ -18,9 +18,12 @@ python3.11 -m venv .venv-data
 python -m pip install --no-index --find-links /absolute/wheelhouse -c data/requirements.lock hetu-data==0.1.0
 ```
 
-每个 CLI 入口显式指定数据根。`query`、网页查询和导出均为本地操作。`plan` 预览，`submit` 入队，获准后才由 `worker` 执行。`worker --once` 排空可执行队列后退出。研究侧可消费同一数据根及任务机制。
+每个 CLI 入口显式指定数据根。旧库及单快照可继续指定原数据根。`query`、网页查询和导出均为本地操作。`plan` 预览，`submit` 入队，获准后才由 `worker` 执行。`worker --once` 排空可执行队列后退出。研究侧可消费同一数据根及任务机制。
 
 `hetu-data libraries --root <数据根>` 列出已发布的库版本。`query --library <库版本>` 按固定清单查询历史和增量分片，也可指定市场和数值条件。`query --snapshot <快照>` 继续用于单快照。库引用可读与全历史覆盖分别验收。
+
+T7 的手动备份、校验和恢复命令见 [T7 手动打包备份](../quant/DATA.md#51-t7-手动打包备份)。
+正式库可在网页的“固定档案目标”切换二十年子集、更早历史和已存增量。当前固定库及同一选择的 CLI、Python、SQL、Notebook 用法见[统一使用手册](../docs/quant-research-platform-usage.md#4-查询筛选和导出)。
 
 - [统一使用手册](../docs/quant-research-platform-usage.md)提供配置、命令和 Python／SQL 示例。
 - [数据字典与维护合同](../quant/DATA.md)说明字段、单位、读取权限、存储和恢复。

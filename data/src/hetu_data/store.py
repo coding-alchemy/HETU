@@ -612,14 +612,19 @@ class DataStore:
         tmp_dir.rename(final_dir)
         return SnapshotRef(snapshot_id=snapshot_id, root=self.root)
 
-    def _logical_entries(self, manifest):
+    def _logical_entries(self, manifest, *, product_codes=None):
         """年度文件按独立对象期间投影为旧规划器可消费的逻辑月分区。"""
         for entry in manifest.get("table_files", []):
+            product_id = entry["product_id"]
+            if product_codes is not None and product_id not in product_codes:
+                continue
             if "year" not in entry:
                 yield entry
                 continue
+            codes = product_codes[product_id] if product_codes is not None else ()
             for cov in manifest.get("object_coverage", []):
-                if cov["product_id"] != entry["product_id"] or cov["table"] != entry["table"]:
+                if (cov["product_id"] != product_id or cov["table"] != entry["table"]
+                        or (codes and cov["code"] not in codes)):
                     continue
                 for month in _month_keys(date.fromisoformat(cov["start"]), date.fromisoformat(cov["end"])):
                     if month[:4] != entry["year"]:
@@ -910,6 +915,8 @@ class DataStore:
     def _coverage_index(
         self,
         published: list[tuple[str, dict[str, object]]] | None = None,
+        *,
+        product_codes: Mapping[str, set[str]] | None = None,
     ) -> dict[str, dict[str, list[tuple[str, str, str, str, list[str] | None]]]]:
         """product_id -> partition -> 候选列表（created_at 新→旧）。
 
@@ -923,7 +930,7 @@ class DataStore:
         for snapshot_id, manifest in loaded:
             created = str(manifest.get("created_at", ""))
             request_doc = manifest.get("request")
-            for entry in self._logical_entries(manifest):
+            for entry in self._logical_entries(manifest, product_codes=product_codes):
                 product_id = entry["product_id"]
                 partition = entry["partition"]
                 coverage = self._entry_coverage(entry, request_doc)
@@ -1291,7 +1298,8 @@ class DataStore:
         ]
 
     def _build_plans(self, request, published, base_manifests):
-        coverage = self._coverage_index(published)
+        product_codes = {pid: set(request.codes_for(pid)) for pid in request.product_ids}
+        coverage = self._coverage_index(published, product_codes=product_codes)
         plans = {
             pid: self._plan_product(pid, request, coverage, base_manifests, published, {})
             for pid in request.product_ids
@@ -1812,10 +1820,12 @@ class DataStore:
                 for plan in plans.values()
                 for key, (relpath, base_id, _cov) in plan["merges"].items()
             )
+            source_ids = {base_id for base_id, _path, _key in needed_sources}
+            product_codes = {pid: set(request.codes_for(pid)) for pid in request.product_ids}
             source_entries = {
                 (base_id, entry["path"], entry["partition"]): entry
-                for base_id, manifest in published
-                for entry in self._logical_entries(manifest)
+                for base_id in source_ids
+                for entry in self._logical_entries(base_manifests[base_id], product_codes=product_codes)
                 if (base_id, entry["path"], entry["partition"]) in needed_sources
             }
             reused_snapshots = {
