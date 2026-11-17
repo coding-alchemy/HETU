@@ -252,3 +252,39 @@ print(json.dumps({'update': update, 'ledger': ledger, 'external_requests': 0}))
                 worker.kill()
                 worker.wait(timeout=5)
             print(f"resident worker reaped: {worker.returncode}")
+
+
+def test_library_cli_and_standalone_readers(isolated_data_env, source_facts):
+    env = isolated_data_env
+    run(env, SETUP.replace("PAYLOAD", repr(source_facts.response().decode())) + f"""
+from dataclasses import replace
+from io import StringIO
+import socket
+import pandas as pd
+from hetu_data.cli import main
+from hetu_data.library import publish_library, query_library, query_library_sql
+from hetu_data.archive import ARCHIVE_COLUMNS
+day = date(2026, 1, 6)
+Client.query = lambda *args: {source_facts.response(day="20260106", price=11)!r}
+next_ref = s.prepare(replace(r, start=day, end=day))
+entries = tuple(dict(root=str(s.root), snapshot_id=shard.snapshot_id, tables=['daily_bars'])
+                for shard in (ref, next_ref))
+library = publish_library(s, asset_snapshots=entries)
+def forbidden(*args, **kwargs):
+    raise AssertionError("unexpected network")
+socket.socket = forbidden
+TushareProvider._query = forbidden
+assert main(['libraries','--root','store']) == 0
+assert main(['query','--root','store','--library',library.library_id,'--codes','SYNTH.SH',
+             '--markets','SH','--start','2026-01-05','--end','2026-01-06',
+             '--columns',','.join(ARCHIVE_COLUMNS),'--output','library.csv']) == 0
+result = query_library(s, library, codes=('SYNTH.SH',), markets=('SH',), start=r.start, end=day)
+assert result['bars'].close_raw.tolist() == [10, 11]
+csv = pd.read_csv('library.csv')
+pd.testing.assert_frame_equal(csv,pd.read_csv(StringIO(result['bars'].to_csv(index=False))))
+sql = query_library_sql(s, result['selection'], 'SELECT * FROM daily_bars WHERE close_raw >= ?', (10,))
+pd.testing.assert_frame_equal(csv,pd.read_csv(StringIO(sql.to_csv(index=False))))
+assert main(['query','--root','store','--snapshot',ref.snapshot_id,'--codes','SYNTH.SH',
+             '--start','2026-01-05','--end','2026-01-06','--columns','close_raw','--output','single.csv']) == 0
+assert pd.read_csv('single.csv').close_raw.tolist() == [10]
+""")

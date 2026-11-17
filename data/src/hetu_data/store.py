@@ -11,6 +11,7 @@ import json
 import shutil
 import uuid
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import TypedDict
@@ -529,6 +530,10 @@ class DataStore:
         product = self.product(product_id)
         self.check_access(request.mode, product, operation=operation)
         cross_section = product.get("cross_section")
+        if request.market_day_codes is not None and (
+            cross_section != "trade_day" or set(request.market_day_codes) - set(self._cross_section_codes(product_id))
+        ):
+            raise AccessDenied("market-day objects outside the approved product scope")
         if cross_section:
             if request.codes_for(product_id) or (cross_section == "trade_day" and request.start != request.end):
                 raise ValueError("market cross-section requires no code filter and a single day for trade_day")
@@ -612,14 +617,19 @@ class DataStore:
         tmp_dir.rename(final_dir)
         return SnapshotRef(snapshot_id=snapshot_id, root=self.root)
 
-    def _logical_entries(self, manifest):
+    def _logical_entries(self, manifest, *, product_codes=None):
         """年度文件按独立对象期间投影为旧规划器可消费的逻辑月分区。"""
         for entry in manifest.get("table_files", []):
+            product_id = entry["product_id"]
+            if product_codes is not None and product_id not in product_codes:
+                continue
             if "year" not in entry:
                 yield entry
                 continue
+            codes = product_codes[product_id] if product_codes is not None else ()
             for cov in manifest.get("object_coverage", []):
-                if cov["product_id"] != entry["product_id"] or cov["table"] != entry["table"]:
+                if (cov["product_id"] != product_id or cov["table"] != entry["table"]
+                        or (codes and cov["code"] not in codes)):
                     continue
                 for month in _month_keys(date.fromisoformat(cov["start"]), date.fromisoformat(cov["end"])):
                     if month[:4] != entry["year"]:
@@ -776,6 +786,18 @@ class DataStore:
         markets = grant.get("markets", [])
         return sorted({code for code in grant.get("codes", []) if code.rsplit(".", 1)[-1] in markets})
 
+    def _market_day_scope(self, product_id, request):
+        codes = self._cross_section_codes(product_id)
+        if request.market_day_codes is not None:
+            return sorted(set(codes).intersection(request.market_day_codes))
+        if self.product(product_id).get("cross_section") == "trade_day":
+            periods = self.config.get("market_day_code_periods")
+            if periods:
+                day = request.start.isoformat()
+                active = {code for code, start, end in periods if start <= day and (not end or day <= end)}
+                return sorted(set(codes) & active)
+        return codes
+
     def _bound_provider_tables(self, product_id, tables, request):
         """全目录/全史原件保持原形，标准表只落本次请求的对象和事实期间。"""
         product = self.product(product_id)
@@ -785,7 +807,7 @@ class DataStore:
         codes = request.codes_for(product_id)
         scoped_cross_section = bool(product.get("cross_section"))
         if scoped_cross_section:
-            codes = self._cross_section_codes(product_id)
+            codes = self._market_day_scope(product_id, request)
         for name, frame in tables.items():
             if (codes or scoped_cross_section) and "code" in TABLE_SCHEMAS[name]["columns"]:
                 frame = frame[frame.code.isin(codes)]
@@ -793,6 +815,16 @@ class DataStore:
                 frame = frame[frame.date.between(request.start.isoformat(), request.end.isoformat())]
             elif name == "corporate_actions":
                 frame = frame[frame.ex_date.between(request.start.isoformat(), request.end.isoformat())]
+            if (product_id == "ts_a_daily_day" and name == "daily_bars"
+                    and (duplicates := self.config.get("initial_cross_section_reuse"))):
+                # Keep the full response and any differing values; omit only facts already in the fixed parent.
+                from hetu_data.archive import _BAR_FIELDS
+
+                fields = ["code", "date", *_BAR_FIELDS]
+                known = pd.DataFrame(duplicates["rows"], columns=fields)
+                known = known[known.date.between(request.start.isoformat(), request.end.isoformat())]
+                if not known.empty:
+                    frame = frame.loc[~pd.MultiIndex.from_frame(frame[fields]).isin(pd.MultiIndex.from_frame(known))]
             bounded[name] = frame.copy()
         return bounded
 
@@ -826,6 +858,7 @@ class DataStore:
                     "params": response["params"],
                     "obtained_at": response["obtained_at"],
                     "evidence_ref": filename,
+                    **{k: response[k] for k in ("query_observation",) if k in response},
                 }
             )
             for table, frame in tables.items():
@@ -910,6 +943,8 @@ class DataStore:
     def _coverage_index(
         self,
         published: list[tuple[str, dict[str, object]]] | None = None,
+        *,
+        product_codes: Mapping[str, set[str]] | None = None,
     ) -> dict[str, dict[str, list[tuple[str, str, str, str, list[str] | None]]]]:
         """product_id -> partition -> 候选列表（created_at 新→旧）。
 
@@ -923,7 +958,7 @@ class DataStore:
         for snapshot_id, manifest in loaded:
             created = str(manifest.get("created_at", ""))
             request_doc = manifest.get("request")
-            for entry in self._logical_entries(manifest):
+            for entry in self._logical_entries(manifest, product_codes=product_codes):
                 product_id = entry["product_id"]
                 partition = entry["partition"]
                 coverage = self._entry_coverage(entry, request_doc)
@@ -1115,6 +1150,8 @@ class DataStore:
             key = f"range={request.start.isoformat()}_{request.end.isoformat()}"
             hits = coverage.get(product_id, {}).get(key, [])
             scoped_cross_section = product.get("provider") == "tushare" and product.get("cross_section")
+            if product.get("provider") == "tushare" and product.get("kind") == "calendar":
+                hits = [hit for hit in hits if hit[4] == [request.start.isoformat(), request.end.isoformat()]]
             if hits and not scoped_cross_section:
                 add_copy(key, hits[0])
                 return plan
@@ -1122,12 +1159,16 @@ class DataStore:
                 from hetu_data.providers.tushare import calls_for
 
                 (api, params), = calls_for(product_id, (), request.start, request.end)
-                scope = self._cross_section_codes(product_id)
+                scope = self._market_day_scope(product_id, request)
                 for hit in hits:
                     base_id, path, *_ = hit
                     manifest = base_manifests[base_id]
                     entry = next(entry for entry in manifest["table_files"] if entry["path"] == path)
                     saved_scope = entry.get("cross_section_codes")
+                    if (saved_scope is not None and "market_day_codes" not in (manifest.get("request") or {})
+                            and self.config.get("market_day_code_periods")):
+                        legacy = replace(request, market_day_codes=None)
+                        saved_scope = sorted(set(saved_scope) & set(self._market_day_scope(product_id, legacy)))
                     if saved_scope is None:
                         # 旧清单只能以实际已保存代码证明同一范围，不能把缺行当成已处理对象。
                         source = self._verified_source(base_id, path, base_manifests)
@@ -1291,7 +1332,8 @@ class DataStore:
         ]
 
     def _build_plans(self, request, published, base_manifests):
-        coverage = self._coverage_index(published)
+        product_codes = {pid: set(request.codes_for(pid)) for pid in request.product_ids}
+        coverage = self._coverage_index(published, product_codes=product_codes)
         plans = {
             pid: self._plan_product(pid, request, coverage, base_manifests, published, {})
             for pid in request.product_ids
@@ -1299,6 +1341,13 @@ class DataStore:
         if request.refresh_from is None:
             return plans
         for pid, plan in plans.items():
+            if self.product(pid).get("cross_section") == "trade_day":
+                if request.start != request.end or request.refresh_from != request.start:
+                    raise ValueError("trade-day cross-section refresh requires a separately bounded day")
+                key = f"range={request.start.isoformat()}_{request.end.isoformat()}"
+                plan.update(copies=[], copy_coverage={}, cross_section_replay=None,
+                            calls=[((), request.start, request.end)], fetched_partitions=[key])
+                continue
             if self.product(pid).get("kind") == "calendar":
                 if request.refresh_from != request.start:
                     raise ValueError("calendar refresh requires a separately bounded request starting at refresh_from")
@@ -1343,7 +1392,7 @@ class DataStore:
         ]
         segments.extend(
             dict(product_id=pid, codes=[], start=request.start.isoformat(), end=request.end.isoformat(),
-                 refresh=False, local_cross_section_codes=self._cross_section_codes(pid))
+                 refresh=False, local_cross_section_codes=self._market_day_scope(pid, request))
             for pid, plan in plans.items() if plan["cross_section_replay"]
         )
         reused = [
@@ -1434,6 +1483,7 @@ class DataStore:
                 target = table_dir / name
                 part = part.drop(columns=["_month"], errors="ignore")
                 coverage: list[str] | None = None
+                observed_ranges = None
                 merge = merge_sources.get(partition)
                 if merge is not None and len(part):
                     # 部分覆盖合并：旧段在前，重叠键保留旧值
@@ -1466,7 +1516,20 @@ class DataStore:
                         request.end.isoformat(),
                     ]
                 elif partition.startswith("range=") and "date" in part.columns:
-                    coverage = [request.start.isoformat(), request.end.isoformat()]
+                    if table_name == "calendar" and product.get("provider") == "tushare":
+                        # 逐连续区间登记实存自然日，兼容旧消费者所用的单区间 coverage。
+                        observed_ranges = []
+                        for day in sorted(part.date):
+                            if observed_ranges and date.fromisoformat(day) == (
+                                date.fromisoformat(observed_ranges[-1][1]) + timedelta(days=1)
+                            ):
+                                observed_ranges[-1][1] = day
+                            else:
+                                observed_ranges.append([day, day])
+                        if len(observed_ranges) == 1:
+                            coverage = list(observed_ranges[0])
+                    else:
+                        coverage = [request.start.isoformat(), request.end.isoformat()]
                 same_batch = next((e for e in table_files if e["path"] == str(target.relative_to(tmp_dir))), None)
                 same_batch_queries = []
                 if same_batch is not None:
@@ -1502,8 +1565,10 @@ class DataStore:
                 }
                 if coverage is not None:
                     entry["coverage"] = coverage
+                if observed_ranges is not None:
+                    entry["observed_ranges"] = observed_ranges
                 if product.get("provider") == "tushare" and product.get("cross_section"):
-                    entry["cross_section_codes"] = self._cross_section_codes(product_id)
+                    entry["cross_section_codes"] = self._market_day_scope(product_id, request)
                 if table_name == "corporate_actions":
                     records = same_batch_queries + list((prior_query_evidence or {}).get(partition, []))
                     code = partition.removeprefix("code=")
@@ -1812,10 +1877,12 @@ class DataStore:
                 for plan in plans.values()
                 for key, (relpath, base_id, _cov) in plan["merges"].items()
             )
+            source_ids = {base_id for base_id, _path, _key in needed_sources}
+            product_codes = {pid: set(request.codes_for(pid)) for pid in request.product_ids}
             source_entries = {
                 (base_id, entry["path"], entry["partition"]): entry
-                for base_id, manifest in published
-                for entry in self._logical_entries(manifest)
+                for base_id in source_ids
+                for entry in self._logical_entries(base_manifests[base_id], product_codes=product_codes)
                 if (base_id, entry["path"], entry["partition"]) in needed_sources
             }
             reused_snapshots = {
@@ -1878,7 +1945,7 @@ class DataStore:
                         }
                         if copy_cov is not None:
                             entry["coverage"] = copy_cov
-                        for field in ("query_basis", "query_coverage", "cross_section_codes"):
+                        for field in ("query_basis", "query_coverage", "cross_section_codes", "observed_ranges"):
                             if field in original:
                                 entry[field] = original[field]
                         table_files.append(entry)
@@ -1935,7 +2002,9 @@ class DataStore:
                             raw.to_parquet(raw_path, index=False)
                             raw_rel = str(raw_path.relative_to(tmp_dir))
                             raw_entry = {"path": raw_rel, "sha256": _sha256(raw_path)}
-                            if observation := raw.attrs.get("query_observation"):
+                            if (observation := raw.attrs.get("query_observation")) and not raw.attrs.get(
+                                "provider_responses"
+                            ):
                                 raw_entry["query_observation"] = observation
                             evidence = raw.attrs.get("query_evidence", [])
                             if evidence:
@@ -1955,6 +2024,12 @@ class DataStore:
                                     "refresh_from": None,
                                 }
                             )
+                            if product.get("cross_section") == "trade_day" and "ts_code" in raw:
+                                unconfirmed = (set(raw.ts_code.dropna()) & set(self._cross_section_codes(product_id))
+                                               - set(self._market_day_scope(product_id, segment_request)))
+                                if unconfirmed:
+                                    raw_entry["unconfirmed_market_day_codes"] = sorted(unconfirmed)
+                                    raw_entry["market_day"] = seg_start.isoformat()
                             tables = self._bound_provider_tables(product_id, tables, segment_request)
                             self._provider_originals(tmp_dir, product_id, raw, tables, raw_files, table_files)
                             for table_name, frame in tables.items():
@@ -2153,6 +2228,27 @@ class DataStore:
                     for pid in request.product_ids
                     if self.product(pid).get("kind") == "calendar" and not any(f["product_id"] == pid for f in failures)
                 }
+            if request.refresh_from is not None:
+                point = request.start.isoformat()
+                market_day_refresh = {
+                    pid: dict(
+                        start=point,
+                        end=point,
+                        codes=self._market_day_scope(pid, request),
+                        supersedes=[
+                            sid for sid, previous in published
+                            if any(
+                                entry["product_id"] == pid and entry.get("coverage") == [point, point]
+                                for entry in previous.get("table_files", ())
+                            )
+                        ],
+                    )
+                    for pid in request.product_ids
+                    if self.product(pid).get("cross_section") == "trade_day"
+                    and not any(f["product_id"] == pid for f in failures)
+                }
+                if market_day_refresh:
+                    doc["market_day_refresh"] = market_day_refresh
             return self._publish(tmp_dir, snapshot_id, doc)
 
         # ---- 读取 ----

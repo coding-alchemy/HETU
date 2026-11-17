@@ -524,6 +524,29 @@
       "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。",
       "storage_layout": "year"
     },
+    "ts_a_daily_day": {
+      "cross_section": "trade_day",
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro/document/2?doc_id=27",
+        "basis": "已核官方 daily 日期查询合同；仍须本机批准相应产品及整日响应权限"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "daily_bars"
+      ],
+      "source_api": "daily",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "单交易日未复权日线横截面。顶到 6000 行或返回 has_more 即停；查询成功不证明独立目标全集。"
+    },
     "ts_adj_factor_day": {
       "cross_section": "trade_day",
       "provider": "tushare",

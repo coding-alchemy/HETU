@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 import shutil
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta
+from functools import cache
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import duckdb
 import pandas as pd
@@ -42,11 +43,58 @@ _TABLES = (
 ARCHIVE_COLUMNS = ("code", "date", *_BAR_FIELDS, "product_id", "source_ref")
 
 
-def _valid_archive_bars(values):
-    valid = values.notna().all(axis=1) & values.ge(0).all(axis=1) & values[_PRICE_FIELDS].gt(0).all(axis=1)
+def _valid_archive_ohlcv(values):
+    required = values[[*_PRICE_FIELDS, "volume_shares"]]
+    valid = required.notna().all(axis=1) & required.ge(0).all(axis=1) & values[_PRICE_FIELDS].gt(0).all(axis=1)
     return valid & values.high_raw.ge(values[_PRICE_FIELDS].max(axis=1)) & values.low_raw.le(
         values[_PRICE_FIELDS].min(axis=1)
     )
+
+
+def _valid_archive_bars(values):
+    return _valid_archive_ohlcv(values) & values.amount_cny.notna() & values.amount_cny.ge(0)
+
+
+def _new_exception_bar_issues(bars, exceptions, accepted_sources, *, origins=None):
+    if not exceptions or bars.empty:
+        return set()
+    keys = bars.code.astype(str) + "/" + bars.date.astype(str)
+    scoped = bars.loc[keys.isin(exceptions)]
+    if scoped.empty:
+        return set()
+    values = scoped[_BAR_FIELDS].apply(pd.to_numeric, errors="coerce")
+    invalid = scoped.loc[~_valid_archive_bars(values) | ~values.abs().lt(float("inf")).all(axis=1)]
+    if invalid.empty:
+        return set()
+    sources = accepted_sources()
+    raw = invalid["_archive_raw"].eq(True) if "_archive_raw" in invalid else [False] * len(invalid)
+    origins = origins or {}
+    known = [
+        (origins.get((root, snapshot), root), snapshot, product, is_raw) in sources
+        for root, snapshot, product, is_raw in zip(
+            invalid.source_root, invalid.snapshot_id, invalid.product_id, raw, strict=True,
+        )
+    ]
+    # Replicas of the same supplier observation do not introduce a new field issue.
+    fields = ["code", "date", "product_id", *_BAR_FIELDS]
+    observations = invalid[fields].assign(raw=raw, known=known)
+    new = ~observations.groupby([*fields, "raw"], dropna=False).known.transform("any")
+    return set(observations.loc[new, ["code", "date"]].itertuples(index=False, name=None))
+
+
+def _primary_status_keys(bars, rule):
+    """Return scoped object-days with one finite six-field price and no unresolved price disagreement."""
+    if not rule or bars.empty:
+        return set()
+    keys = bars.code.astype(str) + "/" + bars.date.astype(str)
+    candidates = bars.loc[keys.isin(rule["object_days"])]
+    result = set()
+    for (code, day), rows in candidates.groupby(["code", "date"], sort=False):
+        values = rows[_BAR_FIELDS].apply(pd.to_numeric, errors="coerce").drop_duplicates()
+        if (rows.product_id.eq("ts_a_daily").any() and len(values) == 1
+                and values.abs().lt(float("inf")).all(axis=None) and _valid_archive_bars(values).iat[0]):
+            result.add((code, day))
+    return result
 
 
 def _archive_trade_evidence(values, valid):
@@ -57,6 +105,38 @@ def _official_no_trade(events):
     return events.product_id.eq("cn_a_archive_no_trade") & events.event_type.eq("confirmed_no_trade") & (
         events.source_ref.fillna("").astype(str).str.strip().ne("")
     )
+
+
+_TUSHARE_HALT_PRODUCTS = ("ts_suspend_day", "ts_suspend_events")
+_OFFICIAL_TRADE_TIMING = "cn_a_archive_trade_timing"
+_INTRADAY_PREFIX = "confirmed_intraday_halt:"
+
+
+def _full_day_halt(events):
+    return events.event_type.eq("S") & events.suspend_timing.astype("string").fillna("").str.strip().eq("")
+
+
+def _official_intraday_keys(events):
+    corrected_sources = {_INTRADAY_PREFIX + product: product for product in _TUSHARE_HALT_PRODUCTS}
+    verified = (
+        events.product_id.eq(_OFFICIAL_TRADE_TIMING) & events.event_type.isin(corrected_sources)
+        & events.code.astype("string").str.endswith(".SZ", na=False)
+        & events.suspend_timing.fillna("").str.strip().ne("") & events.source_ref.fillna("").str.strip().ne("")
+    )
+    return {
+        (code, day, corrected_sources[event_type])
+        for code, day, event_type in events.loc[
+            verified, ["code", "date", "event_type"]
+        ].itertuples(index=False, name=None)
+    }
+
+
+def _exclude_revised_provider_halts(events, official_keys):
+    revise = _full_day_halt(events)
+    return events[~(revise & pd.Series(
+        [key in official_keys for key in events[["code", "date", "product_id"]].itertuples(index=False, name=None)],
+        index=events.index, dtype=bool,
+    ))]
 
 
 def _query_boolean(value):
@@ -104,28 +184,85 @@ def open_archive_view(store: DataStore, ref: SnapshotRef) -> duckdb.DuckDBPyConn
 def query_archive(store, ref, *, codes, start, end):
     """网页和Notebook共同入口；缺口只解释本次范围，不替代全档案资格。"""
     bars = store.read_range(ref, "daily_bars", codes=codes, start=start, end=end, columns=ARCHIVE_COLUMNS)
-    calendar = store.read_range(
-        ref, "calendar", codes=(), start=start, end=end, columns=("date", "is_trading_day", "source_ref")
+
+    def read(table, fields, product_id=None):
+        return store.read_range(ref, table, codes=codes, start=start, end=end, columns=fields, product_id=product_id)
+
+    gaps, auxiliary_limits = _archive_query_details(read, bars, codes, start, end)
+    return dict(
+        snapshot_id=ref.snapshot_id,
+        mode=store.load_manifest(ref).get("mode", "free"),
+        bars=bars,
+        gaps=gaps,
+        auxiliary_limits=auxiliary_limits,
     )
-    identities = store.read_range(
-        ref, "securities", codes=codes, start=start, end=end, columns=("code", "ipo_date", "out_date", "source_ref")
+
+
+def _archive_query_details(read, bars, codes, start, end, *, policy_days=(), primary_status_keys=(),
+                           scoped_status_days=(), accepted_keys=(), tushare_delist_date_exclusive=False):
+    limitations = []
+
+    def auxiliary(table, fields, product_id=None):
+        try:
+            return read(table, fields, product_id)
+        except AccessDenied as error:
+            limitations.append(dict(table=table, reason=str(error)))
+            return pd.DataFrame(columns=fields)
+
+    halt_fields = ("code", "date", "event_type", "suspend_timing", "product_id", "source_ref")
+    official_intraday = _official_intraday_keys(auxiliary("security_events", halt_fields, _OFFICIAL_TRADE_TIMING))
+    halt_events = pd.concat([auxiliary("security_events", halt_fields, pid) for pid in _TUSHARE_HALT_PRODUCTS],
+                            ignore_index=True)
+    if official_intraday:
+        halt_events = _exclude_revised_provider_halts(halt_events, official_intraday)
+    full = _full_day_halt(halt_events)
+    halted = set(halt_events.loc[full, ["code", "date"]].itertuples(index=False, name=None))
+    other = set(halt_events.loc[~full, ["code", "date"]].itertuples(index=False, name=None))
+    identities = auxiliary("securities", ("code", "ipo_date", "out_date", "status", "product_id", "source_ref"))
+    identities = _source_exit_boundaries(identities, tushare_delist_date_exclusive)
+    gaps = _archive_gaps(
+        bars, auxiliary("calendar", ("date", "is_trading_day", "source_ref", "product_id")),
+        identities,
+        auxiliary("security_status", ("code", "date", "is_suspended", "source_ref")),
+        auxiliary("security_events", ("code", "date", "event_type", "product_id", "source_ref"),
+                  "cn_a_archive_no_trade"),
+        codes, start, end, halted=halted, mixed=halted & other,
+        official_intraday={(code, day) for code, day, _ in official_intraday},
+        policy_days=policy_days,
+        primary_status_keys=primary_status_keys,
+        scoped_status_days=scoped_status_days,
+        accepted_keys=accepted_keys,
     )
-    status = store.read_range(
-        ref,
-        "security_status",
-        codes=codes,
-        start=start,
-        end=end,
-        columns=("code", "date", "is_suspended", "source_ref"),
-    )
-    events = store.read_range(
-        ref, "security_events", codes=codes, start=start, end=end,
-        columns=("code", "date", "event_type", "product_id", "source_ref"),
-        product_id="cn_a_archive_no_trade",
-    )
+    return gaps, limitations
+
+
+def _source_exit_boundaries(identities, tushare_delist_date_exclusive):
+    """Opt-in source semantics; supplier facts and inclusive historical boundaries stay unchanged."""
+    if not tushare_delist_date_exclusive or identities.empty:
+        return identities
+    identities = identities.copy()
+    selected = (identities.product_id.eq("ts_a_basic") & identities.status.eq("D")
+                & identities.source_ref.fillna("").ne("") & identities.out_date.fillna("").ne(""))
+    for index in identities.index[selected]:
+        try:
+            value = date.fromisoformat(str(identities.at[index, "out_date"])[:10])
+        except ValueError:
+            continue
+        identities.at[index, "out_date"] = (value - timedelta(days=1)).isoformat()
+    return identities
+
+
+def _archive_gaps(bars, calendar, identities, status, events, codes, start, end, *,
+                  halted, mixed, official_intraday=(), policy_days=(), primary_status_keys=(),
+                  scoped_status_days=(), accepted_keys=()):
     official_dates = set(events.loc[_official_no_trade(events), ["code", "date"]].itertuples(index=False, name=None))
     days = pd.date_range(start, end).strftime("%Y-%m-%d").tolist()
-    calendars = {str(day): {_query_boolean(v) for v in group.is_trading_day} for day, group in calendar.groupby("date")}
+    exchange_calendar = calendar.product_id.eq("cn_sz_archive_calendar") & calendar.source_ref.fillna("").ne("")
+    sz_closed = set(calendar.loc[exchange_calendar & calendar.is_trading_day.map(_query_boolean).eq(False), "date"])
+    calendars = {
+        str(day): {_query_boolean(v) for v in group.is_trading_day}
+        for day, group in calendar.loc[~exchange_calendar].groupby("date")
+    }
     statuses = {
         (str(code), str(day)): {_query_boolean(v) for v in group.is_suspended}
         for (code, day), group in status.groupby(["code", "date"])
@@ -133,7 +270,8 @@ def query_archive(store, ref, *, codes, start, end):
     missing = []
     for code in codes:
         own = bars[bars.code.eq(code)]
-        identity = identities[identities.code.eq(code)].fillna("")
+        identity = identities.loc[identities.code.eq(code), ["ipo_date", "out_date", "source_ref"]]
+        identity = identity.astype("string").fillna("")
         versions = identity[["ipo_date", "out_date"]].drop_duplicates()
         known = len(versions) == 1 and bool(versions.iloc[0].ipo_date) and identity.source_ref.ne("").all()
         left, right = (str(versions.iloc[0].ipo_date), str(versions.iloc[0].out_date)) if known else ("", "")
@@ -142,12 +280,24 @@ def query_archive(store, ref, *, codes, start, end):
             reasons["lifecycle_unknown"].extend(days)
         observed = set(own.date.astype(str))
         traded = set()
-        if official_dates:
+        if official_dates or halted or (statuses and policy_days) or sz_closed or official_intraday:
             values = own[_BAR_FIELDS]
             traded = set(own.loc[_archive_trade_evidence(values, _valid_archive_bars(values)), "date"].astype(str))
         for day in days:
-            if (code, day) in official_dates:
+            key = (code, day)
+            if key in official_intraday:
+                reasons["confirmed_intraday_halt"].append(day)
+            if key in mixed or (key in halted and (day in traded or False in statuses.get(key, set()))):
+                reason = "conflicting_trade_evidence"
+            elif key in official_dates:
                 reason = "conflicting_trade_evidence" if day in traded else "confirmed_no_trade"
+            elif (f"{code}/{day}" in policy_days and True in statuses.get(key, set())
+                  and (day in traded or False in statuses[key])):
+                reason = "conflicting_trade_evidence"
+            elif code.endswith(".SZ") and day in sz_closed:
+                reason = "conflicting_trade_evidence" if day in traded else "market_closed"
+            elif key in halted:
+                reason = "suspended"
             elif day in observed:
                 continue
             elif known and day < left:
@@ -163,7 +313,14 @@ def query_archive(store, ref, *, codes, start, end):
                 else:
                     values = statuses.get((code, day), set())
                     reason = "suspended" if values == {True} else "missing_bar"
-            reasons[reason].append(day)
+            if reason in {"suspended", "confirmed_no_trade"} and f"{code}/{day}" in scoped_status_days:
+                reason = "conflicting_trade_evidence"
+            if key in accepted_keys and reason in {"conflicting_trade_evidence", "missing_bar"}:
+                continue
+            if reason != "conflicting_trade_evidence" or key not in primary_status_keys or (
+                code.endswith(".SZ") and day in sz_closed
+            ):
+                reasons[reason].append(day)
         if not own.empty:
             incomplete = own[_BAR_FIELDS].isna().any(axis=1)
             reasons["fields_missing"].extend(own.loc[incomplete, "date"].astype(str))
@@ -173,12 +330,252 @@ def query_archive(store, ref, *, codes, start, end):
         for reason, dates in reasons.items():
             for first, last in _ranges(dates):
                 missing.append(dict(code=code, start=first, end=last, reason=reason))
-    return dict(
-        snapshot_id=ref.snapshot_id,
-        mode=store.load_manifest(ref).get("mode", "free"),
-        bars=bars,
-        gaps=pd.DataFrame(missing, columns=["code", "start", "end", "reason"]),
+    return pd.DataFrame(missing, columns=["code", "start", "end", "reason"])
+
+
+_BACKUP_PRODUCT_FIELDS = {
+    "provider", "fee_class", "kind", "tables", "requires_codes", "provider_timezone", "storage_layout",
+    "partition", "cross_section", "fixed_market", "markets", "source_api",
+}
+_BACKUP_GRANT_FIELDS = {
+    "product_id", "approved_scope_ref", "license_ref", "allowed_operations", "markets", "codes",
+    "start", "end", "acquire_until", "read_until", "read_license_ref", "retained_use",
+    "acquire_cross_section", "backup_cross_section",
+}
+
+
+def _backup_config(store, products, *, omit_backup=False):
+    config = {}
+    grants = []
+    for product_id in sorted(products):
+        raw = store.product(product_id)
+        permission = raw.get("permission", {})
+        config[product_id] = {key: raw[key] for key in _BACKUP_PRODUCT_FIELDS & raw.keys()}
+        config[product_id]["permission"] = {
+            key: permission[key] for key in ("status", "allowed_operations") if key in permission
+        }
+        if grant := store._grant(product_id):
+            grants.append({key: grant[key] for key in _BACKUP_GRANT_FIELDS & grant.keys()})
+            if omit_backup or "backup_until" in grant:
+                grants[-1]["allowed_operations"] = [op for op in grant["allowed_operations"] if op != "backup"]
+                grants[-1].pop("backup_cross_section", None)
+        if omit_backup:
+            operations = config[product_id]["permission"].get("allowed_operations", ())
+            config[product_id]["permission"]["allowed_operations"] = [op for op in operations if op != "backup"]
+    return {
+        Path("data-products.json"): dict(products=config),
+        **({Path("data-entitlements.json"): dict(grants=grants)} if grants else {}),
+    }
+
+
+def _locked_backup_file(base, relative, digest, *, label="locked asset mismatch"):
+    path = (base / relative).resolve()
+    if not path.is_relative_to(base.resolve()) or not path.is_file() or _sha256(path) != digest:
+        raise SnapshotTamperedError(f"{label}: {relative}")
+    return path
+
+
+def _check_backup_metadata(document):
+    if isinstance(document, dict):
+        for key, value in document.items():
+            normalized = key.lower().replace("_", "").replace("-", "")
+            if any(word in normalized for word in ("token", "password", "secret", "authorization", "apikey")):
+                raise AccessDenied("locked metadata contains a credential field")
+            _check_backup_metadata(value)
+    elif isinstance(document, list):
+        for value in document:
+            _check_backup_metadata(value)
+
+
+def _check_backup_query(product, grant, query, observed_at):
+    api, params = query.get("api"), query.get("params")
+    if not api or api != product.get("source_api") or not isinstance(params, dict):
+        raise AccessDenied("raw backup API or query scope is not proven")
+    codes = str(params.get("ts_code") or "").split(",") if params.get("ts_code") else ()
+    exchanges = {"SSE": "SH", "SZSE": "SZ", "BSE": "BJ"}
+    exchange = params.get("exchange")
+    if api == "trade_cal" and (codes or exchange not in exchanges):
+        raise AccessDenied("raw backup calendar exchange is not proven")
+    if codes:
+        markets = {code.rsplit(".", 1)[-1] for code in codes}
+    elif exchange in exchanges:
+        markets = {exchanges[exchange]}
+    elif exchange:
+        raise AccessDenied("raw backup query market is not proven")
+    else:
+        markets = set(product.get("markets", ()))
+    if (
+        not markets or not markets <= set(grant.get("markets", ()))
+        or not set(codes) <= set(grant.get("codes", ()))
+    ):
+        raise AccessDenied("raw backup query outside granted object or market")
+    if not codes and api != "trade_cal" and grant.get("backup_cross_section") is not True:
+        raise AccessDenied("whole-market original requires explicit backup permission")
+    try:
+        if "trade_date" in params:
+            if {"start_date", "end_date"} & params.keys():
+                raise ValueError
+            start = end = date.fromisoformat(params["trade_date"]).isoformat()
+        elif "start_date" in params or "end_date" in params:
+            start, end = (date.fromisoformat(params[key]).isoformat() for key in ("start_date", "end_date"))
+        elif api in {"stock_basic", "bse_mapping"} and observed_at:
+            observed = datetime.fromisoformat(observed_at)
+            if observed.tzinfo is None:
+                raise ValueError
+            start = end = observed.astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+        else:
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        raise AccessDenied("raw backup query period is not proven") from None
+    if not grant.get("start", "~") <= start <= end <= grant.get("end", ""):
+        raise AccessDenied("raw backup query outside granted period")
+    return set(codes), markets, start, end
+
+
+def _check_backup_raw_files(product, grant, item, base):
+    files = item.get("raw_files", ())
+    item_query = item.get("query")
+    item_time = item.get("source", {}).get("obtained_at")
+    # A prepared parquet is the local representation of the provider responses in this item.
+    # An imported original, or any unrecognized legacy shape, requires its own recorded query.
+    proved = {entry["sha256"] for entry in files if entry.get("api") and "params" in entry}
+    for entry in files:
+        path = _locked_backup_file(base, entry["path"], entry["sha256"])
+        if entry.get("api") and "params" in entry:
+            query = entry
+        elif item_query:
+            query = item_query
+        elif proved and re.fullmatch(
+            r"response-.+-\d{4}-\d{2}-\d{2}_\d{4}-\d{2}-\d{2}\.parquet", Path(entry["path"]).name,
+        ):
+            try:
+                digests = pd.read_parquet(path, columns=["_response_sha256"])["_response_sha256"]
+            except (OSError, ValueError, KeyError):
+                raise AccessDenied("prepared raw backup file has no proven response lineage") from None
+            if not digests.isin(proved).all():
+                raise AccessDenied("prepared raw backup file has no proven response lineage")
+            continue
+        else:
+            raise AccessDenied("raw backup file has no proven query")
+        codes, markets, start, end = _check_backup_query(product, grant, query, entry.get("obtained_at") or item_time)
+        try:
+            data = json.loads(path.read_bytes())["data"]
+            rows = pd.DataFrame(data["items"], columns=data["fields"])
+            if query["api"] == "trade_cal" and not rows["exchange"].eq(query["params"]["exchange"]).all():
+                raise AccessDenied("raw backup calendar outside granted market")
+            if "ts_code" in rows:
+                received = rows["ts_code"].astype(str)
+                if (codes and not received.isin(codes).all()) or not (
+                    received.str.rsplit(".", n=1).str[-1].isin(markets).all()
+                ):
+                    raise AccessDenied("raw backup response outside granted object or market")
+            for clock in ("trade_date", "cal_date"):
+                if clock in rows and not rows[clock].map(
+                    lambda value: date.fromisoformat(str(value)).isoformat()
+                ).between(start, end).all():
+                    raise AccessDenied("raw backup response outside granted period")
+        except (KeyError, TypeError, ValueError):
+            raise AccessDenied("raw backup response scope is not proven") from None
+
+
+def _snapshot_backup_assets(
+    store, ref, manifest, *, selected=None, raw_products=(), raw_exclusions=None, table_exclusions=None,
+    exclude_raw_originals=False,
+):
+    base = store._snapshot_dir(ref.snapshot_id).resolve()
+    if base.parent != (store.root / "snapshots").resolve() or ref.root.resolve() != store.root.resolve():
+        raise ValueError("invalid backup snapshot reference")
+    prefix = Path("snapshots") / ref.snapshot_id
+    assets = {prefix / "manifest.json": base / "manifest.json"}
+    _check_backup_metadata(manifest)
+    evidence = {}
+    entries = manifest.get("table_files", ())
+    if selected is not None:
+        entries = [entry for entry in entries if entry["path"] in selected]
+    products = {entry["product_id"] for entry in entries} | set(raw_products)
+    if selected is None:
+        products.update(item["product_id"] for item in manifest.get("items", ()))
+    mode = manifest.get("mode", "free")
+    for product_id in products:
+        product = store.product(product_id)
+        store.check_access(mode, product, operation="backup")
+        store.check_access(mode, product, operation="read")
+    for entry in entries:
+        rel, table = entry["path"], entry["table"]
+        path = _locked_backup_file(base, rel, entry["sha256"])
+        pid = entry["product_id"]
+        needs_evidence = table in {"knowledge_evidence", "terminal_disposals"}
+        if store.product(pid).get("fee_class") == "paid" or needs_evidence:
+            frame = pd.read_parquet(path)
+            try:
+                store._check_paid_rows(pid, frame, table)
+            except AccessDenied as error:
+                if table_exclusions is None:
+                    raise
+                table_exclusions.append(dict(path=str(prefix / rel), reason=str(error)))
+                continue
+        assets[prefix / rel] = path
+        if needs_evidence:
+            for row in frame.itertuples():
+                name, digest = str(row.evidence_ref), str(row.sha256)
+                if name in evidence and evidence[name] != digest:
+                    raise SnapshotTamperedError(f"conflicting evidence hashes: {name}")
+                evidence[name] = digest
+    for item in manifest.get("items", ()):
+        pid = item["product_id"]
+        if pid not in products:
+            continue
+        product = store.product(pid)
+        grant = store._grant(pid) or {}
+        raw_files = item.get("raw_files", ())
+        if exclude_raw_originals:
+            raw_exclusions.extend(dict(path=str(prefix / entry["path"]), reason="original outside approved scope")
+                                  for entry in raw_files)
+            continue
+        if raw_files and product.get("fee_class") == "paid":
+            try:
+                _check_backup_raw_files(product, grant, item, base)
+            except AccessDenied as error:
+                if raw_exclusions is None:
+                    raise
+                raw_exclusions.extend(dict(path=str(prefix / entry["path"]), reason=str(error)) for entry in raw_files)
+                continue
+        for entry in raw_files:
+            rel, digest = entry["path"], entry["sha256"]
+            assets[prefix / rel] = _locked_backup_file(base, rel, digest)
+            if name := entry.get("evidence_ref"):
+                if name in evidence and evidence[name] != digest:
+                    raise SnapshotTamperedError(f"conflicting evidence hashes: {name}")
+                evidence[name] = digest
+    for name, digest in evidence.items():
+        assets[Path("evidence") / name] = _locked_backup_file(
+            store.root / "evidence", name, digest, label="evidence missing or changed",
+        )
+    return assets, products
+
+
+def _write_backup(destination, assets, documents, index):
+    for document in documents.values():
+        _check_backup_metadata(document)
+    encoded = {path: json.dumps(doc, ensure_ascii=False, indent=2).encode() for path, doc in documents.items()}
+    required = sum(p.stat().st_size for p in assets.values()) + sum(map(len, encoded.values()))
+    free = shutil.disk_usage(destination.parent).free
+    if free < required + 1024 * 1024:
+        raise OSError(f"insufficient backup space: need {required} bytes plus reserve, free {free}")
+    destination.mkdir()
+    for relative, source in assets.items():
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    for relative, body in encoded.items():
+        target = destination / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(body)
+    index.update(
+        required_bytes=required, free_before_bytes=free, device_disaster_recovery=False,
+        files=[dict(path=str(p), sha256=_sha256(destination / p)) for p in (*assets, *encoded)],
     )
+    (destination / "backup-manifest.json").write_text(json.dumps(index, ensure_ascii=False, indent=2))
 
 
 def backup_archive(store, ref, destination):
@@ -186,72 +583,125 @@ def backup_archive(store, ref, destination):
     destination = Path(destination).resolve()
     if destination.exists():
         raise FileExistsError(destination)
+    source_manifest = store._snapshot_dir(ref.snapshot_id) / "manifest.json"
+    if source_manifest.resolve() != source_manifest.absolute():
+        raise ValueError("invalid backup snapshot manifest path")
     manifest = store.load_manifest(ref)
-    base = store._snapshot_dir(ref.snapshot_id)
-    assets = {Path("snapshots") / ref.snapshot_id / "manifest.json": base / "manifest.json"}
-    evidence = {}
-    for table in sorted({e["table"] for e in manifest.get("table_files", [])}):
-        store._range_files(ref, table)  # 表级读取许可、路径和哈希。
-        frame = store.read_table(ref, table)  # 备份整个授权样本，不能只核部分行权限。
-        if table in {"knowledge_evidence", "terminal_disposals"}:
-            for row in frame.itertuples():
-                name = str(row.evidence_ref)
-                digest = str(row.sha256)
-                if name in evidence and evidence[name] != digest:
-                    raise SnapshotTamperedError(f"conflicting evidence hashes: {name}")
-                evidence[name] = digest
-    for entry in [
-        *manifest.get("table_files", []),
-        *(r for i in manifest.get("items", []) for r in i.get("raw_files", [])),
-    ]:
-        source = (base / entry["path"]).resolve()
-        if not source.is_relative_to(base.resolve()) or not source.is_file() or _sha256(source) != entry["sha256"]:
-            raise SnapshotTamperedError(f"locked asset mismatch: {entry['path']}")
-        assets[Path("snapshots") / ref.snapshot_id / entry["path"]] = source
-    for name, digest in evidence.items():
-        source = (store.root / "evidence" / name).resolve()
-        if (
-            not source.is_relative_to((store.root / "evidence").resolve())
-            or not source.is_file()
-            or _sha256(source) != digest
-        ):
-            raise SnapshotTamperedError(f"evidence missing or changed: {name}")
-        assets[Path("evidence") / name] = source
-    grants = store.root / "data-entitlements.json"
-    if grants.is_file():
-        assets[Path("data-entitlements.json")] = grants
-    required = sum(p.stat().st_size for p in assets.values()) + len(json.dumps(store.config).encode())
-    free = shutil.disk_usage(destination.parent).free
-    if free < required + 1024 * 1024:
-        raise OSError(f"insufficient backup space: need {required} bytes plus reserve, free {free}")
-    destination.mkdir()  # 已存在即失败；不会覆盖已有备份。
-    for relative, source in assets.items():
-        target = destination / relative
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-    (destination / "data-products.json").write_text(json.dumps(store.config, ensure_ascii=False, indent=2))
-    files = [*assets, Path("data-products.json")]
-    index = dict(
-        snapshot_id=ref.snapshot_id,
-        source_root=str(store.root.resolve()),
-        required_bytes=required,
-        free_before_bytes=free,
-        device_disaster_recovery=False,
-        files=[dict(path=str(p), sha256=_sha256(destination / p)) for p in files],
-    )
-    (destination / "backup-manifest.json").write_text(json.dumps(index, ensure_ascii=False, indent=2))
+    assets, products = _snapshot_backup_assets(store, ref, manifest)
+    _write_backup(destination, assets, _backup_config(store, products),
+                  dict(snapshot_id=ref.snapshot_id, source_root=str(store.root.resolve())))
     return verify_archive_backup(destination)
+
+
+def _verify_backup(root):
+    index = json.loads((root / "backup-manifest.json").read_text())
+    for entry in index["files"]:
+        _locked_backup_file(root, entry["path"], entry["sha256"], label="backup asset missing or changed")
+    return index
 
 
 def verify_archive_backup(destination):
     """按备份清单找出具体缺失/变更文件；返回可用DataStore重开的引用。"""
     root = Path(destination).resolve()
-    index = json.loads((root / "backup-manifest.json").read_text())
-    for entry in index["files"]:
-        path = (root / entry["path"]).resolve()
-        if not path.is_relative_to(root) or not path.is_file() or _sha256(path) != entry["sha256"]:
-            raise SnapshotTamperedError(f"backup asset missing or changed: {entry['path']}")
+    index = _verify_backup(root)
     return SnapshotRef(snapshot_id=index["snapshot_id"], root=root)
+
+
+def backup_library(store, ref, destination):
+    from hetu_data.library import _locked_asset, load_library
+
+    destination = Path(destination).resolve()
+    if destination.exists():
+        raise FileExistsError(destination)
+    doc = load_library(store, ref)
+    assets, documents, source_roots = {}, {}, {}
+    by_owner = {}
+    for asset in doc["asset_snapshots"]:
+        owner, snapshot, manifest = _locked_asset(store, asset)
+        origin = str(owner.root.resolve())
+        selected = {row["path"] for row in doc["table_files"]
+                    if row["root"] == origin and row["snapshot_id"] == snapshot.snapshot_id}
+        paths, products = _snapshot_backup_assets(
+            owner, snapshot, manifest, selected=selected, raw_products=asset.get("raw_products", ()),
+        )
+        if origin in by_owner and by_owner[origin][0].config != owner.config:
+            raise ValueError("backup owner has conflicting product configurations")
+        saved_owner, saved_products = by_owner.setdefault(origin, (owner, set()))
+        saved_products.update(products)
+        folder = source_roots.setdefault(origin, f"owners/{len(source_roots)}")
+        assets.update({Path(folder) / path: value for path, value in paths.items()})
+    for origin, (owner, products) in by_owner.items():
+        folder = Path(source_roots[origin])
+        documents.update({folder / path: value for path, value in _backup_config(owner, products).items()})
+
+    for revision in doc["revision_selections"]:
+        origin = revision["root"]
+        owner = by_owner[origin][0]
+        rel = revision["evidence_ref"]
+        source = (owner.root / rel).resolve()
+        if not source.is_relative_to(owner.root.resolve()) or not source.is_file():
+            raise SnapshotTamperedError(f"revision evidence missing: {rel}")
+        assets[Path(source_roots[origin]) / rel] = source
+
+    policy = doc["source_policy"]
+    if policy.get("basis_ref"):
+        for origin, (owner, products) in by_owner.items():
+            if policy["primary_product_id"] not in products:
+                continue
+            rel = policy["basis_ref"]
+            source = (owner.root / rel).resolve()
+            if (source.is_relative_to(owner.root.resolve()) and source.is_file()
+                    and (not policy.get("basis_sha256") or _sha256(source) == policy["basis_sha256"])):
+                assets[Path(source_roots[origin]) / rel] = source
+                break
+        else:
+            raise SnapshotTamperedError(f"source policy evidence missing: {policy['basis_ref']}")
+
+    for key in ("asset_snapshots", "table_files", "sources", "revision_selections"):
+        for item in doc[key]:
+            original = item["root"]
+            if key == "asset_snapshots":
+                item.setdefault("original_root", original)
+                item["config_path"] = None
+            elif key == "table_files":
+                item["config_path"] = None
+            item["root"] = str(destination / source_roots[original])
+            if key == "asset_snapshots":
+                item.pop("revision_selections", None)  # Verified selections are in the canonical manifest.
+    doc["root"] = str(destination)
+    library_manifest = Path("libraries") / ref.library_id / "manifest.json"
+    documents[library_manifest] = doc
+    _write_backup(destination, assets, documents,
+                  dict(library_id=ref.library_id, library_manifest=str(library_manifest), source_roots=source_roots))
+    return verify_library_backup(destination)
+
+
+def verify_library_backup(destination):
+    from hetu_data.models import LibraryRef
+
+    root = Path(destination).resolve()
+    index = _verify_backup(root)
+    ref = LibraryRef(index["library_id"], root)
+    expected = Path("libraries") / ref.library_id / "manifest.json"
+    if Path(index["library_manifest"]) != expected or not (root / expected).is_file():
+        raise SnapshotTamperedError(f"backup library manifest missing or changed: {expected}")
+    doc = json.loads((root / expected).read_text())
+    if doc["library_id"] != ref.library_id or Path(doc["root"]).resolve() != root:
+        raise SnapshotTamperedError("backup library reference does not match its manifest")
+    tracked = {Path(entry["path"]) for entry in index["files"]}
+    required = {expected}
+    for asset in doc["asset_snapshots"]:
+        owner = Path(asset["root"])
+        if owner.resolve() != owner or not owner.is_relative_to(root / "owners"):
+            raise SnapshotTamperedError("backup owner root is outside the registered backup")
+        relative = owner.relative_to(root)
+        required.add(relative / "data-products.json")
+        required.add(relative / "snapshots" / asset["snapshot_id"] / "manifest.json")
+    for row in doc["table_files"]:
+        required.add(Path(row["root"]).relative_to(root) / "snapshots" / row["snapshot_id"] / row["path"])
+    if missing := required - tracked:
+        raise SnapshotTamperedError(f"backup asset missing from manifest: {min(missing)}")
+    return ref
 
 
 def _mask(days):
@@ -283,7 +733,7 @@ def _ranges(days, sessions=None):
     return spans
 
 
-def _history_objects(history, start, end):
+def _history_objects(history, start, end, *, segmented=False):
     objects, exclusions, unknown = [], [], []
     for original in history.fillna("").to_dict("records"):
         code = str(original["code"])
@@ -291,6 +741,14 @@ def _history_objects(history, start, end):
         right = str(original.get("valid_to") or original.get("out_date") or "")[:10]
         state = str(original.get("lifecycle_status", "known" if left else "unknown"))
         known = state == "known" and bool(left) and bool(original.get("source_ref"))
+        if segmented and known:
+            try:
+                known = bool(original.get("identity_id") and original.get("code_period_id")) and (
+                    date.fromisoformat(left).isoformat() == left
+                    and (not right or (date.fromisoformat(right).isoformat() == right and left <= right))
+                )
+            except ValueError:
+                known = False
         required = [max(start, left) if known else start, min(end, right) if known and right else end]
         obj = dict(
             original,
@@ -335,8 +793,23 @@ def _history_objects(history, start, end):
     identities = defaultdict(set)
     for obj in objects:
         identities[obj["code"]].add(obj["identity_id"])
+    overlaps = set()
+    if segmented:
+        by_code = defaultdict(list)
+        for obj in objects:
+            by_code[obj["code"]].append(obj)
+        for code, segments in by_code.items():
+            if len(segments) < 2:
+                continue
+            periods = sorted(tuple(obj["required"]) for obj in segments if obj["required"][0] <= obj["required"][1])
+            if (
+                any(not obj["lifecycle_known"] or not obj.get("code_period_id") for obj in segments)
+                or len({obj.get("code_period_id") for obj in segments}) < len(segments)
+                or any(a[1] >= b[0] for a, b in zip(periods, periods[1:], strict=False))
+            ):
+                overlaps.add(code)
     for obj in objects:
-        if len(identities[obj["code"]]) > 1:
+        if (obj["code"] in overlaps if segmented else len(identities[obj["code"]]) > 1):
             obj["lifecycle_known"] = False
             obj["required"] = [start, end]
             unknown.append(
@@ -350,14 +823,18 @@ def _history_objects(history, start, end):
     return objects, exclusions, unknown
 
 
-def archive_requirements(history, calendar, cutoff, *, years=20, start=None):
+def archive_requirements(history, calendar, cutoff, *, years=20, start=None, calendar_scopes=()):
     left = (pd.Timestamp(cutoff) - pd.DateOffset(years=years)).date() if start is None else start
     start, end = left.isoformat(), cutoff.isoformat()
-    objects, exclusions, unknown = _history_objects(history, start, end)
+    segmented = "code_period_id" in history
+    if segmented:
+        history = history.drop_duplicates()
+    objects, exclusions, unknown = _history_objects(history, start, end, segmented=segmented)
     for obj in objects:
         if obj["attributes_known"] and (obj["security_type"] != "stock" or obj["market"] not in ("SH", "SZ", "BJ")):
             obj["excluded"] = True
             exclusions.append(dict(code=obj["code"], reason="not_common_stock_or_market", interval=[start, end]))
+    market_sessions, unknown_by_market = _market_sessions(calendar, calendar_scopes, objects)
     return dict(
         purpose="daily_archive",
         start=start,
@@ -370,11 +847,59 @@ def archive_requirements(history, calendar, cutoff, *, years=20, start=None):
             if _truthy(flag) and start <= str(d)[:10] <= end
         ),
         calendar_days=sorted(set(calendar.date.astype(str))),
+        expected_sessions_by_market=market_sessions,
+        calendar_unknown_ranges=unknown_by_market,
         exclusions=exclusions,
         unknown_ranges=unknown,
         target_scope=dict(history.attrs.get("target_scope", {})),
         requested_markets=sorted(set(o["market"] for o in objects)),
     )
+
+
+def _period_mask(start, end):
+    first = (date.fromisoformat(start) - _BASE).days
+    last = (date.fromisoformat(end) - _BASE).days
+    return ((1 << (last - first + 1)) - 1) << first if first <= last else 0
+
+
+def _market_sessions(calendar, scopes, objects):
+    by_market = defaultdict(lambda: defaultdict(set))
+    proved_shenzhen_closures = set()
+    if {"product_id", "source_ref"} <= set(calendar):
+        for scope in scopes:
+            if not scope.get("source_ref"):
+                continue
+            rows = calendar[calendar.product_id.eq(scope["product_id"]) & calendar.source_ref.fillna("").ne("")]
+            for row in rows.itertuples():
+                day = str(row.date)[:10]
+                if scope["valid_from"] <= day <= scope["valid_to"]:
+                    flag = _query_boolean(row.is_trading_day)
+                    if scope["product_id"] == "cn_sz_archive_calendar":
+                        if scope["market"] == "SZ" and flag is False:
+                            proved_shenzhen_closures.add(day)
+                        continue
+                    by_market[scope["market"]][day].add(flag)
+    for day in proved_shenzhen_closures:
+        by_market["SZ"][day] = {False}
+    market_windows = defaultdict(list)
+    for obj in objects:
+        if not obj.get("excluded") and obj["required"][0] <= obj["required"][1]:
+            market_windows[obj["market"]].append(obj["required"])
+    expected, unknown = {}, []
+    for market, windows in sorted(market_windows.items()):
+        merged = []
+        for left, right in sorted(windows):
+            if merged and left <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], right)
+            else:
+                merged.append([left, right])
+        days = [day for left, right in merged for day in pd.date_range(left, right).strftime("%Y-%m-%d")]
+        flags = by_market[market]
+        expected[market] = [day for day in days if flags[day] == {True}]
+        missing = _ranges(day for day in days if flags[day] not in ({True}, {False}))
+        if missing:
+            unknown.append(dict(domain="calendar", market=market, ranges=missing, reason="calendar_unproved"))
+    return expected, unknown
 
 
 @dataclass
@@ -388,6 +913,9 @@ class CoverageInventory:
     queries: list = field(default_factory=list)
     action_entries: list = field(default_factory=list)
     failures: list = field(default_factory=list)
+    source_differences: list = field(default_factory=list)
+    archive_status_rule: dict = field(default_factory=dict)
+    archive_factor_rule: dict = field(default_factory=dict)
     stats: dict = field(default_factory=lambda: dict(files=0, bytes=0, raw_rows=0, tables={}))
 
 
@@ -430,20 +958,70 @@ def _source_rows(store, ref, asset_snapshots):
             yield owner, manifest, base, dict(entry, format="standard"), selection
 
 
-def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
+def _resolve_archive_source_differences(frame, values, valid, conflict, code, policy, differences):
+    if not policy or code not in policy["codes"]:
+        return
+    product = policy["primary_product_id"]
+    comparable = {product, *policy["compared_product_ids"]}
+    in_scope = frame.date.between(policy["start"], policy["end"]) & frame.date.isin(conflict[conflict].index)
+    for day, group in frame[in_scope].groupby("date"):
+        exact = policy.get("object_days")
+        if exact is not None and f"{code}/{day}" not in exact:
+            continue
+        primary = group.product_id.eq(product)
+        originals = values.loc[group.index]
+        day_values = originals
+        evidence = (exact or {}).get(f"{code}/{day}", {})
+        expected_amounts = evidence.get("observed_amount_by_product")
+        if expected_amounts and any(
+            pid not in expected_amounts or value != expected_amounts[pid]
+            for pid, value in zip(group.product_id, originals.amount_cny, strict=True)
+        ):
+            continue
+        equivalence = evidence.get("volume_equivalence")
+        if equivalence:
+            observed = equivalence["observed_by_product"]
+            if all(pid in observed and value in observed[pid] for pid, value in zip(
+                group.product_id, originals.volume_shares, strict=True
+            )):
+                day_values = originals.assign(volume_shares=equivalence["shares"])
+        fields = day_values.nunique(dropna=False)
+        fields = fields[fields.gt(1)].index.tolist()
+        if (
+            not primary.any() or not set(group.product_id) <= comparable or not valid.loc[group.index].all()
+            or len(day_values[primary].drop_duplicates()) != 1 or not set(fields) <= set(policy["fields"])
+        ):
+            continue
+        rows = group[["product_id", "source_root", "snapshot_id", "source_ref"]].join(originals)
+        differences.append(dict(code=code, date=day, fields=fields, primary_product_id=product,
+                                basis_ref=policy["basis_ref"], rows=rows.drop_duplicates().to_dict("records"),
+                                canonical_volume_shares=(equivalence["shares"] if day_values is not originals
+                                                         else None)))
+        conflict.loc[day] = False
+
+
+def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None, _entries=None, _revisions=(), _policy=None,
+                        _factor_rule=None, _accepted_sources=None, _origins=None):
     """只读逐块核行；大日线原件按代码逐组处理，内存中只保留日期位图。"""
     from hetu_data.providers.baostock import BaoStockProvider
 
     inventory = CoverageInventory()
+    if _policy:
+        inventory.archive_status_rule = _policy.get("archive_status_rule", {})
+    exceptions = inventory.archive_status_rule.get("accepted_exceptions", {})
+    exception_codes = {key.split("/", 1)[0] for key in exceptions}
+    if _factor_rule:
+        inventory.archive_factor_rule = _factor_rule
     daily_sources = defaultdict(list)
     extras = defaultdict(list)
-    for owner, manifest, base, entry, _selection in _source_rows(store, ref, asset_snapshots):
+    entries = _entries if _entries is not None else _source_rows(store, ref, asset_snapshots)
+    for owner, manifest, base, entry, _selection in entries:
         path = (base / entry["path"]).resolve()
         try:
             if not path.is_relative_to(base.resolve()):
                 raise ValueError("audit source path outside snapshot")
             owner.check_access(manifest.get("mode", "free"), owner.product(entry["product_id"]), operation="read")
-            if hashlib.sha256(path.read_bytes()).hexdigest() != entry["sha256"]:
+            if _sha256(path) != entry["sha256"]:
                 raise ValueError("audit source hash mismatch")
             if entry["format"] == "raw":
                 match = re.fullmatch(r"response-(.+)-(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.parquet", path.name)
@@ -451,7 +1029,7 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
                     inventory.failures.append(dict(source=str(path), reason="raw query scope not proven"))
                     continue
                 code = match[1].replace("_", ".")
-                daily_sources[code].append((path, entry["product_id"], match[2], match[3]))
+                daily_sources[code].append((path, entry["product_id"], match[2], match[3], owner.root, base.name))
             else:
                 frame = pd.read_parquet(path)
                 inventory.stats["files"] += 1
@@ -459,6 +1037,8 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
                 table = entry["table"]
                 owner._check_paid_rows(entry["product_id"], frame, table)
                 frame["evidence_root"] = str(owner.root)
+                if _revisions or _policy:
+                    frame["source_root"], frame["snapshot_id"] = str(owner.root.resolve()), base.name
                 if table in ("daily_bars", "security_status", "security_events", "adjustment_factors") and len(frame):
                     for code, group in frame.groupby("code"):
                         extras[str(code)].append((table, group, str(path)))
@@ -467,7 +1047,10 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
                 if table == "corporate_actions":
                     inventory.action_entries.append(entry)
         except (OSError, ValueError, PermissionError, KeyError) as error:
-            inventory.failures.append(dict(source=str(path), reason=str(error)))
+            failure = dict(source=str(path), reason=str(error))
+            if _entries is not None:
+                failure["table"] = entry.get("table", "daily_bars")
+            inventory.failures.append(failure)
     codes = sorted(set(daily_sources) | set(extras))
     for position, code in enumerate(codes, 1):
         groups = defaultdict(list)
@@ -475,7 +1058,7 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
         for table, frame, path in extras[code]:
             groups[table].append(frame)
             sources.append(path)
-        for path, product, start, end in daily_sources[code]:
+        for path, product, start, end, root, snapshot in daily_sources[code]:
             raw = pd.read_parquet(path).astype(str)
             inventory.stats["files"] += 1
             inventory.stats["bytes"] += path.stat().st_size
@@ -502,12 +1085,19 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
                 if "adjustflag" not in raw or not raw.adjustflag.eq("3").all():
                     inventory.failures.append(dict(source=str(path), reason="unadjusted price basis unproved"))
                 else:
-                    groups["daily_bars"].append(BaoStockProvider().standardize(product, raw, {})["daily_bars"])
+                    frame = BaoStockProvider().standardize(product, raw, {})["daily_bars"]
+                    if _revisions or _policy:
+                        frame = frame.assign(source_root=str(root.resolve()), snapshot_id=snapshot, product_id=product)
+                    if code in exception_codes:
+                        frame["_archive_raw"] = True
+                    groups["daily_bars"].append(frame)
             valid = raw.tradestatus.isin(["0", "1"]) & raw.isST.isin(["0", "1"])
             if valid.any():
-                groups["security_status"].append(
-                    BaoStockProvider().standardize("cn_a_status", raw[valid], {})["security_status"]
-                )
+                frame = BaoStockProvider().standardize("cn_a_status", raw[valid], {})["security_status"]
+                if _revisions:
+                    frame = frame.assign(source_root=str(root.resolve()), snapshot_id=snapshot,
+                                         product_id="cn_a_status")
+                groups["security_status"].append(frame)
         masks = dict(
             bars=0,
             status=0,
@@ -525,16 +1115,31 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
                 continue
             frame = frame[frame.code.astype(str).eq(code)].copy()
             frame["date"] = frame.date.astype(str).str[:10]
+            if _revisions:
+                from hetu_data.library import _select_revisions
+
+                frame = _select_revisions(frame, table, _revisions)
             inventory.stats["tables"][table] = inventory.stats["tables"].get(table, 0) + len(frame)
             if table == "daily_bars":
                 values = frame[_BAR_FIELDS].apply(pd.to_numeric, errors="coerce")
                 valid = _valid_archive_bars(values)
                 numeric = pd.concat([frame[["date"]], values], axis=1)
                 conflict = numeric.groupby("date")[_BAR_FIELDS].nunique(dropna=False).gt(1).any(axis=1)
+                _resolve_archive_source_differences(frame, values, valid, conflict, code, _policy,
+                                                    inventory.source_differences)
                 masks["conflicting"] |= _mask(conflict[conflict].index)
                 masks["bars"] |= _mask(frame.loc[valid, "date"])
                 masks["archive_trade_evidence"] = _mask(frame.loc[_archive_trade_evidence(values, valid), "date"])
                 masks["invalid"] |= _mask(frame.loc[~valid, "date"])
+                if inventory.archive_status_rule:
+                    masks["archive_primary_seen"] = _mask(frame.loc[frame.product_id.eq("ts_a_daily"), "date"])
+                    masks["archive_primary_status"] = _mask(
+                        day for _, day in _primary_status_keys(frame, inventory.archive_status_rule)
+                    )
+                    if code in exception_codes:
+                        issues = _new_exception_bar_issues(frame, exceptions, _accepted_sources, origins=_origins)
+                        masks["exception_bar_issues"] = _mask(day for _, day in issues)
+                        masks["invalid"] |= masks["exception_bar_issues"]
             elif table == "security_status":
                 columns = ["is_suspended", "is_st", "is_listed"]
                 valid = pd.Series(True, index=frame.index)
@@ -547,10 +1152,20 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
                 masks["status"] |= _mask(frame.loc[valid, "date"])
                 masks["suspended"] |= _mask(frame.loc[valid & frame.is_suspended.map(_truthy), "date"])
                 explicitly_trading |= _mask(frame.loc[valid & ~frame.is_suspended.map(_truthy), "date"])
+                if _entries is not None:
+                    states = frame.is_suspended.map(_query_boolean)
+                    halted = _mask(frame.loc[states.eq(True), "date"])
+                    normal = _mask(frame.loc[states.eq(False), "date"])
+                    masks["archive_suspended"] = halted & ~normal
+                    masks["archive_status_conflicting"] = halted & normal
+                    explicitly_trading |= normal
             elif table == "security_events":
                 masks["official_no_trade"] = _mask(frame.loc[_official_no_trade(frame), "date"])
-                events = frame[frame.product_id.eq("ts_suspend_day")]
-                full = events.event_type.eq("S") & events.suspend_timing.fillna("").astype(str).str.strip().eq("")
+                events = frame[frame.product_id.isin(_TUSHARE_HALT_PRODUCTS)]
+                official_intraday = _official_intraday_keys(frame)
+                if official_intraday:
+                    events = _exclude_revised_provider_halts(events, official_intraday)
+                full = _full_day_halt(events)
                 positive = _mask(events.loc[full, "date"])
                 mixed = positive & _mask(events.loc[~full, "date"])
                 masks["event_suspended"] = positive & ~mixed
@@ -560,6 +1175,12 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
                 conflict = values.groupby(frame.date).nunique(dropna=False).gt(1)
                 masks["factors_conflicting"] |= _mask(conflict[conflict].index)
                 masks["factors"] |= _mask(frame.loc[values.gt(0), "date"])
+                if _factor_rule:
+                    masks["factor_source_seen"] = _mask(frame.date)
+                    available = frame.product_id.eq("ts_adj_factor_day") & values.gt(0) & values.lt(float("inf"))
+                    masks["factor_supplier_positive"] = _mask(frame.loc[available, "date"]) & ~masks[
+                        "factors_conflicting"
+                    ]
         masks["bars"] &= ~masks["conflicting"]
         masks["factors"] &= ~masks["factors_conflicting"]
         masks["status"] &= ~masks["status_conflicting"]
@@ -581,7 +1202,13 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
                 )
             )
     inventory.frames = {t: pd.concat(pieces, ignore_index=True) for t, pieces in inventory.frames.items() if pieces}
-    if "calendar" in inventory.frames:
+    if _revisions:
+        from hetu_data.library import _select_revisions
+
+        inventory.frames = {t: _select_revisions(f, t, _revisions) for t, f in inventory.frames.items()}
+    if "calendar" in inventory.frames and _entries is not None:
+        inventory.calendar = inventory.frames["calendar"][["product_id", "date", "is_trading_day", "source_ref"]]
+    elif "calendar" in inventory.frames:
         inventory.calendar = inventory.frames["calendar"][["date", "is_trading_day"]].drop_duplicates()
         inventory.calendar["date"] = inventory.calendar.date.astype(str).str[:10]
         inventory.calendar["is_trading_day"] = inventory.calendar.is_trading_day.map(_truthy)
@@ -593,23 +1220,48 @@ def scan_local_coverage(store, ref, *, asset_snapshots=(), progress=None):
     return inventory
 
 
-def _coverage_rows(requirements, inventory, domains):
-    sessions = requirements["expected_sessions"]
+def _coverage_rows(requirements, inventory, domains, *, raw_library=False):
     rows = []
+    rule = inventory.archive_status_rule
+    status_rule_applies = raw_library and rule and requirements.get("purpose") == "daily_archive" and all(
+        requirements.get(key) == rule[key] for key in ("target_id", "start", "end")
+    )
+    factor_rule = inventory.archive_factor_rule
+    factor_rule_applies = raw_library and factor_rule and requirements.get("purpose") == "daily_archive" and all(
+        requirements.get(key) == factor_rule[source]
+        for key, source in (("target_id", "target_id"), ("start", "history_start"), ("end", "history_end"))
+    )
+    audited_days, accepted_days = defaultdict(list), defaultdict(list)
+    if status_rule_applies:
+        for key in rule["object_days"]:
+            code, day = key.split("/")
+            audited_days[code].append(day)
+            if key in rule.get("accepted_exceptions", {}):
+                accepted_days[code].append(day)
     for obj in requirements["objects"]:
-        if obj.get("excluded") or obj["required"][0] > obj["required"][1]:
+        if obj.get("excluded") or obj["required"][0] > obj["required"][1] or (
+            raw_library and not (obj["lifecycle_known"] and obj["attributes_known"])
+        ):
             continue
+        sessions = (requirements["expected_sessions_by_market"].get(obj["market"], ()) if raw_library
+                    else requirements["expected_sessions"])
         start, end = obj["required"]
         days = [d for d in sessions if start <= d <= end]
         expected = _mask(days)
         own = inventory.masks.get(obj["code"], {})
         for domain, metric in domains.items():
             observed = own.get(metric, 0)
+            if domain == "adjustment_factors" and factor_rule_applies:
+                for supplier, scoped in factor_rule["date_keys"].get(obj["code"], {}).items():
+                    mask = inventory.masks.get(supplier, {}).get("factor_supplier_positive", 0)
+                    observed |= mask & _mask(scoped) & ~own.get("factor_source_seen", 0)
             suspended = expected & own.get("suspended", 0) if domain == "daily_bars" else 0
             missing = expected & ~(observed | suspended)
             conflicting = expected & own.get("conflicting", 0) if domain == "daily_bars" else 0
             state_conflict = expected & own.get("status_conflicting", 0)
             no_trade = 0
+            status_audit = 0
+            accepted = 0
             if domain == "daily_bars":
                 conflicting |= state_conflict & ~observed
                 if requirements.get("purpose") == "daily_archive":
@@ -638,7 +1290,34 @@ def _coverage_rows(requirements, inventory, domains):
                         observed | own.get("bars", 0) | own.get("archive_trade_evidence", 0)
                         | own.get("conflicting", 0) | conflicting
                     )
-            missing &= ~(conflicting | suspended | no_trade)
+            if raw_library:
+                halted = own.get("archive_suspended", 0) | own.get("event_suspended", 0)
+                halt_conflict = own.get("archive_status_conflicting", 0) | own.get("event_conflicting", 0)
+                trade = own.get("archive_trade_evidence", 0) | own.get("conflicting", 0)
+                official = own.get("official_no_trade", 0)
+                untraded = expected & (halted | official) & ~(trade | halt_conflict)
+                if domain == "daily_bars":
+                    conflicting |= expected & (halt_conflict | (halted | official) & trade)
+                    observed &= ~conflicting
+                    no_trade, suspended = untraded & official, untraded & ~official
+                    if status_rule_applies:
+                        scoped = expected & _mask(audited_days.get(obj["code"], ()))
+                        status_audit = scoped & own.get("archive_primary_status", 0) & ~own.get("conflicting", 0)
+                        conflicting |= scoped
+                        observed |= status_audit
+                        conflicting &= ~status_audit
+                        observed &= ~conflicting
+                        no_trade &= ~scoped
+                        suspended &= ~scoped
+                        accepted = conflicting & _mask(accepted_days.get(obj["code"], ())) & ~(
+                            own.get("archive_primary_seen", 0) | own.get("conflicting", 0)
+                            | own.get("exception_bar_issues", 0)
+                        )
+                        conflicting &= ~accepted
+                else:
+                    no_trade, suspended = untraded & ~observed, 0
+                missing = expected & ~(observed | no_trade | suspended)
+            missing &= ~(conflicting | suspended | no_trade | accepted)
 
             def dates(mask, days=days):
                 return [d for d in days if _BITS[d] & mask] if mask else []
@@ -661,6 +1340,19 @@ def _coverage_rows(requirements, inventory, domains):
                     source_refs=inventory.sources.get(obj["code"], []),
                 )
             )
+            if raw_library:
+                rows[-1].update(code_period_id=obj.get("code_period_id"), market=obj["market"],
+                                no_trade_sessions=(no_trade | suspended).bit_count())
+                if status_audit:
+                    rows[-1]["status_difference_ranges"] = _ranges(dates(status_audit), days)
+                    rows[-1]["status_difference_days"] = status_audit.bit_count()
+                if accepted:
+                    rows[-1]["accepted_exception_ranges"] = _ranges(dates(accepted), days)
+                    rows[-1]["accepted_exception_days"] = accepted.bit_count()
+                if domain == "daily_bars" and status_rule_applies:
+                    new_invalid = conflicting & own.get("exception_bar_issues", 0)
+                    if new_invalid:
+                        rows[-1]["invalid_exception_bar_ranges"] = _ranges(dates(new_invalid), days)
     return rows
 
 
@@ -705,7 +1397,183 @@ def audit_archive(store, ref, requirements, *, inventory=None):
     )
 
 
-def plan_coverage_gaps(audits, store, *, as_of, contracts, domain_products):
+def _scan_library_coverage(store, ref):
+    from hetu_data.library import (
+        _accepted_exception_sources,
+        _archive_factor_aliases,
+        _exception_scope,
+        _locked_asset,
+        archive_source_policy,
+        load_library,
+    )
+
+    document = load_library(store, ref)
+    fixed = {(entry["root"], entry["snapshot_id"], entry["path"]): entry for entry in document["table_files"]}
+    failures, observations = [], []
+
+    def entries():
+        seen = set()
+        for asset in document["asset_snapshots"]:
+            identity = asset["root"], asset["snapshot_id"]
+            try:
+                owner, snapshot, manifest = _locked_asset(store, asset)
+            except (OSError, ValueError, PermissionError, KeyError, SnapshotTamperedError) as error:
+                for table in asset["tables"]:
+                    failures.append(dict(source=str(identity), reason=str(error), table=table))
+                continue
+            base = owner._snapshot_dir(snapshot.snapshot_id)
+            for entry in manifest.get("table_files", ()):
+                locked = fixed.get((*identity, entry["path"]))
+                if locked and entry["table"] in _TABLES and (base / entry["path"]).resolve() not in seen:
+                    seen.add((base / entry["path"]).resolve())
+                    if any(locked[key] != entry[key] for key in ("table", "product_id", "sha256")):
+                        failures.append(dict(source=entry["path"], table=entry["table"], reason="fixed file mismatch"))
+                    else:
+                        yield owner, manifest, base, dict(entry, format="standard"), asset
+            for item in manifest.get("items", ()):
+                if item["product_id"] not in asset.get("raw_products", ()):
+                    continue
+                try:
+                    owner.check_access(
+                        manifest.get("mode", "free"), owner.product(item["product_id"]), operation="read",
+                    )
+                except AccessDenied as error:
+                    failures.append(dict(source=str(identity), reason=str(error), table="daily_bars"))
+                    continue
+                for entry in item.get("raw_files", ()):
+                    if entry["path"] in asset.get("unavailable_raw_paths", ()):
+                        failures.append(dict(source=entry["path"], table="daily_bars",
+                                             reason="raw original outside backup scope"))
+                        continue
+                    if entry["path"].endswith(".parquet") and item["product_id"] in {"cn_a_daily", "cn_a_status"}:
+                        yield owner, manifest, base, dict(entry, format="raw", product_id=item["product_id"]), asset
+                    elif state := entry.get("query_observation"):
+                        observations.append(dict(
+                            status=state, product_id=item["product_id"], source_ref=str(base / entry["path"]),
+                            snapshot_id=snapshot.snapshot_id,
+                        ))
+
+    policy = archive_source_policy(document)
+
+    @cache
+    def accepted_sources():
+        return _accepted_exception_sources(store, document, _exception_scope(policy))
+
+    inventory = scan_local_coverage(store, ref, _entries=entries(), _revisions=document["revision_selections"],
+                                    _policy=policy, _factor_rule=_archive_factor_aliases(store, document, policy),
+                                    _accepted_sources=accepted_sources, _origins={
+                                        (a["root"], a["snapshot_id"]): a["original_root"]
+                                        for a in document["asset_snapshots"] if a.get("original_root")
+                                    })
+    inventory.failures.extend(failures)
+    inventory.queries.extend(observations)
+    return inventory
+
+
+def audit_library(store, ref, requirements, *, inventory=None):
+    """Audit a target; callers reusing inventory must bind it to the same fixed library."""
+    if inventory is None:
+        inventory = _scan_library_coverage(store, ref)
+    rows = _coverage_rows(requirements, inventory, {"daily_bars": "bars", "adjustment_factors": "factors"},
+                          raw_library=True)
+    bars = [row for row in rows if row["domain"] == "daily_bars"]
+    factors = [row for row in rows if row["domain"] == "adjustment_factors"]
+    unknown = [*requirements["unknown_ranges"], *requirements["calendar_unknown_ranges"]]
+    scope = requirements["target_scope"]
+    scope_unknown = scope.get("unknown_ranges", [])
+    if scope_unknown:
+        unknown.append(dict(reason="target_scope_unproved", ranges=scope_unknown))
+    target_complete = scope.get("complete") is True and bool(scope.get("source_ref") and scope.get("source_version"))
+    target_complete = target_complete and not scope_unknown and not requirements["unknown_ranges"]
+    expected = sum(row["expected_sessions"] for row in bars)
+    qualified = sum(row["observed_sessions"] for row in bars)
+    no_trade = sum(row["no_trade_sessions"] for row in bars)
+    accepted = sum(row.get("accepted_exception_days", 0) for row in bars)
+    allowed = defaultdict(int)
+    uncertain_codes = set()
+    allowed_days = {
+        market: _mask(sessions) for market, sessions in requirements["expected_sessions_by_market"].items()
+    }
+    for row in requirements["calendar_unknown_ranges"]:
+        for left, right in row["ranges"]:
+            allowed_days[row["market"]] |= _period_mask(left, right)
+    for obj in requirements["objects"]:
+        if not obj["lifecycle_known"] or not obj["attributes_known"]:
+            uncertain_codes.add(obj["code"])
+        if not obj.get("excluded") and obj["lifecycle_known"] and obj["attributes_known"]:
+            # Dates lacking calendar evidence are still possible target dates.
+            allowed[obj["code"]] |= _period_mask(*obj["required"]) & allowed_days.get(obj["market"], 0)
+    target_days = _period_mask(requirements["start"], requirements["end"])
+    outside = sum(
+        ((facts.get("bars", 0) | facts.get("invalid", 0) | facts.get("conflicting", 0)) & target_days
+         & ~allowed[code]).bit_count()
+        for code, facts in inventory.masks.items()
+        if code not in uncertain_codes and (target_complete or code in allowed)
+    )
+    counts = dict(expected=expected, qualified_bars=qualified, no_trade=no_trade,
+                  unknown_or_conflict=expected - qualified - no_trade - accepted, outside_scope=outside)
+    if accepted:
+        counts["accepted_exceptions"] = accepted
+    core_failures = [f for f in inventory.failures if f.get("table") != "adjustment_factors"]
+    known_ratio = (qualified + no_trade) / expected if expected else None
+    coverage_ratio = known_ratio if target_complete and not requirements["calendar_unknown_ranges"] else None
+    target_accepted = (
+        bool(bars) and target_complete and not unknown and not core_failures and not counts["unknown_or_conflict"]
+    )
+    raw_complete = target_accepted and not accepted
+    adjustment_failures = [f for f in inventory.failures if f.get("table") in {
+        "calendar", "security_status", "security_events", "adjustment_factors",
+    }]
+    adjustment_complete = bool(factors) and target_complete and not unknown and not adjustment_failures and not any(
+        row["data_gaps"] or row["unknown_ranges"] for row in factors
+    )
+    unknown.extend(
+        dict(code=row["code"], domain=row["domain"], ranges=row["unknown_ranges"], reason="row_conflict")
+        for row in rows if row["unknown_ranges"]
+    )
+    status = "accepted_with_exceptions" if accepted else "complete"
+    return dict(
+        status=status if target_accepted else "limited",
+        coverage=rows, gaps=[row for row in rows if row["data_gaps"]], unknown_ranges=unknown,
+        target_start=requirements["start"], target_end=requirements["end"],
+        latest_available_date=max((last for row in bars for _, last in row["covered"]), default=None),
+        raw_price_complete=raw_complete, adjustment_complete=adjustment_complete, target_scope_complete=target_complete,
+        coverage_counts=counts, coverage_ratio=coverage_ratio, known_scope_ratio=known_ratio,
+        status_difference_count=sum(row.get("status_difference_days", 0) for row in bars),
+        accepted_exception_count=accepted, raw_price_target_accepted=target_accepted,
+        units=dict(price="CNY_unadjusted", volume="shares", amount="CNY"), source_refs=inventory.sources,
+        query_observations=inventory.queries, read_failures=inventory.failures,
+        source_differences=inventory.source_differences,
+    )
+
+
+def list_archive_targets(store):
+    out = []
+    base = store.root.resolve() / "archive" / "targets"
+    for path in sorted(base.glob("*.json")):
+        if not path.name.startswith(".") and path.resolve() == path:
+            record = json.loads(path.read_text())
+            if record["target_id"] != path.stem:
+                raise ValueError("archive target filename does not match its identity")
+            out.append(dict(target_id=record["target_id"], **{
+                name: record["requirements"][name] for name in ("start", "end", "target_scope")
+            }))
+    return out
+
+
+def load_archive_coverage(store, ref, target_id):
+    if store.root.resolve() != ref.root.resolve():
+        raise ValueError("library belongs to another data root")
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", target_id):
+        raise ValueError("invalid archive target id")
+    base = store.root.resolve() / "archive" / "coverage"
+    path = base / ref.library_id / f"{target_id}.json"
+    if path.resolve() != path:
+        raise ValueError("invalid archive coverage path")
+    return json.loads(path.read_text()) if path.is_file() else None
+
+
+def plan_coverage_gaps(audits, store, *, as_of, contracts, domain_products, mode="free"):
     from hetu_data.updates import METERS, plan_update
 
     grouped = defaultdict(list)
@@ -721,7 +1589,10 @@ def plan_coverage_gaps(audits, store, *, as_of, contracts, domain_products):
     requests, unresolved = [], []
     counts = dict.fromkeys(METERS, 0)
     counts["quota_bytes"] = None
+    counts["data_fee_cny"] = 0 if contracts.get("new_data_fee_cny") == 0 else None
     for (product, code), intervals in grouped.items():
+        if mode == "free" and store.product(product).get("fee_class") == "paid":
+            raise AccessDenied("paid archive gap product is not allowed in free mode")
         merged = []
         for left, right in sorted(set(intervals)):
             if merged and left <= merged[-1][1]:
@@ -736,7 +1607,7 @@ def plan_coverage_gaps(audits, store, *, as_of, contracts, domain_products):
                 date.fromisoformat(right),
                 as_of,
                 "daily_archive",
-                mode="paid" if store.product(product).get("fee_class") == "paid" else "free",
+                mode=mode,
             )
             plan = plan_update(
                 request,
@@ -756,6 +1627,9 @@ def plan_coverage_gaps(audits, store, *, as_of, contracts, domain_products):
                     )
                 )
             for key, value in plan["counts"].items():
+                if key == "data_fee_cny":
+                    counts[key] = plan["new_data_fee_cny"]
+                    continue
                 if value is not None and counts[key] is not None:
                     counts[key] += value
     return dict(
@@ -765,7 +1639,7 @@ def plan_coverage_gaps(audits, store, *, as_of, contracts, domain_products):
         unresolved=unresolved,
         executed=False,
         retries=0,
-        new_data_fee_cny=0,
+        new_data_fee_cny=counts["data_fee_cny"],
     )
 
 

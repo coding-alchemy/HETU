@@ -5,6 +5,8 @@ import json
 from dataclasses import replace
 from datetime import date
 
+import pytest
+
 from hetu_quant.models import data_request_from_dict, data_request_to_dict
 from test_data_sources import grant, request, store
 
@@ -49,6 +51,25 @@ def test_resume_only_fetches_pending_segments(tmp_path):
     assert count == len(adapter.client.calls) == 1
     assert result["completed"] == again["completed"]
     assert again["actual_usage"]["network_attempts"] == 1
+
+
+def test_worker_cli_selects_only_the_given_job(tmp_path, capsys):
+    from hetu_data.catalog import DataTaskStore
+    from hetu_data.cli import main
+    from hetu_data.jobs import JobService, submit_update_plan
+
+    ds, _ = store(tmp_path)
+    ds.prepare(request())
+    plan = updates_module().plan_update(request(), ds, contracts())
+    assert not plan["segments"]
+    tasks = DataTaskStore(ds.root)
+    first = submit_update_plan(tasks, plan, "first")
+    other = submit_update_plan(tasks, plan, "other")
+    assert main(["worker", "--root", str(ds.root), "--job-id", first.job_id]) == 0
+    assert json.loads(capsys.readouterr().out)["job_id"] == first.job_id
+    service = JobService(tasks)
+    assert service.get(first.job_id).state == "succeeded"
+    assert service.get(other.job_id).state == "queued"
 
 
 def test_budget_counts_pages_retries_and_quota_separately(tmp_path):
@@ -193,6 +214,27 @@ def test_year_copy_refresh_reopen_keeps_evidence(tmp_path):
     assert all(hashlib.sha256((parent / p).read_bytes()).hexdigest() == h for p, h in before.items())
 
 
+def test_prepare_does_not_expand_unrelated_yearly_object_coverage(tmp_path, monkeypatch):
+    from hetu_data import store as store_module
+
+    ds, adapter = store(tmp_path, codes=["SYNTH.SH", "OTHER.SH"])
+    unrelated = replace(request(start="2025-01-06", end="2025-01-06"), codes=("OTHER.SH",))
+    ds.prepare(unrelated)
+    month_keys = store_module._month_keys
+
+    def only_relevant_months(start, end):
+        assert start.year != 2025, "planning one code must not expand another code's yearly coverage"
+        return month_keys(start, end)
+
+    monkeypatch.setattr(store_module, "_month_keys", only_relevant_months)
+    requested = request(end="2026-01-05")
+    first = ds.prepare(requested)
+    assert set(ds.read_table(first, "daily_bars").code) == {"SYNTH.SH"}
+    calls = len(adapter.client.calls)
+    assert ds.prepare(requested) == first
+    assert len(adapter.client.calls) == calls
+
+
 def test_failed_resume_counts_retry_once_and_never_repeats_success(tmp_path):
     from source_cases import SourceClient
 
@@ -208,6 +250,30 @@ def test_failed_resume_counts_retry_once_and_never_repeats_success(tmp_path):
     assert second["actual_usage"]["network_attempts"] == 2
     assert second["completed"]
     module.execute_update(plan, ds, ledger, cancelled=lambda: False, progress=lambda _: None)
+    assert len(adapter.client.calls) == 2
+
+
+def test_explicit_resend_preserves_limits_and_cannot_send_twice(tmp_path):
+    from source_cases import SourceClient
+
+    ds, adapter = store(tmp_path, SourceClient(fail=True))
+    module = updates_module()
+    plan = module.plan_update(request(), ds, contracts(retries=0))
+    ledger = tmp_path / "usage.jsonl"
+
+    def run(selected):
+        return module.execute_update(selected, ds, ledger, cancelled=lambda: False, progress=lambda _: None)
+
+    run(plan)
+    failure = next(row for row in map(json.loads, ledger.read_text().splitlines()) if row["type"] == "failed")
+    assert run(plan)["actual_usage"]["network_attempts"] == 1
+    resend = {**plan, "authorized_resends": [{"segment": failure["segment"], "failed_at": failure["at"]}]}
+    result = run(resend)
+    assert result["actual_usage"]["authorized_resends"] == 1
+    assert result["actual_usage"]["retries"] == 0
+    assert result["actual_usage"]["network_attempts"] == 2
+    adapter.client.fail = False
+    assert run(resend)["actual_usage"]["network_attempts"] == 2
     assert len(adapter.client.calls) == 2
 
 
@@ -615,9 +681,14 @@ def test_daily_maintenance_preserves_full_revision_window_and_exited_objects(tmp
 
 
 def test_bounded_calendar_refresh_fetches_and_consumes_revision(tmp_path, monkeypatch):
-    import pandas as pd
+    from pathlib import Path
 
-    from hetu_quant.models import SnapshotRef
+    import pandas as pd
+    from hetu_data.catalog import DataTaskStore
+    from hetu_data.jobs import submit_update_plan
+    from hetu_data.library import publish_library, read_library_range
+    from hetu_data.models import LibraryRef, SnapshotRef
+    from hetu_data.worker import run_maintenance_job
 
     ds, adapter = store(tmp_path, product="ts_trade_calendar", codes=[])
     spec = contracts()
@@ -645,6 +716,10 @@ def test_bounded_calendar_refresh_fetches_and_consumes_revision(tmp_path, monkey
 
     adapter.client.query = query
     original = ds.prepare(replace(request("ts_trade_calendar", start="2026-01-09", end="2026-01-15"), codes=()))
+    original_library = publish_library(ds, asset_snapshots=(
+        dict(root=str(ds.root), snapshot_id=original.snapshot_id, tables=["calendar"]),
+    ))
+    spec["library_ref"] = dict(library_id=original_library.library_id, root=str(original_library.root))
     parent_path = ds.root / "snapshots" / original.snapshot_id / "manifest.json"
     parent_hash = hashlib.sha256(parent_path.read_bytes()).hexdigest()
     spec["maintenance"]["start"] = "2026-01-09"
@@ -657,9 +732,11 @@ def test_bounded_calendar_refresh_fetches_and_consumes_revision(tmp_path, monkey
     monkeypatch.setattr(module.time, "sleep", lambda _: None)
     plan = module.maintenance_plan(ds, date(2026, 1, 15), ("ts_trade_calendar",), mode="paid", contracts=spec)
     assert plan["domains"][0]["refresh"] == [dict(code="", start="2026-01-09", end="2026-01-15")]
-    result = module.execute_update(
-        plan, ds, tmp_path / "calendar-usage.jsonl", cancelled=lambda: False, progress=lambda _: None
-    )
+    tasks = DataTaskStore(ds.root)
+    job = submit_update_plan(tasks, plan, "synthetic-calendar-refresh")
+    final = run_maintenance_job(job.job_id, tasks, ds)
+    result = json.loads((final.output / "update.json").read_text())
+    assert final.state == "succeeded"
     assert not result["pending"] and not result["failures"]
     assert result["incremental_usage"]["provider_fetch"] == 1 and len(calls) == 2
     fresh = SnapshotRef(result["snapshot_ids"][-1], ds.root)
@@ -667,10 +744,19 @@ def test_bounded_calendar_refresh_fetches_and_consumes_revision(tmp_path, monkey
     assert ds.read_table(fresh, "calendar").set_index("date").loc["2026-01-15", "is_trading_day"] == False  # noqa: E712
     assert ds.read_table(original, "calendar").set_index("date").loc["2026-01-15", "is_trading_day"] == True  # noqa: E712
     assert hashlib.sha256(parent_path.read_bytes()).hexdigest() == parent_hash
+
+    def library_calendar(ref):
+        return read_library_range(
+            ds, ref, "calendar", codes=(), start=date(2026, 1, 15), end=date(2026, 1, 15),
+            columns=("is_trading_day",),
+        ).is_trading_day.tolist()
+
+    assert library_calendar(original_library) == [True]
+    assert library_calendar(LibraryRef(**result["library_ref"])) == [False]
     after = module.maintenance_plan(ds, date(2026, 1, 15), ("ts_trade_calendar",), mode="paid", contracts=spec)
     assert not after["domains"][0]["missing"]  # 维护消费新版本，不能把被明确修订的旧值再算冲突。
     again = module.execute_update(
-        plan, ds, tmp_path / "calendar-usage.jsonl", cancelled=lambda: False, progress=lambda _: None
+        plan, ds, Path(result["approved_usage_ledger"]), cancelled=lambda: False, progress=lambda _: None
     )
     assert again["incremental_usage"]["provider_fetch"] == 0 and len(calls) == 2
 
@@ -717,6 +803,459 @@ def test_external_coverage_reuses_only_source_licensed_objects(tmp_path):
     assert adapter.client.calls == []
 
 
+def test_maintenance_trade_day_reviews_verified_windows_and_skips_prior_queries(tmp_path):
+    from source_cases import response
+
+    ds, adapter, spec = maintenance_case(tmp_path)
+    pid = "ts_a_daily_day"
+    spec["products"][pid] = dict(max_days=1, time_basis="trading_days", review_lookback_days=7)
+    spec["maintenance"]["start"] = "2026-01-05"
+    path = ds.root / "data-entitlements.json"
+    entitlements = json.loads(path.read_text())
+    entitlements["grants"].append(grant(pid, codes=["SYNTH.SH", "NEW.SH"], acquire_cross_section=True))
+    path.write_text(json.dumps(entitlements))
+    calls = []
+
+    def query(api, params, fields):
+        day = params["trade_date"]
+        calls.append(day)
+        return response(code="SYNTH.SH", day=day)
+
+    adapter.client.query = query
+    one_day = replace(request(pid, end="2026-01-05"), codes=())
+    ds.prepare(one_day)
+    module = updates_module()
+    plan = module.maintenance_plan(ds, date(2026, 1, 8), (pid,), mode="paid", contracts=spec)
+    assert [s["upstream"][0]["params"]["trade_date"] for s in plan["segments"]] == [
+        "20260102", "20260106", "20260107", "20260108",
+    ]
+    assert dict(code="SYNTH.SH", start="2026-01-05", end="2026-01-05") in plan["domains"][0]["covered"]
+    assert plan["domains"][0]["queried_trade_days"] == ["2026-01-05"]
+    assert calls == ["20260105"]
+    spec["products"][pid]["revision_lookback_days"] = 7
+    refresh = module.maintenance_plan(ds, date(2026, 1, 8), (pid,), mode="paid", contracts=spec)
+    assert [s["start"] for s in refresh["segments"]] == [
+        "2026-01-02", "2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08",
+    ]
+    assert all(s["refresh"] and s["revision_target"] == "2026-01-08" for s in refresh["segments"])
+    assert calls == ["20260105"]
+    del spec["products"][pid]["revision_lookback_days"]
+    spec["maintenance"]["object_filter"] = {"codes": ["SYNTH.SH"]}
+    narrower = module.maintenance_plan(ds, date(2026, 1, 8), (pid,), mode="paid", contracts=spec)
+    assert not narrower["segments"] and calls == ["20260105"]
+    assert any(r["reason"] == "market_day_raw_query_requires_the_approved_market_scope"
+               for r in narrower["domains"][0]["unknown"])
+
+
+def test_cross_section_keeps_raw_and_binds_standard_rows_to_code_period(tmp_path):
+    from source_cases import response
+
+    ds, adapter = store(tmp_path)
+    pid = "ts_a_daily_day"
+    ds.config["market_day_code_periods"] = [
+        ["SYNTH.SH", "2026-01-01", "2026-01-06"],
+        ["NEW.SH", "2026-01-08", ""],
+    ]
+    ds.config["initial_cross_section_reuse"] = {
+        "rows": [["SYNTH.SH", "2026-01-05", 10, 11, 9, 10, 1234, 56780]],
+    }
+    (ds.root / "data-entitlements.json").write_text(json.dumps({
+        "grants": [grant(pid, codes=["SYNTH.SH", "NEW.SH"], acquire_cross_section=True)],
+    }))
+
+    def query(api, params, fields):
+        day = params["trade_date"]
+        payload = json.loads(response(code="SYNTH.SH", day=day))
+        payload["data"]["items"].extend(json.loads(response(code="NEW.SH", day=day))["data"]["items"])
+        return json.dumps(payload).encode()
+
+    adapter.client.query = query
+    first = ds.prepare(replace(request(pid, end="2026-01-05"), codes=()))
+    last = ds.prepare(replace(request(pid, end="2026-01-08"), codes=(), start=date(2026, 1, 8)))
+    assert ds.read_table(first, "daily_bars").empty
+    assert ds.read_table(last, "daily_bars").code.tolist() == ["NEW.SH"]
+    for ref in (first, last):
+        raw = next(row["path"] for row in ds.load_manifest(ref)["items"][0]["raw_files"]
+                   if row["path"].endswith(".json"))
+        assert len(json.loads((ds._snapshot_dir(ref.snapshot_id) / raw).read_bytes())["data"]["items"]) == 2
+
+
+def test_manual_window_rejects_sessions_before_market_close(tmp_path, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import pytest
+    from hetu_data import updates
+
+    ds, _, spec = maintenance_case(tmp_path)
+    spec["maintenance"].update(start="2026-01-02", window_floor="2026-01-02", completed_by_local_time="16:30")
+    monkeypatch.setattr(updates, "_quota_now", lambda zone: datetime(2026, 1, 8, 11, tzinfo=ZoneInfo(zone.key)))
+    with pytest.raises(ValueError, match="has not finished"):
+        updates.maintenance_plan(ds, date(2026, 1, 8), ("ts_a_daily",), mode="paid", contracts=spec)
+    assert updates.maintenance_plan(ds, date(2026, 1, 7), ("ts_a_daily",), mode="paid", contracts=spec)["segments"]
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_market_day_worker_publishes_revision_and_reuses_same_target(tmp_path, monkeypatch, malformed):
+    from hetu_data.catalog import DataTaskStore
+    from hetu_data.jobs import submit_update_plan
+    from hetu_data.library import publish_library, query_library
+    from hetu_data.models import LibraryRef
+    from hetu_data.worker import run_maintenance_job
+
+    from source_cases import response
+
+    ds, adapter, spec = maintenance_case(tmp_path)
+    pid = "ts_a_daily_day"
+    day = date(2026, 1, 8)
+    spec["products"][pid] = dict(max_days=1, time_basis="trading_days", revision_lookback_days=1)
+    spec["maintenance"]["start"] = day.isoformat()
+    entitlements = ds.root / "data-entitlements.json"
+    entitlements.write_text(json.dumps({"grants": [
+        grant(pid, codes=["SYNTH.SH", "NEW.SH"], acquire_cross_section=True),
+    ]}))
+    price = [10]
+    calls = []
+
+    def query(api, params, fields):
+        calls.append(params["trade_date"])
+        packet = json.loads(response(code="SYNTH.SH", day=params["trade_date"], price=price[0]))
+        if malformed and price[0] == 17:
+            packet["data"]["items"][0][3] = 1
+        return json.dumps(packet).encode()
+
+    adapter.client.query = query
+    before = ds.prepare(replace(request(pid, start=day.isoformat(), end=day.isoformat()), codes=()))
+    prior = publish_library(ds, asset_snapshots=[
+        dict(root=str(ds.root), snapshot_id=before.snapshot_id, tables=["daily_bars"]),
+    ])
+    spec["library_ref"] = dict(library_id=prior.library_id, root=str(prior.root))
+    module = updates_module()
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    plan = module.maintenance_plan(ds, day, (pid,), mode="paid", contracts=spec)
+    assert [s["refresh"] for s in plan["segments"]] == [True]
+    price[0] = 17
+    tasks = DataTaskStore(ds.root)
+    first = submit_update_plan(tasks, plan, "synthetic-revision-first")
+    final = run_maintenance_job(first.job_id, tasks, ds)
+    assert final.state == "succeeded", final.reason
+    result = json.loads((final.output / "update.json").read_text())
+    after = LibraryRef(**result["library_ref"])
+    for ref, expected in [(prior, 10), (after, 17)]:
+        rows = query_library(ds, ref, codes=("SYNTH.SH",), start=day, end=day)["bars"]
+        assert rows.open_raw.tolist() == [expected]
+    domain = result["maintenance"]["domains"][0]
+    assert ("SYNTH.SH" in {row["code"] for row in domain["covered"]}) is not malformed
+    assert ("SYNTH.SH" in {row["code"] for row in domain["missing"]}) is malformed
+    assert calls == ["20260108", "20260108"]
+    same = module.maintenance_plan(ds, day, (pid,), mode="paid", contracts=spec)
+    assert same["segments"] == []
+    assert [row["code"] for row in same["domains"][0]["covered"]] == ["SYNTH.SH"]
+    repeated = submit_update_plan(tasks, plan, "synthetic-revision-same-target")
+    repeat = run_maintenance_job(repeated.job_id, tasks, ds)
+    assert json.loads((repeat.output / "update.json").read_text())["library_ref"] == result["library_ref"]
+    assert calls == ["20260108", "20260108"]
+    assert "SYNTH.SH" in module.maintenance_plan(
+        ds, date(2026, 1, 12), (pid,), mode="paid",
+        contracts={**spec, "products": {pid: {**spec["products"][pid], "revision_lookback_days": 7}}},
+    )["domains"][0]["target_codes"]
+
+
+def test_manual_worker_releases_daily_after_new_calendar_in_same_job(tmp_path, monkeypatch):
+    from hetu_data.catalog import DataTaskStore
+    from hetu_data.jobs import submit_update_plan
+    from hetu_data.worker import run_maintenance_job
+
+    from source_cases import response
+
+    ds, adapter, spec = maintenance_case(tmp_path)
+    pid, calendar, status = "ts_a_daily_day", "ts_trade_calendar", "ts_suspend_day"
+    day = date(2026, 1, 16)
+    spec["products"].update({
+        pid: dict(max_days=1, time_basis="trading_days"),
+        calendar: dict(max_days=15, time_basis="natural_days"),
+        status: dict(max_days=1, time_basis="trading_days"),
+    })
+    spec["maintenance"].update(start=day.isoformat(), follow_calendar_and_shortfalls=True)
+    (ds.root / "data-entitlements.json").write_text(json.dumps({"grants": [
+        grant(pid, codes=["NEW.SH"], acquire_cross_section=True), grant(calendar, codes=[]),
+        grant(status, codes=["NEW.SH"], acquire_cross_section=True),
+    ]}))
+    calls = []
+
+    def query(api, params, fields):
+        calls.append(api)
+        if api == "trade_cal":
+            return json.dumps({"code": 0, "data": {
+                "fields": ["exchange", "cal_date", "is_open", "pretrade_date"],
+                "items": [["SSE", "20260116", 1, "20260115"]],
+            }}).encode()
+        if api == "daily":
+            return response(code="NEW.SH", day=params["trade_date"], empty=True)
+        return json.dumps({"code": 0, "data": {
+            "fields": ["ts_code", "trade_date", "suspend_timing", "suspend_type"],
+            "items": [["NEW.SH", "20260116", None, "S"]],
+        }}).encode()
+
+    adapter.client.query = query
+    module = updates_module()
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    plan = module.maintenance_plan(ds, day, (pid, calendar, status), mode="paid", contracts=spec)
+    assert [s["product_id"] for s in plan["segments"]] == [calendar]
+    tasks = DataTaskStore(ds.root)
+    job = submit_update_plan(tasks, plan, "synthetic-cal-first")
+    final = run_maintenance_job(job.job_id, tasks, ds)
+    assert final.state == "succeeded", final.reason
+    result = json.loads((final.output / "update.json").read_text())
+    assert result["incremental_usage"]["network_attempts"] == 3
+    assert calls == ["trade_cal", "daily", "suspend_d"]
+
+
+@pytest.mark.parametrize("directory", ["absent", "initial", "later"])
+def test_market_day_uses_new_directory_and_surfaces_unknown_code(tmp_path, monkeypatch, directory):
+    from hetu_data.catalog import DataTaskStore
+    from hetu_data.jobs import submit_update_plan
+    from hetu_data.models import SnapshotRef
+    from hetu_data.worker import run_maintenance_job
+
+    from source_cases import response
+
+    ds, adapter, spec = maintenance_case(tmp_path)
+    pid = "ts_a_daily_day"
+    spec["products"][pid] = dict(max_days=1, time_basis="trading_days")
+    spec["maintenance"].update(start="2026-01-08", follow_calendar_and_shortfalls=True, history_records=[
+        dict(code="SYNTH.SH", market="SH", security_type="stock", valid_from="2000-01-01",
+             valid_to="", source_ref="synthetic initial directory"),
+    ])
+    ds.config["market_day_code_periods"] = [["SYNTH.SH", "2000-01-01", ""]]
+    (ds.root / "data-entitlements.json").write_text(json.dumps({
+        "grants": [grant(pid, codes=["SYNTH.SH", "NEW.SH"], acquire_cross_section=True)],
+    }))
+    def add_directory():
+        facts = tmp_path / "directory.csv"
+        facts.write_text(
+            "code,name,market,ipo_date,out_date,security_type,status\n"
+            "SYNTH.SH,synthetic exit,SH,2000-01-01,2026-01-08,stock,D\n"
+            "NEW.SH,synthetic listing,SH,2026-01-08,,stock,L\n"
+        )
+        manifest = tmp_path / "directory.json"
+        manifest.write_text(json.dumps(dict(mode="free", items=[dict(
+            files=[facts.name], table="securities", product_id="cn_a_basic",
+            source=dict(name="synthetic directory", fee_class="free",
+                        obtained_at="2026-01-09T16:30:00+08:00", permission_basis="synthetic facts"),
+        )])))
+        ds.import_files(manifest, (facts,))
+
+    if directory == "initial":
+        add_directory()
+    calls = []
+
+    def query(api, params, fields):
+        day = params["trade_date"]
+        calls.append(day)
+        packet = json.loads(response(code="NEW.SH", day=day))
+        if day == "20260108" or directory == "absent":
+            packet["data"]["items"].extend(json.loads(response(code="SYNTH.SH", day=day))["data"]["items"])
+        return json.dumps(packet).encode()
+
+    adapter.client.query = query
+    module = updates_module()
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    plan = module.maintenance_plan(ds, date(2026, 1, 9), (pid,), mode="paid", contracts=spec)
+    tasks = DataTaskStore(ds.root)
+    job = submit_update_plan(tasks, plan, "synthetic-listing")
+    final = run_maintenance_job(job.job_id, tasks, ds)
+    assert final.state == "succeeded", final.reason
+    result = json.loads((final.output / "update.json").read_text())
+    covered = {(r["code"], r["start"]) for r in result["maintenance"]["domains"][0]["covered"]}
+    if directory == "initial":
+        assert covered == {("SYNTH.SH", "2026-01-08"), ("NEW.SH", "2026-01-08"), ("NEW.SH", "2026-01-09")}
+        ref = SnapshotRef(result["snapshot_ids"][-1], ds.root)
+        assert ds.read_table(ref, "daily_bars").code.tolist() == ["NEW.SH"]
+    else:
+        assert all(code != "NEW.SH" for code, _ in covered)
+        assert {r["day"] for r in result["maintenance"]["domains"][0]["unknown"]
+                if r.get("code") == "NEW.SH"} == {"2026-01-08", "2026-01-09"}
+    if directory == "later":
+        add_directory()
+        followup = module.maintenance_plan(ds, date(2026, 1, 9), (pid,), mode="paid",
+                                           contracts={**spec, "library_ref": result["library_ref"]})
+        assert len(followup["segments"]) == 2
+        assert all(not segment["upstream"] for segment in followup["segments"])
+        reopened = submit_update_plan(tasks, followup, "synthetic-listing-with-directory")
+        final = run_maintenance_job(reopened.job_id, tasks, ds)
+        assert final.state == "succeeded", final.reason
+        result = json.loads((final.output / "update.json").read_text())
+        domain = result["maintenance"]["domains"][0]
+        assert {(r["code"], r["start"]) for r in domain["covered"]} == {
+            ("SYNTH.SH", "2026-01-08"), ("NEW.SH", "2026-01-08"), ("NEW.SH", "2026-01-09"),
+        }
+        assert not any(r["reason"] == "market_day_lifecycle_unconfirmed" for r in domain["unknown"])
+        assert result["incremental_usage"]["network_attempts"] == 0
+    assert calls == ["20260108", "20260109"]
+
+
+def _exit_directory_case(tmp_path, *, product="ts_a_basic", status="D", out_date="2026-01-08"):
+    ds, adapter, spec = maintenance_case(tmp_path)
+    pid = "ts_a_daily_day"
+    spec["products"][pid] = dict(max_days=1, time_basis="trading_days")
+    spec["maintenance"].update(start="2026-01-07", history_records=[
+        dict(code="SYNTH.SH", market="SH", security_type="stock", valid_from="2000-01-01",
+             valid_to="", source_ref="synthetic original listing"),
+    ])
+    (ds.root / "data-entitlements.json").write_text(json.dumps({"grants": [
+        grant(pid, codes=["SYNTH.SH"], acquire_cross_section=True), grant("ts_a_daily"), grant("ts_a_basic"),
+    ]}))
+    facts = tmp_path / "exit-directory.csv"
+    facts.write_text("code,name,market,ipo_date,out_date,security_type,status\n"
+                     f"SYNTH.SH,synthetic exit,SH,2000-01-01,{out_date},stock,{status}\n")
+    manifest = tmp_path / "exit-directory.json"
+    manifest.write_text(json.dumps(dict(mode="paid" if product == "ts_a_basic" else "free", items=[dict(
+        files=[facts.name], table="securities", product_id=product,
+        source=dict(name="synthetic directory", fee_class="paid" if product == "ts_a_basic" else "free",
+                    obtained_at="2026-01-09T16:30:00+08:00", permission_basis="synthetic facts"),
+    )])))
+    ds.import_files(manifest, (facts,))
+    return ds, adapter, spec
+
+
+@pytest.mark.parametrize("exclusive,product,status,out_date,last", [
+    (True, "ts_a_basic", "D", "2026-01-08", "2026-01-07"),
+    (False, "ts_a_basic", "D", "2026-01-08", "2026-01-08"),
+    (True, "cn_a_basic", "D", "2026-01-08", "2026-01-08"),
+    (True, "ts_a_basic", "L", "", "2026-01-09"),
+])
+def test_maintenance_delisting_boundary_requires_explicit_source_rule(
+    tmp_path, exclusive, product, status, out_date, last,
+):
+    ds, adapter, spec = _exit_directory_case(tmp_path, product=product, status=status, out_date=out_date)
+    spec["maintenance"]["tushare_delist_date_exclusive"] = exclusive
+    plan = updates_module().maintenance_plan(ds, date(2026, 1, 9), ("ts_a_daily_day",), mode="paid", contracts=spec)
+    assert max(s["end"] for s in plan["segments"]) == last
+    assert adapter.client.calls == []
+
+
+def test_library_delisting_boundary_is_opt_in_and_preserves_source_and_old_library(tmp_path):
+    from hetu_data.library import publish_library, query_library, read_library_range
+
+    ds, _, _ = _exit_directory_case(tmp_path)
+    bar = ds.prepare(request(start="2026-01-07", end="2026-01-07"))
+    assets = [dict(root=str(ds.root), snapshot_id=sid,
+                   tables=sorted({e["table"] for e in manifest["table_files"]}))
+              for sid, manifest in ds._published_manifests()]
+    old = publish_library(ds, asset_snapshots=assets)
+    basis = ds.root / "synthetic-exit-rule.json"
+    basis.write_text(json.dumps(dict(
+        purpose="daily_archive", primary_product_id="ts_a_daily", basis="synthetic user-approved source rule",
+        start="2026-01-07", end="2026-01-09", codes=["SYNTH.SH"],
+        compared_product_ids=["cn_a_daily"], fields=["amount_cny"], tushare_delist_date_exclusive=True,
+    )))
+    after = publish_library(ds, previous=old, asset_snapshots=[dict(
+        root=str(ds.root), snapshot_id=bar.snapshot_id, tables=["daily_bars"],
+        source_policy=dict(primary_product_id="ts_a_daily", basis_ref=basis.name),
+    )])
+    def gaps(ref):
+        return query_library(ds, ref, codes=("SYNTH.SH",), start=date(2026, 1, 7), end=date(2026, 1, 8))["gaps"]
+    assert gaps(old).reason.tolist() == ["missing_bar"]
+    assert gaps(after).reason.tolist() == ["after_exit"]
+    assert gaps(after).start.tolist() == ["2026-01-08"]
+    assert gaps(old).reason.tolist() == ["missing_bar"]
+    identity = read_library_range(ds, after, "securities", codes=("SYNTH.SH",),
+                                  start=date(2026, 1, 7), end=date(2026, 1, 8), columns=("out_date",))
+    assert identity.out_date.tolist() == ["2026-01-08"]
+
+
+def test_maintenance_market_labels_do_not_supply_other_exchange_calendar(tmp_path):
+    ds, adapter, spec = maintenance_case(tmp_path)
+    pid = "ts_a_daily_day"
+    spec["products"][pid] = dict(max_days=1, time_basis="trading_days")
+    spec["maintenance"].update(
+        start="2026-01-08",
+        calendar_markets=["SH", "BJ"],
+        history_records=[
+            dict(
+                code="NEW.BJ", market="BJ", security_type="stock", valid_from="2026-01-01",
+                valid_to="", source_ref="synthetic-beijing-listing",
+            )
+        ],
+    )
+    path = ds.root / "data-entitlements.json"
+    entitlements = json.loads(path.read_text())
+    entitlements["grants"].append(grant(pid, codes=["NEW.BJ"], markets=["SH", "BJ"], acquire_cross_section=True))
+    path.write_text(json.dumps(entitlements))
+    plan = updates_module().maintenance_plan(ds, date(2026, 1, 8), (pid,), mode="paid", contracts=spec)
+    assert not plan["segments"]
+    assert {"market": "BJ", "reason": "market_day_calendar_scope_unproved"} in plan["domains"][0]["unknown"]
+    assert adapter.client.calls == []
+
+
+def test_market_day_refresh_recovers_saved_response_without_a_retry(tmp_path, monkeypatch):
+    from hetu_data import updates as module
+
+    from source_cases import response
+
+    ds, adapter, spec = maintenance_case(tmp_path)
+    pid, day = "ts_a_daily_day", date(2026, 1, 8)
+    spec["products"][pid] = dict(max_days=1, time_basis="trading_days", revision_lookback_days=1)
+    spec["maintenance"]["start"] = day.isoformat()
+    (ds.root / "data-entitlements.json").write_text(json.dumps({"grants": [
+        grant(pid, codes=["SYNTH.SH", "NEW.SH"], acquire_cross_section=True),
+    ]}))
+    calls = []
+
+    def query(api, params, fields):
+        calls.append(params["trade_date"])
+        return response(day=params["trade_date"])
+
+    adapter.client.query = query
+    plan = module.maintenance_plan(ds, day, (pid,), mode="paid", contracts=spec)
+    ledger = tmp_path / "usage.jsonl"
+
+    def execute():
+        return module.execute_update(plan, ds, ledger, cancelled=lambda: False, progress=lambda _: None)
+
+    with monkeypatch.context() as failure:
+        def before_publish(*args, **kwargs):
+            raise OSError("synthetic snapshot publication failed")
+
+        failure.setattr(ds, "_publish", before_publish)
+        assert execute()["failures"]
+    recovered = execute()
+    assert not recovered["pending"] and not recovered["failures"]
+    assert recovered["actual_usage"]["network_attempts"] == 1 and recovered["incremental_usage"]["retries"] == 0
+    assert calls == ["20260108"]
+
+
+def test_maintenance_only_requests_status_cross_section_after_confirmed_daily_shortfall(tmp_path):
+    from source_cases import response
+
+    ds, adapter, spec = maintenance_case(tmp_path)
+    pids = ("ts_suspend_day", "ts_a_daily_day")
+    for pid in pids:
+        spec["products"][pid] = dict(max_days=1, time_basis="trading_days")
+    spec["maintenance"]["start"] = "2026-01-08"
+    path = ds.root / "data-entitlements.json"
+    doc = json.loads(path.read_text())
+    doc["grants"].extend(grant(pid, codes=["SYNTH.SH", "NEW.SH"], acquire_cross_section=True) for pid in pids)
+    path.write_text(json.dumps(doc))
+    calls = []
+
+    def query(api, params, fields):
+        calls.append(api)
+        return response(code="SYNTH.SH", day="20260108")
+
+    adapter.client.query = query
+    req = replace(request("ts_a_daily_day", start="2026-01-08", end="2026-01-08"), codes=())
+    module = updates_module()
+    first = module.maintenance_plan(ds, req.end, pids, mode="paid", contracts=spec)
+    assert [s["product_id"] for s in first["segments"]] == ["ts_a_daily_day"]
+    ds.prepare(req)
+    followup = module.maintenance_plan(ds, req.end, pids, mode="paid", contracts=spec)
+    assert [s["product_id"] for s in followup["segments"]] == ["ts_suspend_day"]
+    assert followup["domains"][0]["missing"] == [dict(code="NEW.SH", start="2026-01-08", end="2026-01-08")]
+    assert calls == ["daily"]
+
+
 def test_batched_update_stops_after_first_failed_segment(tmp_path):
     from source_cases import SourceClient
 
@@ -729,3 +1268,246 @@ def test_batched_update_stops_after_first_failed_segment(tmp_path):
     assert len(adapter.client.calls) == 1
     assert len(result["failures"]) == 1
     assert result["pending"] == [first, dict(second, reason="earlier segment failed")]
+
+
+def test_daily_quota_resume_preserves_batch_usage(tmp_path, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    import pytest
+    from hetu_data.catalog import DataTaskStore
+    from hetu_data.jobs import JobService, submit_update_plan
+    from hetu_data.library import list_libraries, publish_library, query_library
+    from hetu_data.models import LibraryRef
+    from hetu_data.worker import run_maintenance_job
+
+    ds, adapter = store(tmp_path)
+    from hetu_data import updates as module
+    zone = ZoneInfo("Asia/Shanghai")
+    baseline = ds.prepare(request(end="2026-01-05"))
+    history = publish_library(ds, asset_snapshots=(
+        dict(root=str(ds.root), snapshot_id=baseline.snapshot_id, tables=["daily_bars"]),
+    ))
+    adapter.client.calls.clear()
+    clock = [datetime(2026, 1, 7, 23, 50, tzinfo=zone)]
+    monkeypatch.setattr(module, "_quota_now", lambda tz: clock[0].astimezone(tz), raising=False)
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    spec = contracts(
+        provider_fetch=2,
+        network_attempts=2,
+        upstream_product_requests=2,
+        daily_limits={"network_attempts": 1},
+        quota_scope_ref="synthetic-source-account",
+        quota_timezone="Asia/Shanghai",
+    )
+    spec["products"]["ts_a_daily"]["max_days"] = 1
+    spec["library_ref"] = dict(library_id=history.library_id, root=str(history.root))
+    plan = module.plan_update(request(start="2026-01-06", end="2026-01-07"), ds, spec)
+    tasks = DataTaskStore(ds.root)
+
+    def execute(frozen_plan, submission):
+        job = submit_update_plan(tasks, frozen_plan, submission)
+        final = run_maintenance_job(job.job_id, tasks, ds)
+        return final, json.loads((final.output / "update.json").read_text())
+
+    final, first = execute(plan, "quota-first")
+    assert len(adapter.client.calls) == 1
+    assert final.state == "failed" and first["stop_reason"] == "daily_limit"
+    assert not first["failures"] and first["pending"][0]["start"] == "2026-01-07"
+    assert first["resume_after"] == "2026-01-08T00:00:00+08:00"
+    assert first["daily_usage"]["usage"]["network_attempts"] == 1
+    assert first["actual_usage"]["provider_fetch"] == 1
+    assert first["last_success_at"] == "2026-01-07T23:50:00+08:00"
+
+    def dates(ref):
+        return query_library(
+            ds, LibraryRef(**ref), codes=("SYNTH.SH",), start=date(2026, 1, 5), end=date(2026, 1, 8),
+        )["bars"].date.tolist()
+
+    assert dates(first["library_ref"]) == ["2026-01-05", "2026-01-06"]
+    assert len(list_libraries(ds)) == 2
+    reopened = JobService(tasks).retry(final.job_id, "quota-reopened")
+    repeated = run_maintenance_job(reopened.job_id, tasks, ds)
+    same_day = json.loads((repeated.output / "update.json").read_text())
+    assert same_day["incremental_usage"]["network_attempts"] == 0
+    assert same_day["actual_usage"]["network_attempts"] == 1
+    assert same_day["library_ref"] == first["library_ref"] and len(list_libraries(ds)) == 2
+
+    other_spec = {**spec, "limits": {**spec["limits"], "approved_scope_ref": "synthetic-other-approval"}}
+    other_plan = module.plan_update(request(start="2026-01-08", end="2026-01-08"), ds, other_spec)
+    _, other = execute(other_plan, "quota-other-approval")
+    assert len(adapter.client.calls) == 1 and other["stop_reason"] == "daily_limit"
+    assert other["daily_usage"]["usage"]["network_attempts"] == 1
+    assert other["actual_usage"]["network_attempts"] == 0
+
+    clock[0] = clock[0].replace(day=8, hour=1)
+    active = submit_update_plan(tasks, plan, "quota-next-day")
+    source_query = adapter.client.query
+
+    def cancel_after_response(*args):
+        payload = source_query(*args)
+        JobService(tasks).cancel(active.job_id)
+        return payload
+
+    monkeypatch.setattr(adapter.client, "query", cancel_after_response)
+    final = run_maintenance_job(active.job_id, tasks, ds)
+    second = json.loads((final.output / "update.json").read_text())
+    assert final.state == "cancelled" and second["stop_reason"] == "cancelled" and not second["pending"]
+    assert len(adapter.client.calls) == second["actual_usage"]["network_attempts"] == 2
+    assert second["daily_usage"]["usage"]["network_attempts"] == 1
+    assert second["incremental_usage"]["network_attempts"] == 1
+    assert second["snapshot_ids"][0] == first["snapshot_ids"][0]
+    assert dates(second["library_ref"]) == ["2026-01-05", "2026-01-06", "2026-01-07"]
+    assert dates(first["library_ref"]) == ["2026-01-05", "2026-01-06"]
+    assert len(list_libraries(ds)) == 3
+    recovered, repeated = execute(plan, "quota-after-cancel")
+    assert recovered.state == "succeeded" and repeated["library_ref"] == second["library_ref"]
+    assert repeated["incremental_usage"]["network_attempts"] == 0 and len(list_libraries(ds)) == 3
+    monkeypatch.setattr(adapter.client, "query", source_query)
+
+    clock[0] = clock[0].replace(day=9)
+    third_plan = module.plan_update(request(start="2026-01-08", end="2026-01-08"), ds, spec)
+    _, third = execute(third_plan, "quota-batch-exhausted")
+    assert len(adapter.client.calls) == 2 and third["stop_reason"] == "batch_limit"
+    assert third["resume_after"] is None and third["actual_usage"]["network_attempts"] == 2
+    with pytest.raises(PermissionError, match="limits changed"):
+        module.execute_update(
+            {**plan, "limits": {**plan["limits"], "network_attempts": 20}},
+            ds,
+            ds.root / first["approved_usage_ledger"],
+            cancelled=lambda: False,
+            progress=lambda _: None,
+        )
+
+
+def test_account_quota_and_throttle_share_registered_acquisition_owners(tmp_path, monkeypatch):
+    from datetime import datetime
+    from types import SimpleNamespace
+    from zoneinfo import ZoneInfo
+
+    from hetu_data import updates as module
+    from hetu_data.worker import approved_usage_ledger
+
+    shared = tmp_path / "formal"
+    wall = datetime(2026, 1, 8, 10, tzinfo=ZoneInfo("Asia/Shanghai"))
+    waits = []
+    monkeypatch.setattr(module, "_quota_now", lambda zone: wall.astimezone(zone))
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: 1.0, sleep=waits.append))
+    for position in range(2):
+        owner = tmp_path / f"owner-{position}"
+        owner.mkdir()
+        ds, adapter = store(owner)
+        scope = f"synthetic-approval-{position}"
+        spec = contracts(
+            approved_scope_ref=scope, requests_per_minute=30, daily_limits={"network_attempts": 2},
+            quota_scope_ref="synthetic-shared-account", quota_timezone="Asia/Shanghai",
+        )
+        plan = module.plan_update(request(end="2026-01-05"), ds, spec)
+        ledger = approved_usage_ledger(shared, scope)
+        result = module.execute_update(
+            plan, ds, ledger, quota_root=shared, cancelled=lambda: False, progress=lambda _: None,
+        )
+        assert len(adapter.client.calls) == 1
+        assert result["actual_usage"]["network_attempts"] == 1
+        assert result["daily_usage"]["usage"]["network_attempts"] == position + 1
+    assert waits == [2.0]
+
+
+def test_daily_quota_inside_fetch_resumes_remaining_calls(tmp_path, monkeypatch):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from hetu_data.models import SnapshotRef
+    from hetu_data.worker import approved_usage_ledger
+
+    from source_cases import SourceClient, response
+
+    ds, adapter = store(tmp_path, SourceClient("stock_basic"), product="ts_a_basic")
+    from hetu_data import updates as module
+    clock = [datetime(2026, 1, 7, 23, 50, tzinfo=ZoneInfo("Asia/Shanghai"))]
+    monkeypatch.setattr(module, "_quota_now", lambda tz: clock[0].astimezone(tz), raising=False)
+    monkeypatch.setattr(module.time, "sleep", lambda _: None)
+    calls = []
+
+    def query(api, params, fields):
+        status = params["list_status"]
+        calls.append(status)
+        return response(api, code=params["ts_code"], empty=status != "L")
+
+    adapter.client.query = query
+    spec = dict(
+        products={"ts_a_basic": dict(max_days=6000, upstream_per_fetch=3)},
+        limits=dict(
+            provider_fetch=3,
+            network_attempts=3,
+            retries=0,
+            approved_scope_ref="synthetic-daily-inside-fetch",
+            daily_limits={"network_attempts": 1},
+            quota_scope_ref="synthetic-source-account",
+            quota_timezone="Asia/Shanghai",
+        ),
+    )
+    plan = module.plan_update(request("ts_a_basic"), ds, spec)
+    ledger = approved_usage_ledger(ds.root, spec["limits"]["approved_scope_ref"])
+
+    def execute():
+        return module.execute_update(plan, ds, ledger, cancelled=lambda: False, progress=lambda _: None)
+
+    first = execute()
+    assert calls == ["L"]
+    assert first["stop_reason"] == "daily_limit" and not first["failures"] and first["pending"]
+    saved = next(e["response"] for e in map(json.loads, ledger.read_text().splitlines()) if e["type"] == "response")
+    assert execute()["incremental_usage"]["provider_fetch"] == 0
+    clock[0] = clock[0].replace(day=8, hour=1)
+    assert execute()["stop_reason"] == "daily_limit" and calls == ["L", "D"]
+    clock[0] = clock[0].replace(day=9)
+    third = execute()
+    assert calls == ["L", "D", "P"] and not third["pending"] and not third["failures"]
+    assert third["actual_usage"]["network_attempts"] == third["actual_usage"]["provider_fetch"] == 3
+    assert third["actual_usage"]["retries"] == 0
+    securities = ds.read_table(SnapshotRef(third["snapshot_ids"][-1], ds.root), "securities")
+    assert securities.code.tolist() == ["SYNTH.SH"]
+    assert securities.observed_at.iloc[0] == saved["obtained_at"]
+
+
+
+def test_daily_quota_worker_can_retry_failed_library_publication_without_fetch(tmp_path, monkeypatch):
+    from hetu_data import library
+    from hetu_data.catalog import DataTaskStore
+    from hetu_data.jobs import JobService, submit_update_plan
+    from hetu_data.models import LibraryRef
+    from hetu_data.worker import run_maintenance_job
+
+    ds, adapter = store(tmp_path)
+    baseline = ds.prepare(request(end="2026-01-05"))
+    published = library.publish_library(ds, asset_snapshots=(
+        dict(root=str(ds.root), snapshot_id=baseline.snapshot_id, tables=["daily_bars"]),
+    ))
+    ref = dict(library_id=published.library_id, root=str(published.root))
+    spec = {**contracts(), "library_ref": ref}
+    plan = updates_module().plan_update(request(start="2026-01-06", end="2026-01-06"), ds, spec)
+    tasks = DataTaskStore(ds.root)
+    first = submit_update_plan(tasks, plan, "publish-first")
+    publish = library.publish_library
+
+    def fail(*args, **kwargs):
+        raise OSError("synthetic unavailable publication destination")
+
+    monkeypatch.setattr(library, "publish_library", fail)
+    first = run_maintenance_job(first.job_id, tasks, ds)
+    interrupted = json.loads((first.output / "update.json").read_text())
+    assert first.state == "failed" and interrupted["library_ref"] == ref
+    assert len(library.list_libraries(ds)) == 1 and len(adapter.client.calls) == 2
+
+    monkeypatch.setattr(library, "publish_library", publish)
+    second = JobService(tasks).retry(first.job_id, "publish-retry")
+    second = run_maintenance_job(second.job_id, tasks, ds)
+    recovered = json.loads((second.output / "update.json").read_text())
+    assert second.state == "succeeded" and recovered["snapshot_ids"] == interrupted["snapshot_ids"]
+    assert recovered["incremental_usage"]["network_attempts"] == 0 and len(adapter.client.calls) == 2
+    assert len(library.list_libraries(ds)) == 2
+    query = library.query_library(
+        ds, LibraryRef(**recovered["library_ref"]), codes=("SYNTH.SH",),
+        start=date(2026, 1, 5), end=date(2026, 1, 6),
+    )
+    assert query["bars"].date.tolist() == ["2026-01-05", "2026-01-06"]

@@ -24,6 +24,7 @@ PRODUCTS = {
     "ts_bak_basic": ("bak_basic", "security_observations"),
     "ts_bse_mapping": ("bse_mapping", "security_observations"),
     "ts_a_daily": ("daily", "daily_bars"),
+    "ts_a_daily_day": ("daily", "daily_bars"),
     "ts_adj_factor": ("adj_factor", "adjustment_factors"),
     "ts_adj_factor_day": ("adj_factor", "adjustment_factors"),
     "ts_a_market_cap": ("daily_basic", "market_cap"),
@@ -97,7 +98,11 @@ class IncompleteResponse(ValueError):
     """返回不完整或查询语义不足，不登记整个期间覆盖。"""
 
 
-MARKET_DAY_PRODUCTS = frozenset({"ts_suspend_day", "ts_adj_factor_day", "ts_st_day"})
+class ProviderRejected(IncompleteResponse):
+    """供应商返回了非成功响应。"""
+
+
+MARKET_DAY_PRODUCTS = frozenset({"ts_a_daily_day", "ts_suspend_day", "ts_adj_factor_day", "ts_st_day"})
 
 
 def _day(value):
@@ -199,7 +204,8 @@ class TushareProvider:
     def decode_response(self, body: bytes, *, api: str, params: Mapping, obtained_at: str) -> pd.DataFrame:
         payload = json.loads(body)
         if payload.get("code") != 0:
-            raise IncompleteResponse(f"Tushare provider code {payload.get('code')}; not successful coverage")
+            error = ProviderRejected if api == "trade_cal" else IncompleteResponse
+            raise error(f"Tushare provider code {payload.get('code')}; not successful coverage")
         data = payload.get("data")
         if (
             not isinstance(data, dict)
@@ -216,26 +222,45 @@ class TushareProvider:
         if api in ROW_LIMIT and len(data["items"]) >= ROW_LIMIT[api]:
             raise IncompleteResponse("row limit reached; complete interval not proven")
         raw = pd.DataFrame(data["items"], columns=data["fields"])
-        if api in {"suspend_d", "adj_factor", "stock_st"} and "trade_date" in params and len(raw):
+        if api in {"daily", "suspend_d", "adj_factor", "stock_st"} and "trade_date" in params and len(raw):
             if not raw.trade_date.map(_day).eq(_day(params["trade_date"])).all():
                 raise IncompleteResponse("market response outside requested day")
-            if api == "suspend_d" and not raw.suspend_type.isin(("S", "R")).all():
+            if api == "daily" and (raw.ts_code.isna().any() or raw.ts_code.duplicated().any()):
+                raise IncompleteResponse("missing or duplicate security in daily cross-section")
+        if api == "suspend_d" and len(raw):
+            if not raw.suspend_type.isin(("S", "R")).all():
                 raise IncompleteResponse("unrecognized suspension event type")
+            if "start_date" in params and "end_date" in params and not raw.trade_date.map(_day).between(
+                _day(params["start_date"]), _day(params["end_date"]),
+            ).all():
+                raise IncompleteResponse("suspension response outside requested period")
         if api == "bse_mapping" and len(raw):
             for field in ("o_code", "n_code"):
                 if not raw[field].astype(str).str.endswith(".BJ").all() or raw[field].duplicated().any():
                     raise IncompleteResponse("invalid or ambiguous BSE mapping")
             if raw.o_code.eq(raw.n_code).any() or raw.list_date.map(_day).isna().any():
                 raise IncompleteResponse("invalid BSE listing observation")
-        if api == "trade_cal" and "start_date" in params and "end_date" in params:
-            wanted = {d.date().isoformat() for d in pd.date_range(params["start_date"], params["end_date"])}
-            if len(raw) != len(wanted) or {_day(d) for d in raw.cal_date} != wanted:
-                raise IncompleteResponse("calendar query does not contain every natural day")
-            if params.get("exchange") == "SZSE":
-                if "exchange" not in raw or not raw.exchange.eq("SZSE").all():
-                    raise IncompleteResponse("calendar response for another exchange")
-                if not raw.is_open.astype(str).isin(("0", "1")).all():
-                    raise IncompleteResponse("invalid calendar open marker")
+        if api == "trade_cal":
+            exchange = params.get("exchange")
+            if (exchange == "SZSE" or "exchange" in raw) and (
+                "exchange" not in raw or (exchange and not raw.exchange.eq(exchange).all())
+            ):
+                raise IncompleteResponse("calendar response for another exchange")
+            if not raw.is_open.astype(str).isin(("0", "1")).all():
+                raise IncompleteResponse("invalid calendar open marker")
+            dates = raw.cal_date.map(_day)
+            if dates.isna().any() or dates.duplicated().any():
+                raise IncompleteResponse("invalid or duplicate calendar date")
+            if "start_date" in params and "end_date" in params:
+                first, last = _day(params["start_date"]), _day(params["end_date"])
+                if not dates.between(first, last).all():
+                    raise IncompleteResponse("calendar response outside requested period")
+                count = (date.fromisoformat(last) - date.fromisoformat(first)).days + 1
+                raw.attrs["query_observation"] = (
+                    "success_empty" if raw.empty else (
+                        "success_complete" if len(raw) == count else "success_partial"
+                    )
+                )
         digest = hashlib.sha256(body).hexdigest()
         raw["_response_row"] = range(len(raw))
         raw["_response_sha256"] = digest
@@ -249,6 +274,8 @@ class TushareProvider:
                 "sha256": digest,
             }
         ]
+        if observation := raw.attrs.get("query_observation"):
+            raw.attrs["provider_responses"][0]["query_observation"] = observation
         # 仅证明本次查询的口径，不把无日期全史接口升级为实施日完整覆盖。
         raw.attrs["query_evidence"] = []
         if "ts_code" in params:
@@ -295,9 +322,15 @@ class TushareProvider:
             try:
                 body = cached["body"].encode("utf-8") if cached else self._query(api, params, FIELDS[api])
                 raw = self.decode_response(body, api=api, params=params, obtained_at=observed)
-            except Exception:
+            except Exception as error:
                 if self.on_usage and cached is None:
                     failure = {**event, "rows": None, "quota_bytes": None, "failed": True}
+                    if api == "trade_cal":
+                        failure["query_observation"] = (
+                            "provider_error" if isinstance(error, ProviderRejected) else (
+                                "transport_error" if body is None else "invalid_content"
+                            )
+                        )
                     if body is not None:
                         failure["raw_response"] = dict(
                             body=body.decode("utf-8"), api=api, params=params, obtained_at=observed
@@ -312,6 +345,7 @@ class TushareProvider:
                         "quota_bytes": None,
                         "failed": False,
                         "raw_response": raw.attrs["provider_responses"][0],
+                        **{k: raw.attrs[k] for k in ("query_observation",) if k in raw.attrs},
                     }
                 )
             responses.extend(raw.attrs["provider_responses"])
@@ -321,6 +355,8 @@ class TushareProvider:
             raise ValueError("objects required for selected product")
         result = pd.concat(frames, ignore_index=True)
         result.attrs.update(provider_responses=responses, query_evidence=evidence)
+        if len(responses) == 1 and (observation := responses[0].get("query_observation")):
+            result.attrs["query_observation"] = observation
         return result
 
     def standardize(self, product_id: str, raw: pd.DataFrame, product: Mapping) -> dict[str, pd.DataFrame]:

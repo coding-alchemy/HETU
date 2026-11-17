@@ -1,3 +1,5 @@
+import hashlib
+
 from hetu_data.archive import (
     _BAR_FIELDS,
     _BASE,
@@ -28,7 +30,6 @@ from hetu_data.archive import (
     defaultdict,
     duckdb,
     field,
-    hashlib,
     json,
     open_archive_view,
     pd,

@@ -54,6 +54,90 @@ def approved_usage_ledger(root: Path, approved_scope_ref: str) -> Path:
     return root / "updates" / "approved-usage" / scope_id / "usage.jsonl"
 
 
+def maintenance_data_store(data, definition):
+    """Select the registered acquisition owner's separate product and grants."""
+    relative = definition.get("acquisition_owner")
+    if relative is None:
+        return data
+    owner = data.root.resolve() / relative
+    if (owner.parent != data.root.resolve() / "owners" or owner.resolve() != owner
+            or not (owner / "data-products.json").is_file() or not (owner / "data-entitlements.json").is_file()):
+        raise PermissionError("maintenance acquisition owner is not registered under this data root")
+    return DataStore(owner)
+
+
+def _market_day_revision_rules(acquisition, snapshot_id, manifest, registered):
+    rules = []
+    root = acquisition.root.resolve()
+    for pid, span in manifest.get("market_day_refresh", {}).items():
+        table = acquisition.product(pid)["tables"][0]
+        for parent in span["supersedes"]:
+            if parent not in registered:
+                continue
+            rule = dict(
+                root=str(root), product_id=pid, table=table, superseded_snapshot_id=parent,
+                selected_snapshot_id=snapshot_id, codes=span["codes"], start=span["start"], end=span["end"],
+            )
+            relative = f"evidence/market-day-revisions/{snapshot_id}-{parent}-{pid}.json"
+            path = root / relative
+            body = json.dumps(rule, ensure_ascii=False, sort_keys=True)
+            if path.exists():
+                if path.read_text(encoding="utf-8") != body:
+                    raise ValueError("recorded market-day revision evidence differs")
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                temporary = path.with_suffix(".tmp")
+                temporary.write_text(body, encoding="utf-8")
+                temporary.replace(path)
+            rules.append(dict(**rule, evidence_ref=relative))
+    return rules
+
+
+def _publish_update_library(data, ledger, definition, result, *, acquisition=None):
+    from hetu_data.library import load_library, publish_library
+    from hetu_data.models import LibraryRef, SnapshotRef
+    from hetu_data.updates import _read_events, _write
+
+    previous_ref = definition.get("library_ref")
+    for event in reversed(_read_events(ledger)):
+        if event["type"] == "library_published":
+            previous_ref = dict(library_id=event["library_id"], root=event["root"])
+            break
+    result["library_ref"] = previous_ref
+    previous = LibraryRef(**previous_ref) if previous_ref else None
+    prior = load_library(data, previous) if previous else {}
+    acquisition = data if acquisition is None else acquisition
+    root = str(acquisition.root.resolve())
+    known = {asset["snapshot_id"] for asset in prior.get("asset_snapshots", ()) if asset["root"] == root}
+    snapshot_ids = dict.fromkeys([*definition.get("registered_local_snapshots", ()), *result["snapshot_ids"]])
+    registered = known | snapshot_ids.keys()
+    assets = []
+    for sid in snapshot_ids:
+        if sid in known:
+            continue
+        manifest = acquisition.load_manifest(SnapshotRef(sid, acquisition.root))
+        tables = sorted({entry["table"] for entry in manifest["table_files"]})
+        raw_products = sorted({item["product_id"] for item in manifest["items"] if item.get("raw_files")})
+        revisions = [
+            dict(
+                root=root, product_id=pid, table="calendar", superseded_snapshot_id=parent, selected_snapshot_id=sid,
+                codes=[], start=span["start"], end=span["end"], evidence_ref=f"snapshots/{sid}/manifest.json",
+            )
+            for pid, span in manifest.get("calendar_refresh", {}).items()
+            for parent in span["supersedes"] if parent in registered
+        ]
+        revisions.extend(_market_day_revision_rules(acquisition, sid, manifest, registered))
+        assets.append(dict(
+            root=root, snapshot_id=sid, tables=tables, raw_products=raw_products, revision_selections=revisions,
+        ))
+    if not assets:
+        return previous_ref
+    published = publish_library(data, asset_snapshots=tuple(assets), previous=previous)
+    ref = dict(library_id=published.library_id, root=str(published.root))
+    _write(ledger, dict(type="library_published", **ref, snapshot_ids=[a["snapshot_id"] for a in assets]))
+    return ref
+
+
 def run_maintenance_job(job_id, tasks, data):
     with worker_lock(data.root, reentrant=True):
         service = JobService(tasks)
@@ -87,38 +171,66 @@ def run_maintenance_job(job_id, tasks, data):
 
             # 安全命名同一批准额度的账本；不是结果等价/过期/批次绑定条件。
             ledger = approved_usage_ledger(data.root, definition.get("limits", {}).get("approved_scope_ref", ""))
-            result = execute_update(
-                definition,
-                data,
-                ledger,
-                cancelled=lambda: service.get(job_id).state == "cancel_requested",
-                progress=update_progress,
-            )
-            if "maintenance_contracts" in definition and service.get(job_id).state != "cancel_requested":
-                contracts = json.loads(json.dumps(definition["maintenance_contracts"]))
-                selected = contracts["maintenance"].get("coverage_snapshot_ids")
+            acquisition = maintenance_data_store(data, definition)
+            phase, added = definition, {}
+            contracts = json.loads(json.dumps(definition.get("maintenance_contracts")))
+            covered_segments = set()
+
+            def cancelled():
+                return service.get(job_id).state == "cancel_requested"
+
+            while True:
+                result = execute_update(
+                    phase, acquisition, ledger, quota_root=data.root, cancelled=cancelled, progress=update_progress,
+                )
+                for meter, count in result["incremental_usage"].items():
+                    prior_count = added.get(meter, 0)
+                    added[meter] = None if count is None or prior_count is None else prior_count + count
+                result["incremental_usage"] = added
+                result["approved_usage_ledger"] = str(ledger)
+                if "library_ref" in definition:
+                    try:
+                        result["library_ref"] = _publish_update_library(
+                            data, ledger, definition, result, acquisition=acquisition,
+                        )
+                    except Exception:
+                        # The next explicit attempt can retry publication using the successful snapshots.
+                        publish("update.json", result)
+                        raise
+                if not contracts or cancelled():
+                    publish("update.json", result)
+                    break
+                settings = contracts["maintenance"]
+                if result.get("library_ref"):
+                    contracts["library_ref"] = result["library_ref"]
+                selected = settings.get("coverage_snapshot_ids")
                 if selected is not None:
-                    contracts["maintenance"]["coverage_snapshot_ids"] = list(
-                        dict.fromkeys(selected + result["snapshot_ids"])
-                    )
+                    settings["coverage_snapshot_ids"] = list(dict.fromkeys(selected + result["snapshot_ids"]))
                 from datetime import date
 
                 post = maintenance_plan(
-                    data,
-                    date.fromisoformat(definition["target"]),
-                    tuple(definition["request"]["product_ids"]),
-                    mode=definition["request"]["mode"],
-                    contracts=contracts,
+                    acquisition, date.fromisoformat(definition["target"]), tuple(definition["request"]["product_ids"]),
+                    mode=definition["request"]["mode"], contracts=contracts, quota_root=data.root,
                 )
                 result["maintenance"] = {k: post[k] for k in ("start", "target", "domains", "target_scope")}
-                result["maintenance"]["semantics"] = (
-                    "请求完成不等于内容/PIT齐备；refresh为以后显式维护的回看需求，不自动执行"
-                )
-            result["approved_usage_ledger"] = str(ledger)
-            publish("update.json", result)
+                result["maintenance"]["semantics"] = "请求完成不等于内容或PIT齐备，后续周期仍需手动触发"
+                publish("update.json", result)
+                if (not settings.get("follow_calendar_and_shortfalls") or result["pending"]
+                        or result["failures"] or result["stop_reason"] or post["unresolved"]):
+                    break
+                covered_segments.update(json.dumps(s, sort_keys=True) for s in phase["segments"])
+                remaining = [
+                    s for s in post["segments"]
+                    if acquisition.product(s["product_id"]).get("cross_section") == "trade_day"
+                    and json.dumps(s, sort_keys=True) not in covered_segments
+                ]
+                if not remaining:
+                    break
+                phase = {**definition, "segments": remaining, "request": post["request"]}
             _raise_if_cancelled(service, job_id)
             if result["pending"] or result["failures"]:
-                raise RuntimeError("maintenance limited: pending/failed segments; see update.json")
+                reason = result["stop_reason"] or "pending/failed segments"
+                raise RuntimeError(f"maintenance limited: {reason}; see update.json")
             limited = any(
                 d["missing"] or d["unknown"] or d["unrecoverable"]
                 for d in result.get("maintenance", {}).get("domains", [])
@@ -139,17 +251,23 @@ def run_maintenance_job(job_id, tasks, data):
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="HETU 数据 worker")
     parser.add_argument("--root", required=True, help=".hetu/quant 或测试临时根目录")
-    parser.add_argument(
+    selected = parser.add_mutually_exclusive_group()
+    selected.add_argument(
         "--once",
         action="store_true",
         help="排空当前队列后退出（默认常驻轮询）",
     )
+    selected.add_argument("--job-id", help="只执行指定的持久维护任务")
     args = parser.parse_args(argv)
     root = Path(args.root)
     store = DataTaskStore(root)
     data = DataStore(root)
     try:
         with worker_lock(root):
+            if args.job_id:
+                job = run_maintenance_job(args.job_id, store, data)
+                print(json.dumps(dict(job_id=job.job_id, state=job.state, reason=job.reason), ensure_ascii=False))
+                return 0 if job.state == "succeeded" else 2
             recover_stale_jobs(store, kinds=("maintenance",))
             while True:
                 pending = queued_job_ids(store, kinds=("maintenance",))
@@ -160,7 +278,7 @@ def main(argv: list[str] | None = None) -> int:
                     continue
                 for job_id in pending:
                     run_maintenance_job(job_id, store, data)
-    except RuntimeError as error:
+    except (KeyError, ValueError, RuntimeError) as error:
         print(f"worker 未启动：{error}", file=sys.stderr)
         return 2
 

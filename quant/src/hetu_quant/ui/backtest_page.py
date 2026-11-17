@@ -141,27 +141,28 @@ def _build_definition(root_inputs: dict) -> BacktestDefinition:
     )
 
 
-def render_backtest_page(root: Path, store) -> None:
-    st.header("回测")
+def _render_configuration(root: Path, store, experiments: ExperimentStore) -> None:
     st.caption("免费模式 free；正式研究与机制演示分别冻结。执行由本地 worker 完成，关闭网页后可找回。")
+    definitions = experiments.list_definitions("backtest")
+    if definitions:
+        with st.expander("复制已保存的回测定义"):
+            _render_copy(store, experiments, definitions)
     stage = st.radio("运行用途", ("formal", "mechanism"), horizontal=True, key="bt_stage")
+    mode = st.selectbox("来源模式", ("free", "paid"), key="bt_mode")
+    if mode == "paid":
+        st.warning("现有研究 worker 不接收 paid 定义。可在数据页使用已获准的付费数据操作。")
+        return
     protocol_path = Path(__file__).resolve().parents[3] / "research" / "phase2-protocol.json"
-    defaults = json.loads(protocol_path.read_text(encoding="utf-8"))
-    payload = defaults
+    payload = _formal_payload(protocol_path)
     phase, trial_id = "development_validation", "dev_main"
     frequency = "monthly"
     if stage == "formal":
-        st.caption("低波动：36个月月收益、月调仓、最低十分位及市值权重；CNY与历史沪深池为本地适配。"
-                   "八项试验共用脚本的冻结、阶段、基准及预算门禁。修改配置须使用新的研究标识。")
-        protocol_text = st.text_area("完整研究协议（JSON，含股票池、时间划分、目标及查看记录）",
-                                     value=json.dumps(defaults, ensure_ascii=False, indent=2),
-                                     height=220, key="bt_protocol")
+        st.caption("低波动：36个月月收益、月调仓、最低十分位及市值权重。八项试验共用冻结协议与预算。")
+        st.selectbox("股票池规则", (payload["definition"]["protocol"]["universe"]["rule"],), key="bt_pool")
         try:
-            payload = json.loads(protocol_text)
             rows = _validation_definitions(payload)
         except (ValueError, KeyError, TypeError) as error:
             st.error(f"研究协议无效：{error}")
-            _render_results(ExperimentStore(root))
             return
         phase = st.selectbox("研究阶段", ("development_validation", "final"), key="bt_phase")
         trials = [row["trial_id"] for row in rows if row["phase"] == phase]
@@ -172,7 +173,6 @@ def render_backtest_page(root: Path, store) -> None:
         st.info("透明市值基准 universe_vw 的周/月机制验证：从合格历史池生成市值权重，"
                 "只证明信号与账户行为，经济结论为 not_evaluated；低波动研究使用正式月频协议。")
         frequency = st.selectbox("调仓规则", ("monthly", "weekly"), key="bt_frequency")
-    experiments = ExperimentStore(root)
     snapshots = [snapshot_id for snapshot_id, _ in store._published_manifests()]
     if not snapshots:
         st.warning("尚无已发布快照，请先在数据页更新或导入。")
@@ -194,7 +194,7 @@ def render_backtest_page(root: Path, store) -> None:
     initial_cash = col_cash.number_input(
         "初始资本（CNY）", min_value=0.0, value=1_000_000.0, key="bt_capital"
     )
-    benchmark_id = col_bench.text_input("共同基准", value="universe_vw", key="bt_benchmark")
+    benchmark_id = col_bench.selectbox("共同基准", ("universe_vw",), key="bt_benchmark")
     col_comm, col_min, col_slip = st.columns(3)
     commission_rate = col_comm.number_input(
         "佣金率", min_value=0.0, value=0.0003, format="%.6f", key="bt_commission"
@@ -244,19 +244,19 @@ def render_backtest_page(root: Path, store) -> None:
         )
     except (ValueError, KeyError, TypeError) as error:
         st.error(f"定义无效：{error}")
-        _render_results(experiments)
         return
 
     st.subheader("冻结定义（提交后不可修改；修改请另存新定义）")
     st.json(backtest_definition_to_dict(definition))
     st.caption(f"实际策略：{definition.strategy_id}；方法标签：{strategy_method_label(definition)}")
+    st.caption("信号：收盘；成交：下一交易日开盘。")
     if st.button("检查资格与限制", key="bt_check_qualification"):
         st.session_state.pop("bt_qualification", None)
         # 与 worker 共用 01 的 prepare_backtest；不自行降低门槛
         # prepare_backtest 要求 bundle 目录尚不存在：用临时父目录下的新路径
-        bundle_dir = Path(tempfile.mkdtemp(prefix="hetu-bt-qual-")) / "bundle"
         try:
-            report = prepare_backtest(definition, store, bundle_dir)
+            with tempfile.TemporaryDirectory(prefix="hetu-bt-qual-") as workdir:
+                report = prepare_backtest(definition, store, Path(workdir) / "bundle")
         except Exception as error:  # noqa: BLE001 - 缺口如实展示
             st.error(f"资格检查失败：{type(error).__name__}: {error}")
         else:
@@ -268,11 +268,25 @@ def render_backtest_page(root: Path, store) -> None:
                     "limitations": list(report.limitations),
                 })
     qualified = st.session_state.get("bt_qualification")
-    if qualified and qualified[0] == backtest_definition_to_dict(definition):
+    preview_current = bool(qualified and qualified[0] == backtest_definition_to_dict(definition))
+    if preview_current:
         st.json(qualified[1])
-    if st.button("提交任务", key="bt_submit_job"):
+    can_submit = stage == "mechanism" or (preview_current and qualified[1]["can_run"])
+    if st.button("提交任务", key="bt_submit_job", disabled=not can_submit):
         _submit(experiments, "backtest", definition)
 
+
+def _formal_payload(protocol_path: Path) -> dict:
+    return json.loads(protocol_path.read_text(encoding="utf-8"))
+
+
+def render_backtest_page(root: Path, store) -> None:
+    st.header("回测")
+    experiments = ExperimentStore(root)
+    try:
+        _render_configuration(root, store, experiments)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        st.error(f"配置不可用：{error}")
     _render_results(experiments)
 
 
@@ -282,6 +296,9 @@ def _render_results(experiments: ExperimentStore) -> None:
     if not run_ids:
         st.info("尚无已发布回测。")
         return
+    suggested = st.session_state.pop("suggested_result", None)
+    if suggested in run_ids:
+        st.session_state["bt_result_select"] = suggested
     run_id = st.selectbox("回测", run_ids, key="bt_result_select")
     ref = experiments.get_backtest(run_id)
     payload = read_backtest(ref)
@@ -303,6 +320,9 @@ def _render_results(experiments: ExperimentStore) -> None:
         st.markdown(f"- 限制：{limitation}")
     for limitation in evaluation.get("limitations", []):
         st.markdown(f"- 限制：{limitation}")
+    st.json({"metrics": evaluation.get("metrics", {}), "statistics": evaluation.get("statistics", {}),
+             "exposure": evaluation.get("exposure", "not_available"),
+             "capacity": evaluation.get("capacity", "not_available")})
 
     tables = payload["tables"]
     sections = (
@@ -356,3 +376,85 @@ def _render_results(experiments: ExperimentStore) -> None:
             mime="application/zip",
             key="bt_download_zip",
         )
+
+
+_EDITABLE_FIELDS = (
+    "protocol.costs.commission_rate", "protocol.costs.min_commission_cny",
+    "protocol.costs.slippage_rate", "parameters.lookback_months",
+)
+
+
+def copy_backtest_definition(
+    store: ExperimentStore, definition_id: str, changes: dict,
+) -> tuple[BacktestDefinition, list[dict]]:
+    original = store.read_definition(definition_id)
+    if not isinstance(original, BacktestDefinition):
+        raise ValueError("definition is not a backtest")
+    payload = backtest_definition_to_dict(original)
+    differences = []
+    for path, after in changes.items():
+        if path not in _EDITABLE_FIELDS:
+            raise ValueError(f"unsupported copy field: {path}")
+        *parents, key = path.split(".")
+        mapping = payload
+        for name in parents:
+            mapping = mapping[name]
+        if key not in mapping or isinstance(after, bool) or not isinstance(after, (int, float)) or after < 0:
+            raise ValueError(f"unsupported value for {path}")
+        if path == "parameters.lookback_months" and (type(after) is not int or after < 1):
+            raise ValueError("lookback_months must be a positive integer")
+        before = mapping[key]
+        if before != after:
+            mapping[key] = after
+            differences.append(dict(path=path, before=before, after=after))
+    definition = backtest_definition_from_dict(payload)
+    require_formal_protocol(definition)
+    return definition, differences
+
+
+def _render_copy(store, experiments, definitions) -> None:
+    choices = {row["definition_id"]: row["created_at"] for row in definitions}
+    selected = st.selectbox("来源定义", choices, format_func=lambda key: f"{choices[key]} · {key}",
+                            key="bt_copy_source")
+    original = experiments.read_definition(selected)
+    changed = {}
+    for field in _EDITABLE_FIELDS:
+        parts = field.split(".")
+        if field.startswith("parameters"):
+            value = original.parameters.get(parts[-1])
+        else:
+            value = original.protocol["costs"].get(parts[-1])
+        if value is not None:
+            changed[field] = st.number_input(field, value=value, min_value=type(value)(0),
+                                             key=f"bt_copy::{selected}::{field}")
+    try:
+        candidate, differences = copy_backtest_definition(experiments, selected, changed)
+    except ValueError as error:
+        st.warning(str(error))
+        return
+    st.json(differences)
+    payload = backtest_definition_to_dict(candidate)
+    frozen = candidate.protocol.get("research_execution")
+    formal = candidate.protocol["stage"] == "formal"
+    conforms = not formal or (
+        frozen and payload == backtest_definition_to_dict(
+            _build_formal_definition(payload["protocol"]["research_execution"]["payload"], frozen["phase"],
+                                     frozen["trial_id"])
+        )
+    )
+    if candidate.mode != "free" or not conforms:
+        st.warning("草稿超出当前冻结试验定义或研究来源范围。正式研究账本和原定义保持。")
+        if st.button("保存草稿", key="bt_copy_save"):
+            st.success(experiments.save_definition("backtest", candidate))
+        return
+    if st.button("检查复制定义资格", key="bt_copy_qualification"):
+        st.session_state.pop("bt_copy_qualified", None)
+        with tempfile.TemporaryDirectory(prefix="hetu-bt-copy-") as workdir:
+            report = prepare_backtest(candidate, store, Path(workdir) / "bundle")
+        st.session_state["bt_copy_qualified"] = (payload, report.can_run, list(report.limitations))
+    checked = st.session_state.get("bt_copy_qualified")
+    current = checked is not None and checked[0] == payload
+    if current:
+        st.write({"can_run": checked[1], "limitations": checked[2]})
+    if st.button("提交复制定义", key="bt_copy_submit", disabled=not (current and checked[1])):
+        _submit(experiments, "backtest", candidate)

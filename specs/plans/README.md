@@ -31,7 +31,7 @@ E2 局部效果成立、经济性未证；Codex 外层截断及网络即时保�
 不将其写成全部由机械优化带来的节约。效果不再重验，历史材料缺口仍按原范围保留；G2从未启动。
 七份已执行或被最新方向替代的计划已清理，原文及状态去向见[清理记录](#standard-token-efficiency-closeout)。
 
-量化平台的一至三期已整合为[初始实现与交接](../2026-11-07-quant-research-platform-initial-implementation.md)，四、五期规格独立维护。
+量化初始建设与系统完善现统一由[量化系统实现与交接](../2026-11-07-quant-research-platform-implementation.md)维护。策略研究与验证独立保留原池、窗口和八次协议，按自身规格及授权执行。
 七期“分层优化与 Quick／Standard 能力补全”已按最新批准范围验收完成；
 2026-10-14 按用户授权清理本批路线图及三份阶段计划，原文回源见[清理记录](#standard-scope-closeout)。
 
@@ -47,15 +47,14 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 产品测试材料清理三阶段已执行并评审通过，执行计划已按授权清理。
 后续维护遵循[测试材料复用与维护方法论](../../docs/engineering/test-fixtures-methodology.md)。
 
-量化初始建设统一保存真实两榜、回测软件、独立数据模块、数据接入与限定验收。档案 limited、原研究资格 blocked、真实研究预算 0/8。
+量化系统统一保存真实两榜、回测软件、独立数据模块及正式日线库。系统完善已按批准的 Tushare 已知目录范围验收通过，独立历史全集证明限制保留；原研究资格 blocked，真实研究预算 0/8。
 
 | 阶段 | 设计与现行入口 | 计划状态 |
 | --- | --- | --- |
-| 量化初始建设（原一至三期） | [初始实现](../2026-11-07-quant-research-platform-initial-implementation.md)、[统一使用手册](../../docs/quant-research-platform-usage.md) | 一期原范围、二期软件及三期修订范围验收保持；旧执行计划按原归档或固定提交回源 |
-| 新量化四期 | 后续规格单独交付 | 待设计批准后编独立计划；原八次协议与窗口不变 |
-| 新量化五期 | 后续规格单独交付 | 待设计批准后编独立计划；代表策略实际平台执行保留 |
+| 量化系统（初始建设与系统完善） | [统一实现](../2026-11-07-quant-research-platform-implementation.md)、[统一使用手册](../../docs/quant-research-platform-usage.md) | 原一至三期验收保持；完善 01–04 按批准来源范围收口。计划已清理，[分项结论](../2026-11-07-quant-research-platform-implementation.md#8-分项验收与直接证据)与[原文恢复](../2026-11-07-quant-research-platform-implementation.md#10-条款去向与历史恢复)保留适用范围 |
+| 策略研究与验证 | 两份 `2026-11-07-quant-strategy-research-{requirements,design}.md` 规格在固定提交 `d7172a6a8d639657bd9901f8bf021d99df948ee9` 保存，当前分支未纳入 | 原四期及原五期剩余策略任务；原池、窗口和八次预算保持，真实代表策略平台执行仍需独立验收；执行计划未编写 |
 
-四、五期分别审阅与验收。三期已按 Tushare 和公开信息范围收口，移出能力的原归属、限制和原件见初始实现。新设计和计划按 AGENTS.md 分别获批，真实研究与旧结果重跑另按具体范围授权。
+系统可用、固定来源目标覆盖和严格研究资格分别判定。[策略交接与限制](../2026-11-07-quant-research-platform-implementation.md#9-能力限制与策略交接)保留 PIT、行动、跨码和账户任务。旧四、五期规格可从 Git `1832734f94fe1425b933c47a4850d5e0bc38e449` 按原路径回源；新设计、计划、真实研究及旧结果重跑仍按 AGENTS.md 和具体授权办理。
 
 六期已按用户批准的已证范围限定验收，正式全仓工程门禁与收尾交接已完成；
 2026-10-10 按用户授权删除六期路线图及六份编号计划，原文从本页的固定 Git 提交回溯。
@@ -68,7 +67,7 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 收口及阶段 05 本批汇总与复评成果保持有效；第 8 组性能数值未验收、五期整体未完成的事实
 保留，不安排新采样、配对或校准，不重复请求延期批准。
 
-本目录保留总索引。量化一至三期计划已退出执行入口，历史回源见[初始实现 §6](../2026-11-07-quant-research-platform-initial-implementation.md#6-附录原文件与有效条款去向)。
+本目录保留总索引。量化一至三期计划已退出执行入口，历史回源见[统一实现 §10](../2026-11-07-quant-research-platform-implementation.md#10-条款去向与历史恢复)。
 
 已执行或停止执行的五期旧计划已清理。五期有效要求、实现行为、
 证据与未完成边界统一见[五期实现](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md)。
@@ -83,6 +82,8 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 提交、推送与 main 集成按用户后续具体指令处理；清理不新增运行授权。
 
 ## 当前执行计划
+
+量化系统完善的路线图及 01–04 计划已按用户要求清理，现行交付和历史恢复统一见[量化系统实现与交接](../2026-11-07-quant-research-platform-implementation.md)。七日接受例外、独立全集证明限制及供应商原响应的备份例外继续保留；手动维护按有期限合同使用，例行 M 关闭。
 
 行业基本面独立Skill已按预算执行收尾，四份已执行计划退出当前入口，需求与设计统一见[行业基本面实现](../2026-11-07-industry-fundamentals-implementation.md)。核心离线行为、美国原油六条代表来源与12期表图、后续需求兑现／资金周转／库存组成三项增量行为通过。**limited完整交付及最终报告对用户错误摘要的属性／采用说明仍为同一未验证场景**，首次环境限制、初始化失败、能源续派消息留存不足和历史过程偏差继续保留。清理范围与原件见[行业清理回源](#industry-fundamentals-closeout)，不登记全部行为通过，不新增研究或重跑授权。
 
@@ -113,7 +114,7 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 | 扩展与计量工具 | 实现、组内修复及四项阻断均已关闭；[扩展管理](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-extensions)、[计量工具](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-metering) |
 | 第 5–7 组验收 | 第 5 组限定接受、第 6 组原五运行限定闭合、第 7 组本批 4/5＝80% 限定认证；[批准例外与支持边界](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-status) |
 | 预算与性能 | N7 默认及获批 X1／X4 已执行，额度用尽；三条性能线、全流程取样与实测校准未完成；[停止点](../2026-10-02-stock-analysis-workflow-v1-phase-5-implementation.md#phase5-closeout) |
-| 量化初始建设 | [一至三期有效成果、限制与计划回源](../2026-11-07-quant-research-platform-initial-implementation.md) |
+| 量化系统 | [初始建设、系统完善、现行验收及计划回源](../2026-11-07-quant-research-platform-implementation.md) |
 | 六期资料完整性与证据闭合 | 已证范围获限定验收、工程收尾完成；[已交付范围与证据入口](../2026-10-04-stock-analysis-workflow-v1-phase-6-implementation.md#6-交付与验收结果)，剩余取得要求仍在长期清单 |
 | 七期分层优化与能力补全 | Q01–Q08／S01–S08及完整Standard交付按批准范围验收；[七期实现](../2026-10-12-stock-analysis-workflow-v1-phase-7-implementation.md#13-当前完成边界)维护需求、设计、实现与证据，Deep仅整理 |
 | Standard Token 机械优化与核账 | [实现范围与规则](../2026-10-15-standard-token-efficiency-design.md)、[局部验证](../../.hetu/validation/standard-token-efficiency-appendix-20261015/report.md)及[实际差额归因](../../.hetu/validation/standard-token-comparison-20261015/input-delta-attribution-20261017.md)；默认策略未切换，金额与分项纯因果贡献未证 |

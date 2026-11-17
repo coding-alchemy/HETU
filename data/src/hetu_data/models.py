@@ -98,6 +98,19 @@ class SnapshotRef:
 
 
 @dataclass(frozen=True)
+class LibraryRef:
+    library_id: str
+    root: Path
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.library_id, str) or not self.library_id or self.library_id.startswith(".") or (
+            Path(self.library_id).name != self.library_id
+        ):
+            _fail("invalid library id")
+        object.__setattr__(self, "root", Path(self.root))
+
+
+@dataclass(frozen=True)
 class DataRequest:
     product_ids: tuple[str, ...]
     codes: tuple[str, ...]
@@ -110,6 +123,7 @@ class DataRequest:
     # 未列出的产品沿用 codes。缺省为空，行为与单一 codes 域完全一致。
     codes_by_product: Mapping[str, tuple[str, ...]] | None = None
     refresh_from: date | None = None
+    market_day_codes: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         product_ids = _str_tuple(self.product_ids, "product_ids")
@@ -134,6 +148,10 @@ class DataRequest:
             _fail(f"start {self.start} must not be after end {self.end}")
         if self.refresh_from is not None and not self.start <= self.refresh_from <= self.end:
             _fail("refresh_from must lie within the approved request period")
+        if self.market_day_codes is not None:
+            if len(product_ids) != 1 or self.start != self.end:
+                _fail("market_day_codes requires a single product and day")
+            object.__setattr__(self, "market_day_codes", _str_tuple(self.market_day_codes, "market_day_codes"))
         require_cn_aware(self.as_of)
         if self.purpose not in PURPOSES:
             _fail(f"unknown purpose: {self.purpose!r}")
@@ -226,6 +244,8 @@ def data_request_to_dict(request: DataRequest) -> dict[str, object]:
         payload["codes_by_product"] = {key: list(value) for key, value in request.codes_by_product.items()}
     if request.refresh_from is not None:
         payload["refresh_from"] = request.refresh_from.isoformat()
+    if request.market_day_codes is not None:
+        payload["market_day_codes"] = list(request.market_day_codes)
     return payload
 
 
@@ -241,4 +261,5 @@ def data_request_from_dict(payload: Mapping[str, object]) -> DataRequest:
         mode=payload.get("mode", "free"),
         codes_by_product=dict(override) if isinstance(override, Mapping) else None,
         refresh_from=date.fromisoformat(payload["refresh_from"]) if payload.get("refresh_from") else None,
+        market_day_codes=tuple(payload["market_day_codes"]) if "market_day_codes" in payload else None,
     )

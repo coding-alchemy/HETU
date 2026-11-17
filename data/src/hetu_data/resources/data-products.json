@@ -327,6 +327,33 @@
       "provider_timezone": "Asia/Shanghai",
       "notes": "二期历史宇宙仅经import_files导入：已核验官方原件与独立发布记录按版本登记；仅有当前目录摘录时不证明历史公开，不经prepare网络取数"
     },
+    "cn_sz_archive_calendar": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "交易所公开披露的深市开休市事实，按已核日期随原件经 import_files 登记。"
+      },
+      "kind": "calendar",
+      "requires_codes": false,
+      "markets": ["SZ"],
+      "tables": ["calendar"],
+      "notes": "仅适用于有直接依据的深市日期，不延伸到其他市场或日期。"
+    },
+    "cn_bj_archive_calendar": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "交易所公开交易规则和对应窗口休市公告，逐日核定后经 import_files 登记。",
+        "allowed_operations": ["read", "import", "backup"]
+      },
+      "kind": "calendar",
+      "requires_codes": false,
+      "markets": ["BJ"],
+      "tables": ["calendar"],
+      "notes": "仅覆盖有公开规则和期间例外核对的自然日；不以其他交易所日历代替。"
+    },
     "cn_a_archive_no_trade": {
       "provider": "local_file",
       "fee_class": "free",
@@ -338,6 +365,19 @@
       "requires_codes": true,
       "tables": ["security_events"],
       "notes": "仅解释对应对象日的档案量价缺口，不能推断完整交易状态、风险警示或账户退出处置。"
+    },
+    "cn_a_archive_trade_timing": {
+      "provider": "local_file",
+      "fee_class": "free",
+      "permission": {
+        "status": "verified_free",
+        "basis": "交易所公开披露的证券停复牌时段，按原件经 import_files 登记。"
+      },
+      "kind": "event",
+      "requires_codes": true,
+      "markets": ["SZ"],
+      "tables": ["security_events"],
+      "notes": "仅解释直接核实的代码和日期，保留供应商停牌观察及其他来源冲突。"
     },
     "cn_a_knowledge": {
       "provider": "local_file",
@@ -523,6 +563,29 @@
       "provider_timezone": "Asia/Shanghai",
       "notes": "G1有界样本已证用途；非全池/PIT/全部行动资格。无G3网络授权不得取新数据。",
       "storage_layout": "year"
+    },
+    "ts_a_daily_day": {
+      "cross_section": "trade_day",
+      "provider": "tushare",
+      "fee_class": "paid",
+      "permission": {
+        "status": "selected_paid",
+        "source_url": "https://tushare.pro/document/2?doc_id=27",
+        "basis": "已核官方 daily 日期查询合同；仍须本机批准相应产品及整日响应权限"
+      },
+      "kind": "catalog",
+      "requires_codes": false,
+      "tables": [
+        "daily_bars"
+      ],
+      "source_api": "daily",
+      "markets": [
+        "SH",
+        "SZ",
+        "BJ"
+      ],
+      "provider_timezone": "Asia/Shanghai",
+      "notes": "单交易日未复权日线横截面。顶到 6000 行或返回 has_more 即停；查询成功不证明独立目标全集。"
     },
     "ts_adj_factor_day": {
       "cross_section": "trade_day",

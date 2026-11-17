@@ -1,6 +1,6 @@
 # 本地量化数据使用手册
 
-本手册集中说明**已经实现**的数据字段、存储布局和离线访问方法。来源选型见[数据源评估](../docs/theory/A股量化数据方案评估报告.md)，建设取舍见[数据与数据源方案](../docs/theory/A股量化系统数据与数据源方案.md)，实际覆盖与阶段结论见[初始实现与验收](../specs/2026-11-07-quant-research-platform-initial-implementation.md)。
+本手册集中说明**已经实现**的数据字段、存储布局和离线访问方法。来源选型见[数据源评估](../docs/theory/A股量化数据方案评估报告.md)，建设取舍见[数据与数据源方案](../docs/theory/A股量化系统数据与数据源方案.md)，系统能力、实际覆盖与验收边界见[统一实现与交接](../specs/2026-11-07-quant-research-platform-implementation.md)。
 
 有数据就可以查询；历史档案可以持续积累。查询入口可用不代表二十年数据已经齐全，也不代表数据已满足历史回测的公开时点要求。
 
@@ -56,7 +56,7 @@
 
 ## 3. 存储布局与格式
 
-默认数据根为 `.hetu/quant/`；`HETU_QUANT_ROOT` 可指定另一个数据根。每个根有自己的产品配置、读取授权和快照，查询不会隐式合并其他批次根。
+默认数据根为 `.hetu/quant/`；`HETU_QUANT_ROOT` 可指定另一个数据根。每个根有自己的产品配置、读取授权和快照，查询不会隐式合并其他批次根。正式日线根为 `~/data/hetu/a-share/daily/`，独立入口显式传 `--root`，HETU 数据页用 `HETU_DATA_ROOT`。正式库维护证据及使用命令见[统一使用手册](../docs/quant-research-platform-usage.md)。
 
 ```text
 <data-root>/
@@ -77,6 +77,8 @@
 - **访问引擎**：DuckDB 直接读 Parquet；没有再复制一份全量行情到持久数据库。范围查询先裁剪已知月／年／代码分区，再由 DuckDB 过滤日期、代码并投影所需列。
 
 普通查询核验**实际选择的标准文件**哈希，不扫描所有无关资产和原件；它不是全库完整性审计。完整样本备份核验清单、raw、标准表及引用的 evidence。数据不足的片段仍能被查询，返回的缺口解释与全档案审计分开保存。
+
+固定库引用 `LibraryRef` 位于 `<data-root>/libraries/<library_id>/manifest.json`。由 `publish_library` 登记明确的快照和表。增量发布可以继承前一库引用，并保留旧清单及原文件。通过 `query_library` 取得固定 `selection`、实际行情、来源及缺口，`query_library_sql` 使用同一选择重新核对当时的读取权限。跨根读取遵守每个资产所属根的权限。已证明的同源修订仅作用于其匹配范围，跨来源差异继续保留。
 
 ## 4. Python、SQL、网页与 CSV
 
@@ -120,7 +122,7 @@ Notebook：[data_archive.ipynb](notebooks/data_archive.ipynb)，包含同一快�
 
 `gaps` 列为 `code/start/end/reason`，解释包括 `not_listed`（未上市）、`after_exit`（退出后）、`suspended`（已证停牌）、`missing_bar`（交易日无行情）、`calendar_unknown`、`lifecycle_unknown`、`fields_missing`、`conflicting_bars`。不把这些情况统称“零成交”；存在多来源同日记录时保留明细、暂不画歧义 K 线。
 
-免费和付费是来源属性，存在本地文件不会自动获得许可。范围查询、SQL、网页和备份均核验读取授权；到期后能否保留使用取决于已登记许可，不自动延长期限。查询失败只展示失败原因，补数据必须单独发起更新任务。
+免费和付费是来源属性，范围查询、SQL、网页和备份均核验读取授权。付费授权可用 `read_until` 单独登记本机读取期限，获取和导入沿用原操作期限。没有独立读取日期的旧登记沿用 `acquire_until`。订阅到期后的使用权以已登记许可为准。补数据需要单独发起更新任务。
 
 ## 5. 小样本备份与恢复
 
@@ -138,7 +140,52 @@ same_bars = restored_store.read_range(restored_ref, "daily_bars", **selection,
 
 完整备份会读取所选样本的表来核验授权和原件引用，不能当成已验证的全量流式备份器。校验通过证明这份备份可重开，**同盘副本不提供设备故障保护**。备份不会放宽许可，恢复后仍按当前授权读取；运行失败留下的目录应先检查原因，不覆盖已有内容重试。
 
+### 5.1 T7 手动打包备份
+
+接入已登记的 T7，在仓库根执行。每次预览使用新的本地计划路径。示例使用仓库现有的 `quant/.venv`；若已独立安装数据模块，也可将 `backup_cli` 换成 `(.venv-data/bin/hetu-data)`。
+
+```bash
+root="$HOME/data/hetu/a-share/daily"
+repo="/Volumes/T7/data/HETU-backups/a-share-daily"
+plan="$HOME/t7-a-share-daily-$(date +%Y%m%d-%H%M%S).json"
+library="lib-d2ee48254d284873a09d0ac315ec8ccf"
+backup_cli=(env PYTHONPATH=data/src quant/.venv/bin/python -m hetu_data.cli)
+"${backup_cli[@]}" backup plan --root "$root" --repository "$repo" \
+  --library "$library" --exclude-raw-originals --output "$plan"
+```
+
+查看预览的 `libraries`、`excluded`、`recoverable_windows` 和 `logical_bytes`。核对指定库是否列入 `libraries`。`--exclude-raw-originals` 用于只获准备份标准表及恢复元数据的范围。若 `file_count` 为 0 或指定库未列入 `libraries`，停止在预览。
+
+```bash
+"${backup_cli[@]}" backup run --root "$root" --plan "$plan"
+```
+
+运行成功会返回恢复点 ID、校验和恢复命令及新增包用量。断开后接回同一卷，用同一计划重新执行 `run`，复用已经校验的包。备份后新入库的内容仍只在 Mac，下一次用新预览纳入。最近成功点见 T7 仓库的 `points/<恢复点>/report.json`，其中记录时间、可恢复库、范围和排除项。未发布的暂存目录不能恢复。
+
+```bash
+point="替换为运行结果中的恢复点ID"
+"${backup_cli[@]}" backup verify --repository "$repo" --point "$point"
+"${backup_cli[@]}" backup restore --repository "$repo" --point "$point" \
+  --destination "$HOME/data/hetu/restore-checks/a-share-daily/$point"
+```
+
+等待命令退出并完成校验，再从 Finder 安全弹出。恢复目标须为新目录，使用返回的数据根和固定库引用查询。恢复不会启用采集或例行 M，使用许可仍按原有效范围核对。累计账本按原字节保留，未获准纳入的账本原件引用仅作历史出处。
+
+恢复点 `936fd7bb934c4dd8b552ca8de333c622` 已验证库 `lib-ef149bfb7a7d4105ba18328794defae5`。T7 点目录的报告及[现行恢复交接](../specs/2026-11-07-quant-research-platform-implementation.md#6-t7打包备份与独立恢复)记录实际可恢复版本、标准表、验收例外、状态审计、复权、额度账本及独立恢复。供应商原响应继续排除，旧恢复点保留。新发布内容是否已经纳入以恢复点清单为准，新备份按当次范围登记操作权。
+
+后继库 `lib-d2ee48254d284873a09d0ac315ec8ccf` 复用同一行情资产，其新增元数据及累计账本分别存 T7 的 `supplements/lib-d2ee48254d284873a09d0ac315ec8ccf/metadata.tar.gz` 和 `accounting.tar.gz`。两包须配合上述旧点及同目录 `RECOVERY.md` 使用，不是可直接传给 `backup restore --point` 的新恢复点，也不能单独恢复行情库。完整补充恢复流程已在禁网、禁正式与旧数据根条件下核验新库、退出边界、覆盖及累计用量，证据见同目录 `combined-verification.json`。
+
 ## 6. 工程可用与数据齐备分别检查
+
+固定库版本的 `archive_requirements(..., calendar_scopes=...)` 与 `audit_library(...)` 按独立证券身份／代码有效段和适用市场日历核对。原价覆盖按已知预期对象交易日去重计数，拆为合格量价、已证无交易和未知／冲突；范围外单列。全集或市场日历未证时只给已知范围覆盖率。原价、复权辅助和研究资格分别报告，最晚合格交易日也不表示之前连续完整。已有单快照审计保留原返回合同。
+
+固定目标的精确接受例外单列在 `coverage_counts.accepted_exceptions`，仍计入应有日。`raw_price_target_accepted` 表示包含其他门禁的验收判定，事实覆盖率继续按合格原价和已证无交易计。集中收口库可用 `read_library_range(store, ref, "adjustment_factors", codes=..., start=..., end=..., columns=("code", "date", "adj_factor", "supplier_code"), archive_factors=True)` 读取档案因子观察。`supplier_code` 保留原供应商代码；跨码使用、锚点和策略资格各自判断。
+
+现行 S2 按用户批准的 Tushare 已知目录及公开补证确定的对象期间验收，独立历史全集证明不足保留为来源限制。明确的 Tushare 退市日期表示退出生效日，不含当日；已证最后交易日和原已核代码段的包含式末端保持各自含义。仅有成功空响应或不明确的日期不能自行生成退出事实。退市边界修订改变应有日分母，不记为新增行情或无交易数据，也不生成策略账户的退出处置。
+
+该规则由新固定库 `source_policy` 的锁定依据和维护合同 `maintenance` 显式启用 `tushare_delist_date_exclusive`。只消费 `product_id=ts_a_basic`、`status=D`、`source_ref` 非空且退市日期明确的目录记录；原目录中的 `out_date` 保持，查询及维护期间转换为此前的包含式末端。其他来源、未启用规则的旧库和已有 `history_records.valid_to` 不自动扣日。
+
+库备份使用 `backup_library(store, ref, destination)`，并通过 `verify_library_backup(destination)` 检查已复制的清单、标准表、原件和证据。源库按登记资产逐根核对，清单重定位到备份子根；恢复后的查询仍检查当前读取权。单快照及库备份都需独立的 `backup` 操作许可，免费产品也须在产品合同中明确允许。获准读取或订阅到期后的留存读取不能代替备份许可。
 
 工程入口可用的证据是：已有数据可筛选读取、来源可查、多入口数值一致、空结果有解释、样本备份可恢复、查询零外部请求。全历史齐备还需要按目标对象、生命周期、交易日和产品逐段核对，另由档案／研究资格流程证明。
 
@@ -161,11 +208,19 @@ same_bars = restored_store.read_range(restored_ref, "daily_bars", **selection,
 
 日历回看必须形成独立有界查询，`refresh_from`等于该查询起点；支持时实际取回新值并记录同源有界修订关系，保留旧快照。其他目录直接刷新、非有界日历刷新仍明确拒绝，不能当缓存复用成功。
 
+已获准的 Tushare 日期截面使用 `revision_lookback_days` 启用真实回看。回看以已结束的目标日及其完整交易窗口为范围，按已核代码期间写入标准表，保留供应商原件和旧快照。相同目标周期的成功段沿原批准账本复用；发生新目标日时，按实际回看合同选择待获取日期。单纯本地复核使用 `review_lookback_days`，不产生供应商修订证据。
+
+启用 `follow_calendar_and_shortfalls` 的手动合同在同一任务内先取得所需日历，再释放日期已证的截面和已有行情缺口所需的状态查询。整个任务沿用同一目标、产品与批准账本。正式入口显示覆盖未证或额度受限时保留相应日期，重开凭有效原件和累计账本接续。
+
 合约及目标可缺一域而不阻断其他已证域。覆盖按实际行／有效字段与查询证据分开核对；成功空不是未上市、停牌或无事件。自然日发布／修订保留恢复窗口内曾存续的退出对象，不漏周末；来源不能提供的旧版本继续列不可恢复。
+
+固定库覆盖页上的“数据根最近成功更新时间”来自 `last_success.json`，按北京时间展示，并标出产品。它与所选目标截止日、最晚合格原价日分别记录；打开旧库不会改变其覆盖结论。
 
 `limits`必须引用本次具体批准范围`approved_scope_ref`，以及实际获批的fetch、上游、尝试、重试等计数。不以凭据、账户积分、本地文件或0元新增费用替代授权；也不把示例数字写成供应商日限。可执行维护受逐请求计量证据和批准范围限制。已有 Tushare 及 BaoStock 的指定产品／操作有界计量证据，不外推到其他产品或未证适配，不自动切换收费源。已有免费资产和本地查询不受此执行限制替代。
 
 预览显示各域`last_success/target/covered/missing/refresh/unrecoverable`、未知／失败／成功空、模式、预计计量及额度。`last_success`是本维护窗口中的已证数据截止，不是采集时间；空值不表示全库从未成功。提交会冻结具体计划、真实模式和目标事实，进入既有JobService队列；人工启动worker后才执行。当前任务运行、停止和重开在“任务列表”查看，页面刷新／重开只读取，不增加任务。
+
+市场截面维护预览读取已登记且当前可读的证券目录，按每个交易日核定新上市及期间退出对象。截面返回中身份未证的获准代码会在维护明细中列为受限。后来取得适用目录事实时，可按现有导入权限复用已保存响应。覆盖统计按固定库选中的行情修订判断字段质量，选中的无效行情单列缺口，旧固定库仍可读取其原值。
 
 取消运行中任务先显示`cancel_requested`，等待worker在请求边界确认；不是按下按钮就已停止。重试创建新任务记录，但复用同一批准额度账本，已完成段不重复；多上游fetch取消后，已成功原件验哈希并保留原取得时点，只发送剩余上游。前次传输结果不确定则待核，不盲发。相同批准引用下改变额度会被拒绝，新的额度需新的明确批准，不能用新点击／新定义／新日期重置。
 
@@ -176,4 +231,4 @@ same_bars = restored_store.read_range(restored_ref, "daily_bars", **selection,
 - `maintenance.domains`：执行后只读复核的内容覆盖和限制；任务`succeeded`仅说明请求完成，不能替代内容／PIT／研究资格。
 - `snapshot_ids/pending/failures`：已发布片段和未完成段。失败、取消或额度耗尽不删除旧快照，已有合法读取权限的本地数据仍可查询。
 
-依然不配置常驻worker、计划任务或后台采集。取得许可到期后禁止新请求；只有登记允许留存读取的资产才能继续使用，不推定供应商永久保留权。维护软件机制已验证，未来执行仍须具备授权及预算。三期已按修订来源范围收口，档案 limited、原研究资格 blocked。
+依然不配置常驻worker、计划任务或后台采集。取得许可到期后禁止新请求；只有登记允许留存读取的资产才能继续使用，不推定供应商永久保留权。维护软件机制已验证，未来执行仍须具备授权及预算。系统完善按已批准的 Tushare 来源范围交付，独立全集证明及研究资格另列；原研究保持 blocked。
