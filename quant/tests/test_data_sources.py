@@ -690,6 +690,55 @@ def test_market_factor_day_bounds_rows_and_checks_date(tmp_path):
                                 obtained_at="2026-10-25T09:00:00+08:00")
 
 
+@pytest.mark.parametrize("case", ["complete", "wrong_day", "duplicate", "has_more", "at_row_limit"])
+def test_daily_market_slice_validates_and_bounds_source_rows(tmp_path, case):
+    from dataclasses import replace
+
+    from hetu_data.updates import plan_update
+
+    class MarketDay:
+        def __init__(self):
+            self.calls = []
+
+        def query(self, api, params, fields):
+            self.calls.append((api, params))
+            rows = [
+                ["SYNTH.SH", "20260105", 10.0, 11.0, 9.0, 10.0, 9.5, 12.0, 23.0],
+                ["EXTRA.SH", "20260105", 10.0, 11.0, 9.0, 10.0, 9.5, 12.0, 23.0],
+            ]
+            if case == "wrong_day":
+                rows[0][1] = "20260106"
+            elif case == "duplicate":
+                rows[1][0] = rows[0][0]
+            elif case == "at_row_limit":
+                rows = [[f"{i:06d}.SH", *rows[0][1:]] for i in range(6000)]
+            return json.dumps({"code": 0, "data": {
+                "fields": fields.split(","), "items": rows, "has_more": case == "has_more",
+            }}).encode()
+
+    product = "ts_a_daily_day"
+    client = MarketDay()
+    ds, _ = store(tmp_path, client, product=product, acquire_cross_section=True)
+    req = replace(request(product, end="2026-01-05"), codes=())
+    plan = plan_update(req, ds, {"products": {product: {"max_days": 1}}})
+    assert plan["counts"]["network_attempts"] == 1
+    if case == "complete":
+        ref = ds.prepare(req)
+        assert ds.prepare(req) == ref
+        rows = ds.read_table(ref, "daily_bars")
+        assert rows[["code", "close_raw", "volume_shares", "amount_cny"]].to_dict("records") == [
+            {"code": "SYNTH.SH", "close_raw": 10.0, "volume_shares": 1200.0, "amount_cny": 23000.0}
+        ]
+    else:
+        with pytest.raises(provider_module().IncompleteResponse, match={
+            "wrong_day": "outside requested day", "duplicate": "duplicate security",
+            "has_more": "has_more", "at_row_limit": "row limit",
+        }[case]):
+            ds.prepare(req)
+        assert not list((ds.root / "snapshots").glob("prep-*/manifest.json"))
+    assert client.calls == [("daily", {"trade_date": "20260105"})]
+
+
 def test_sz_calendar_validates_exchange_and_keeps_legacy_default(tmp_path):
     from dataclasses import replace
 
@@ -706,6 +755,106 @@ def test_sz_calendar_validates_exchange_and_keeps_legacy_default(tmp_path):
     with pytest.raises(ValueError, match="another exchange"):
         adapter.decode_response(invalid, api="trade_cal",
                                 params={"exchange": "SZSE", "start_date": "20260105", "end_date": "20260105"},
+                                obtained_at="2026-10-25T09:00:00+08:00")
+
+
+@pytest.mark.parametrize(("days", "state"), [
+    ([], "success_empty"),
+    (["20260105", "20260107"], "success_partial"),
+    (["20260105", "20260106", "20260107"], "success_complete"),
+])
+def test_calendar_response_preserves_only_observed_days(tmp_path, days, state):
+    from dataclasses import replace
+
+    product = "ts_trade_calendar_sz"
+    ds, adapter = store(tmp_path, product=product, markets=["SZ"])
+    original = json.dumps({"code": 0, "data": {
+        "fields": ["exchange", "cal_date", "is_open"],
+        "items": [["SZSE", day, "1"] for day in days],
+    }}).encode()
+    adapter.client.query = lambda *_: original
+    req = replace(request(product, end="2026-01-07"), codes=())
+    ref = ds.prepare(req)
+    manifest = ds.load_manifest(ref)
+    calendar = ds.read_table(ref, "calendar")
+    assert calendar.date.tolist() == [date.fromisoformat(day).isoformat() for day in days]
+    evidence = [
+        item for item in manifest["items"][0]["raw_files"]
+        if item["path"].endswith(".json")
+    ]
+    assert evidence[0]["query_observation"] == state
+    assert (ref.root / "snapshots" / ref.snapshot_id / evidence[0]["path"]).read_bytes() == original
+    assert not manifest["failures"]
+    assert bool(ds.plan(req)["segments"]) == (state != "success_complete")
+    (entry,) = [item for item in manifest["table_files"] if item["table"] == "calendar"]
+    expected_spans = {
+        "success_empty": [],
+        "success_partial": [["2026-01-05", "2026-01-05"], ["2026-01-07", "2026-01-07"]],
+        "success_complete": [["2026-01-05", "2026-01-07"]],
+    }
+    assert entry["observed_ranges"] == expected_spans[state]
+    if state != "success_complete":
+        assert not any(
+            f.get("coverage") == ["2026-01-05", "2026-01-07"]
+            for f in manifest["table_files"] if f["table"] == "calendar"
+        )
+
+
+@pytest.mark.parametrize("change", ["wrong_exchange", "bad_marker", "duplicate", "outside", "has_more"])
+def test_partial_calendar_still_rejects_invalid_content(change):
+    data = {"fields": ["exchange", "cal_date", "is_open"], "items": [["SZSE", "20260105", "1"]]}
+    if change == "wrong_exchange":
+        data["items"][0][0] = "SSE"
+    if change == "bad_marker":
+        data["items"][0][2] = "2"
+    if change == "duplicate":
+        data["items"].append(data["items"][0])
+    if change == "outside":
+        data["items"][0][1] = "20260104"
+    if change == "has_more":
+        data["has_more"] = True
+    adapter = provider_module().TushareProvider(client=object())
+    with pytest.raises(ValueError):
+        adapter.decode_response(
+            json.dumps({"code": 0, "data": data}).encode(), api="trade_cal",
+            params={"exchange": "SZSE", "start_date": "20260105", "end_date": "20260107"},
+            obtained_at="2026-10-25T09:00:00+08:00",
+        )
+
+
+@pytest.mark.parametrize(("failure", "state"), [
+    ("network", "transport_error"),
+    ("provider", "provider_error"),
+    ("marker", "invalid_content"),
+])
+def test_calendar_usage_separates_provider_errors_from_bad_content(failure, state):
+    class Calendar:
+        def query(self, *_):
+            if failure == "network":
+                raise ConnectionError("synthetic connection failure")
+            if failure == "provider":
+                return b'{"code":-1,"msg":"synthetic error"}'
+            return b'{"code":0,"data":{"fields":["cal_date","is_open"],"items":[["20260105","bad"]]}}'
+
+    attempts = []
+    adapter = provider_module().TushareProvider(client=Calendar(), on_usage=attempts.append)
+    with pytest.raises((ConnectionError, ValueError)):
+        adapter.fetch("ts_trade_calendar", (), date(2026, 1, 5), date(2026, 1, 6))
+    (record,) = attempts
+    assert record["failed"] and record["query_observation"] == state
+
+
+@pytest.mark.parametrize(("day", "kind", "error"), [
+    ("20260104", "S", "outside requested period"),
+    ("20260105", "X", "unrecognized suspension event type"),
+])
+def test_per_code_suspension_response_enforces_date_and_type(day, kind, error):
+    adapter = provider_module().TushareProvider()
+    packet = dict(code=0, data=dict(fields=["ts_code", "trade_date", "suspend_timing", "suspend_type"],
+                                  items=[["SYNTH.SH", day, None, kind]]))
+    params = {"ts_code": "SYNTH.SH", "start_date": "20260105", "end_date": "20260106"}
+    with pytest.raises(ValueError, match=error):
+        adapter.decode_response(json.dumps(packet).encode(), api="suspend_d", params=params,
                                 obtained_at="2026-10-25T09:00:00+08:00")
 
 

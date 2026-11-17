@@ -283,7 +283,7 @@ def test_zero_seat_result_page_and_export(tmp_path, monkeypatch):
     assert "（无入选板块）" in _text(app), "零席位两榜如实显示为空"
     app.button(key="export_result").click().run()
     assert not app.exception
-    payload, name = app.session_state["export_payload"]
+    _, payload, name = app.session_state["export_payload"]
     assert name.endswith(".zip")
     archive = zipfile.ZipFile(io.BytesIO(payload))
     names = set(archive.namelist())
@@ -371,7 +371,7 @@ def test_export_reads_existing_result(tmp_path, monkeypatch):
     app.selectbox(key="result_select").set_value(result.result_id).run()
     app.button(key="export_result").click().run()
     assert not app.exception
-    payload, name = app.session_state["export_payload"]
+    _, payload, name = app.session_state["export_payload"]
     assert name.endswith(".zip")
     assert app.download_button(key="download_zip").label == "下载 ZIP"
     archive = zipfile.ZipFile(io.BytesIO(payload))
@@ -411,3 +411,50 @@ def test_notebook_reads_same_result(tmp_path, monkeypatch):
     assert namespace["zip_path"].exists()
     archive = zipfile.ZipFile(namespace["zip_path"])
     assert "slots.csv" in archive.namelist()
+
+
+def test_result_export_is_bound_to_selection(tmp_path, monkeypatch):
+    root, first = _seed_zero_seat_root(tmp_path)
+    # Preserve the second published artifact's own identifier.
+    import shutil
+
+    first_dir = root / "results" / first.result_id
+    second_id = "res-synthetic-second"
+    second_dir = root / "results" / second_id
+    shutil.copytree(first_dir, second_dir)
+    manifest_path = second_dir / "result.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["result_id"] = second_id
+    manifest["limitations"] = ["synthetic second result limitation"]
+    manifest_path.write_text(json.dumps(manifest))
+    monkeypatch.setenv("HETU_QUANT_ROOT", str(root))
+    app = AppTest.from_file(str(APP_PATH)).run()
+    app.sidebar.radio[0].set_value("结果与导出").run()
+    app.selectbox(key="result_select").set_value(first.result_id).run()
+    app.button(key="export_result").click().run()
+    assert "export_payload" in app.session_state
+    app.selectbox(key="result_select").set_value(second_id).run()
+    assert "export_payload" not in app.session_state
+    app.button(key="export_result").click().run()
+    selected, payload, _ = app.session_state["export_payload"]
+    assert selected == second_id
+    archive = zipfile.ZipFile(io.BytesIO(payload))
+    assert json.loads(archive.read("limitations.json")) == ["synthetic second result limitation"]
+    assert _jobs(root) == []
+
+
+def test_formal_data_root_is_separate_from_the_research_root(tmp_path, monkeypatch):
+    research, _ = _seed_root(tmp_path / "research")
+    formal = tmp_path / "formal"
+    formal.mkdir()
+    (formal / "last_success.json").write_text(json.dumps({"cn_a_daily": "2026-11-05T15:00:00+08:00"}))
+    monkeypatch.setenv("HETU_QUANT_ROOT", str(research))
+    monkeypatch.setenv("HETU_DATA_ROOT", str(formal))
+
+    app = AppTest.from_file(str(APP_PATH)).run()
+    app.sidebar.radio[0].set_value("数据").run()
+    assert not app.exception
+    assert any("2026-11-05T15:00:00+08:00" in str(item.value) for item in app.markdown)
+    assert any(str(formal) in str(item.value) for item in app.caption)
+    assert _jobs(research) == []
+    assert not (formal / "catalog.sqlite").exists()

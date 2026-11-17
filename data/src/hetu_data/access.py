@@ -12,12 +12,15 @@ class AccessDenied(PermissionError):
 def check_product_access(
     mode: str, product: Mapping[str, object], grant: Mapping[str, object] | None, *, operation: str
 ) -> None:
-    if mode not in {"free", "paid"} or operation not in {"acquire", "import", "read"}:
+    if mode not in {"free", "paid"} or operation not in {"acquire", "import", "read", "backup"}:
         raise AccessDenied("unknown mode or operation")
     fee = product.get("fee_class")
     if fee == "free":
-        if (product.get("permission") or {}).get("status") not in {"verified_free", "declared_free"}:
+        permission = product.get("permission") or {}
+        if permission.get("status") not in {"verified_free", "declared_free"}:
             raise AccessDenied("free permission not established")
+        if operation == "backup" and operation not in permission.get("allowed_operations", ()):
+            raise AccessDenied("backup permission missing")
         return
     if fee != "paid" or mode != "paid":
         raise AccessDenied("paid product is not allowed in free mode or fee_class is unknown")
@@ -30,7 +33,11 @@ def check_product_access(
     ):
         raise AccessDenied("product or operation grant missing")
     until = grant.get("acquire_until")
-    if operation == "read" and grant.get("retained_use") is True:
-        return
+    if operation == "backup":
+        until = grant.get("backup_until", until)
+    if operation == "read":
+        if grant.get("retained_use") is True:
+            return
+        until = grant.get("read_until", until)
     if not until or datetime.now(ZoneInfo("Asia/Shanghai")).date() > date.fromisoformat(str(until)):
         raise AccessDenied("current-use permission ended or validity unknown; retained use is not established")

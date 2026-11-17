@@ -9,7 +9,8 @@ description = "Portable Agent Skill helpers for evidence-based A-share stock ana
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "pydantic>=2.13,<3",
-  "typer>=0.26,<1",
+  # Typer 0.29 requires Pydantic during CLI parsing, breaking helper dependency isolation.
+  "typer>=0.26,<0.29",
   "pyyaml>=6.0,<7",
   "markdown-it-py>=4.0,<5",
   "pypdf>=6.16,<7",

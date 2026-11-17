@@ -79,9 +79,12 @@ def test_phase2_formal_web_real_engine_same_artifact_flow(tmp_path, monkeypatch)
         raise AssertionError('formal flow must remain offline/free')
     monkeypatch.setattr('hetu_quant.providers.akshare.AKShareProvider.fetch', forbidden)
     monkeypatch.setattr('hetu_quant.providers.baostock.BaoStockProvider.fetch', forbidden)
+    from hetu_quant.ui import backtest_page
+
+    monkeypatch.setattr(backtest_page, "_formal_payload", lambda _path: payload)
     app = AppTest.from_file(str(APP)).run()
     app.sidebar.radio[0].set_value('回测').run()
-    app.text_area(key='bt_protocol').set_value(json.dumps(payload)).run()
+    assert not app.text_area
     app.date_input(key='bt_start').set_value(definition.start).run()
     app.date_input(key='bt_end').set_value(pd.Timestamp(payload['definition']['end']).date()).run()
     app.text_input(key='bt_as_of').set_value(payload['definition']['as_of']).run()

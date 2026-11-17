@@ -8,7 +8,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from hetu_data.models import SnapshotRef, data_request_from_dict
+from hetu_data.library import list_libraries, query_library
+from hetu_data.models import LibraryRef, SnapshotRef, data_request_from_dict
 from hetu_data.store import DataStore
 from hetu_data.updates import plan_update
 
@@ -23,20 +24,45 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--output", type=Path, required=True)
     plan.add_argument("--request", type=Path, required=True)
     plan.add_argument("--contracts", type=Path, required=True)
-    query.add_argument("--snapshot", required=True)
+    source = query.add_mutually_exclusive_group(required=True)
+    source.add_argument("--snapshot")
+    source.add_argument("--library")
     query.add_argument("--codes", required=True)
     query.add_argument("--start", type=date.fromisoformat, required=True)
     query.add_argument("--end", type=date.fromisoformat, required=True)
     query.add_argument("--columns", required=True)
+    query.add_argument("--markets", default="")
+    query.add_argument("--predicates", type=json.loads, default=[])
+    libraries = commands.add_parser("libraries")
+    libraries.add_argument("--root", type=Path, required=True)
     worker = commands.add_parser("worker")
     worker.add_argument("--root", type=Path, required=True)
-    worker.add_argument("--once", action="store_true")
+    worker_mode = worker.add_mutually_exclusive_group()
+    worker_mode.add_argument("--once", action="store_true")
+    worker_mode.add_argument("--job-id")
     web = commands.add_parser("web")
     web.add_argument("--root", type=Path, required=True)
     submit = commands.add_parser("submit")
     submit.add_argument("--root", type=Path, required=True)
     submit.add_argument("--plan", type=Path, required=True)
     submit.add_argument("--submission-id", required=True)
+    backup = commands.add_parser("backup").add_subparsers(dest="backup_command", required=True)
+    for action in ("plan", "run", "verify", "restore"):
+        step = backup.add_parser(action)
+        if action in {"plan", "run"}:
+            step.add_argument("--root", type=Path, required=True)
+        if action != "run":
+            step.add_argument("--repository", type=Path, required=True)
+        if action in {"verify", "restore"}:
+            step.add_argument("--point", required=True)
+        if action == "restore":
+            step.add_argument("--destination", type=Path, required=True)
+        elif action == "run":
+            step.add_argument("--plan", type=Path, required=True)
+        elif action == "plan":
+            step.add_argument("--output", type=Path, required=True)
+            step.add_argument("--library")
+            step.add_argument("--exclude-raw-originals", action="store_true")
     args = parser.parse_args(argv)
     if args.command == "web":
         try:
@@ -53,8 +79,27 @@ def main(argv: list[str] | None = None) -> int:
             sys.argv = previous
     if args.command == "worker":
         from hetu_data.worker import main as worker_main
-        return worker_main(["--root", str(args.root)] + (["--once"] if args.once else []))
+
+        selected = ["--job-id", args.job_id] if args.job_id else ["--once"] if args.once else []
+        return worker_main(["--root", str(args.root), *selected])
     try:
+        if args.command == "backup":
+            from hetu_data import packed_backup
+
+            if args.backup_command == "verify":
+                result = packed_backup.verify_packed_backup(args.repository, args.point)
+            elif args.backup_command == "restore":
+                result = packed_backup.restore_packed_backup(args.repository, args.point, args.destination)
+            elif args.backup_command == "plan":
+                path = packed_backup.plan_packed_backup(
+                    DataStore(args.root), args.repository, output=args.output, library_id=args.library,
+                    exclude_raw_originals=args.exclude_raw_originals,
+                )
+                result = {"plan": str(path)}
+            else:
+                result = packed_backup.execute_packed_backup(DataStore(args.root), args.plan)
+            print(json.dumps(result, ensure_ascii=False))
+            return 0
         store = DataStore(args.root)
         if args.command == "submit":
             from hetu_data.catalog import DataTaskStore
@@ -65,7 +110,19 @@ def main(argv: list[str] | None = None) -> int:
             request = data_request_from_dict(json.loads(args.request.read_text()))
             result = plan_update(request, store, json.loads(args.contracts.read_text()))
             args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n")
+        elif args.command == "libraries":
+            print(json.dumps(list_libraries(store), ensure_ascii=False))
+        elif args.library:
+            result = query_library(
+                store, LibraryRef(args.library, args.root),
+                codes=tuple(args.codes.split(",")), markets=tuple(args.markets.split(",")) if args.markets else (),
+                start=args.start, end=args.end, columns=tuple(args.columns.split(",")),
+                predicates=tuple(args.predicates),
+            )
+            result["bars"].to_csv(args.output, index=False)
         else:
+            if args.markets or args.predicates:
+                raise ValueError("--markets and --predicates require --library")
             frame = store.read_range(
                 SnapshotRef(args.snapshot, args.root),
                 "daily_bars",

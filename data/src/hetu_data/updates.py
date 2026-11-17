@@ -5,12 +5,13 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import os
 import time
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from hetu_data.locking import worker_lock
 from hetu_data.models import data_request_from_dict, data_request_to_dict
@@ -25,8 +26,96 @@ METERS = (
     "rows",
     "quota_bytes",
     "data_fee_cny",
+    "authorized_resends",
 )
 
+
+_DAILY_METERS = frozenset(METERS[:6])
+
+
+class _QuotaLimit(PermissionError):
+    def __init__(self, reason, meter, *, resume_after=None):
+        super().__init__(f"{meter}: {reason} reached")
+        self.reason = reason
+        self.resume_after = resume_after
+
+
+def _quota_now(zone):
+    return datetime.now(zone)
+
+
+class _DailyQuota:
+    def __init__(self, root, ledger, limits, events):
+        self.limits = limits.get("daily_limits", {})
+        self.scope = limits.get("quota_scope_ref")
+        self.zone = ZoneInfo(limits["quota_timezone"] if self.limits else "Asia/Shanghai")
+        self.days = {}
+        self.last_wire_at = None
+        if not self.limits:
+            return
+        root = Path(root) / "updates" / "approved-usage"
+        recorded = [events]
+        recorded.extend(
+            _read_events(path)
+            for path in root.glob("*/usage.jsonl")
+            if path.resolve() != ledger.resolve()
+        )
+        for batch in recorded:
+            approval = next((e["limits"] for e in batch if e["type"] == "approval_limits"), None)
+            if not approval or approval.get("quota_scope_ref") != self.scope:
+                continue
+            if any(approval.get(k) != limits[k] for k in ("daily_limits", "quota_timezone")):
+                raise PermissionError("inconsistent daily quota contract for the same account scope")
+            for event in batch:
+                deltas = event.get("usage")
+                if not deltas:
+                    continue
+                stamp = datetime.fromisoformat(event["at"]) if event.get("at") else None
+                if stamp is None or stamp.utcoffset() is None:
+                    raise PermissionError("usage date unknown for the shared quota scope")
+                day = stamp.astimezone(self.zone).date()
+                if event.get("quota_date", day.isoformat()) != day.isoformat() or event.get(
+                    "quota_timezone", self.zone.key
+                ) != self.zone.key:
+                    raise PermissionError("usage date conflicts with the shared quota scope")
+                self.add(day, deltas)
+                if (deltas.get("network_attempts", 0) or 0) > 0 and (
+                    self.last_wire_at is None or stamp > self.last_wire_at
+                ):
+                    self.last_wire_at = stamp
+
+    def add(self, day, increments):
+        usage = self.days.setdefault(day, dict.fromkeys(_DAILY_METERS, 0))
+        for name, increment in increments.items():
+            if name in usage and increment is not None:
+                usage[name] += increment
+
+    def check(self, day, increments):
+        usage = self.days.get(day, {})
+        for name, increment in increments.items():
+            if increment is not None and name in self.limits and usage.get(name, 0) + increment > self.limits[name]:
+                tomorrow = datetime.combine(day + timedelta(days=1), datetime.min.time(), tzinfo=self.zone)
+                raise _QuotaLimit("daily_limit", name, resume_after=tomorrow.isoformat())
+
+    def report(self):
+        if not self.limits:
+            return None
+        day = _quota_now(self.zone).date()
+        return dict(
+            date=day.isoformat(),
+            timezone=self.zone.key,
+            quota_scope_ref=self.scope,
+            usage=dict(self.days.get(day, dict.fromkeys(_DAILY_METERS, 0))),
+        )
+
+
+def _read_events(ledger):
+    return [json.loads(line) for line in ledger.read_text().splitlines()] if ledger.exists() else []
+
+
+def _data_fee(contracts):
+    # Only an explicit no-additional-fee contract can be aggregated without pricing assumptions.
+    return 0 if type(contracts.get("new_data_fee_cny")) in (int, float) and contracts["new_data_fee_cny"] == 0 else None
 
 def plan_update(request, store, contracts, *, audited_segments=None):
     if audited_segments is None:
@@ -48,6 +137,7 @@ def plan_update(request, store, contracts, *, audited_segments=None):
     segments, unresolved = [], []
     counts = dict.fromkeys(METERS, 0)
     counts["quota_bytes"] = None
+    counts["data_fee_cny"] = _data_fee(contracts)
     for segment in base["segments"]:
         pid = segment["product_id"]
         if "local_cross_section_codes" in segment:
@@ -89,6 +179,8 @@ def plan_update(request, store, contracts, *, audited_segments=None):
         segments=segments,
         reused_coverage=base["reused_coverage"],
         counts=counts,
+        new_data_fee_cny=counts["data_fee_cny"],
+        library_ref=copy.deepcopy(contracts.get("library_ref")),
         limits=dict(contracts.get("limits", {})),
         unresolved=unresolved,
         planning_basis="audited_missing_rows" if audited_segments is not None else "store_query_coverage",
@@ -97,18 +189,32 @@ def plan_update(request, store, contracts, *, audited_segments=None):
 
 
 def _write(ledger, event):
+    record = {"at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(), **event}
     with ledger.open("a") as stream:
-        stream.write(
-            json.dumps({"at": datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(), **event}, ensure_ascii=False) + "\n"
-        )
+        stream.write(json.dumps(record, ensure_ascii=False) + "\n")
         stream.flush()
         os.fsync(stream.fileno())
+    return record
+
+
+def _segment_identity(segment):
+    identity = {key: segment[key] for key in ("product_id", "codes", "start", "end", "refresh")}
+    identity.update({key: segment[key] for key in ("local_cross_section_codes", "revision_target") if key in segment})
+    return identity
 
 
 def validate_update_plan(plan):
     if not isinstance(plan, dict):
         raise TypeError("maintenance requires a concrete update plan")
     request = data_request_from_dict(plan["request"])
+    identities = [_segment_identity(segment) for segment in plan["segments"]]
+    resends = plan.get("authorized_resends", [])
+    if not isinstance(resends, list) or any(
+        not isinstance(item, dict) or set(item) != {"segment", "failed_at"}
+        or item["segment"] not in identities or not isinstance(item["failed_at"], str) or not item["failed_at"]
+        for item in resends
+    ):
+        raise ValueError("explicit resend must name a frozen segment and its previous failure")
     for segment in plan["segments"]:
         pid = segment["product_id"]
         if (
@@ -117,24 +223,64 @@ def validate_update_plan(plan):
             or not request.start.isoformat() <= segment["start"] <= segment["end"] <= request.end.isoformat()
         ):
             raise ValueError("update segment outside frozen request")
+        if "revision_target" in segment and (
+            not segment["refresh"] or segment["start"] != segment["end"] or segment["codes"]
+            or segment["end"] > segment["revision_target"] or segment["revision_target"] != plan.get("target")
+        ):
+            raise ValueError("market-day revision must bind a single eligible day to its frozen target")
+        if "market_day_codes" in segment and (
+            segment["start"] != segment["end"] or segment["codes"]
+            or not isinstance(segment["market_day_codes"], list)
+            or any(not isinstance(code, str) or not code for code in segment["market_day_codes"])
+        ):
+            raise ValueError("invalid frozen market-day object scope")
     for name, amount in plan.get("limits", {}).items():
-        if name in METERS and (not isinstance(amount, (int, float)) or amount < 0):
+        if name in METERS and (type(amount) not in (int, float) or not math.isfinite(amount) or amount < 0):
             raise ValueError("update limit must be a nonnegative known amount")
         if name == "requests_per_minute" and (type(amount) is not int or not 1 <= amount <= 500):
             raise ValueError("approved requests_per_minute must be an integer from 1 to 500")
+    limits = plan.get("limits", {})
+    for name, amount in plan.get("requested_budget", {}).items():
+        if (
+            name not in METERS or type(amount) not in (int, float) or not math.isfinite(amount)
+            or amount < 0 or amount != limits.get(name)
+        ):
+            raise PermissionError(f"申请额度与当前批准额度不一致（{name}）")
+    if "daily_limits" in limits:
+        daily = limits["daily_limits"]
+        scope = limits.get("quota_scope_ref")
+        if not isinstance(daily, dict) or not daily or not isinstance(scope, str) or not scope.strip():
+            raise ValueError("daily limits require a nonempty quota scope and daily meters")
+        if any(
+            name not in _DAILY_METERS or type(amount) not in (int, float) or not math.isfinite(amount) or amount < 0
+            for name, amount in daily.items()
+        ):
+            raise ValueError("daily limit must reserve a supported meter with a nonnegative known amount")
+        try:
+            ZoneInfo(limits["quota_timezone"])
+        except (KeyError, TypeError, ValueError, ZoneInfoNotFoundError) as error:
+            raise ValueError("daily limits require a known quota timezone") from error
+    library_ref = plan.get("library_ref")
+    if library_ref is not None and (
+        not isinstance(library_ref, dict) or set(library_ref) != {"library_id", "root"}
+        or not all(isinstance(value, str) and value.strip() for value in library_ref.values())
+    ):
+        raise ValueError("invalid frozen library reference")
 
 
-def execute_update(plan, store, ledger: Path, *, cancelled, progress):
-    with worker_lock(store.root, reentrant=True):
+def execute_update(plan, store, ledger: Path, *, cancelled, progress, quota_root=None):
+    quota_root = Path(quota_root) if quota_root is not None else store.root
+    with worker_lock(quota_root, reentrant=True), worker_lock(store.root, reentrant=True):
         validate_update_plan(plan)
         if plan["unresolved"] or not plan.get("limits", {}).get("approved_scope_ref"):
             raise ValueError("unresolved contract or missing scope approval")
         ledger = Path(ledger)
         ledger.parent.mkdir(parents=True, exist_ok=True)
-        events = [json.loads(x) for x in ledger.read_text().splitlines()] if ledger.exists() else []
+        events = _read_events(ledger)
         recorded_limits = [e["limits"] for e in events if e["type"] == "approval_limits"]
         if recorded_limits and recorded_limits[0] != plan["limits"]:
             raise PermissionError("approved ledger limits changed; a new explicit approval is required")
+        quota = _DailyQuota(quota_root, ledger, plan["limits"], events)
         if not recorded_limits:
             _write(ledger, dict(type="approval_limits", limits=plan["limits"]))
         usage = dict.fromkeys(METERS, 0)
@@ -147,62 +293,95 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
         completed = [e["segment"] for e in events if e["type"] == "completed"]
         snapshots = [e["snapshot_id"] for e in events if e["type"] == "completed"]
         failures, pending = [], []
+        stop_reason = resume_after = None
+        last_success_at = next((e.get("at") for e in reversed(events) if e["type"] == "completed"), None)
         original_request = data_request_from_dict(plan["request"])
         limits = plan["limits"]
         interval = 60 / limits["requests_per_minute"] if "requests_per_minute" in limits else 2.05
         previous_call = None
         prior_wires = [e for e in events if e.get("usage", {}).get("network_attempts", 0) > 0 and e.get("at")]
-        if prior_wires:
+        last_wire = quota.last_wire_at
+        if prior_wires and last_wire is None:
+            last_wire = datetime.fromisoformat(prior_wires[-1]["at"])
+        if last_wire is not None:
             elapsed = max(
                 0,
-                (
-                    datetime.now(ZoneInfo("Asia/Shanghai")) - datetime.fromisoformat(prior_wires[-1]["at"])
-                ).total_seconds(),
+                (_quota_now(quota.zone) - last_wire).total_seconds(),
             )
             previous_call = time.monotonic() - elapsed
         for segment in plan["segments"]:
             # 语义描述用于断点定位，不用批次/哈希/as_of判断既有结果过期。
-            identity = {k: segment[k] for k in ("product_id", "codes", "start", "end", "refresh")}
+            identity = _segment_identity(segment)
             local_scope = segment.get("local_cross_section_codes")
-            if local_scope is not None:
-                identity["local_cross_section_codes"] = local_scope
             if identity in completed:
+                continue
+            if stop_reason in {"daily_limit", "batch_limit", "cancelled"}:
+                pending.append({**identity, "reason": stop_reason})
                 continue
             if failures and limits.get("stop_on_failure"):
                 pending.append({**identity, "reason": "earlier segment failed"})
                 continue
             if cancelled():
-                pending.append(identity)
+                stop_reason = stop_reason or "cancelled"
+                pending.append({**identity, "reason": "cancelled"})
                 continue
             starts = sum(e["type"] == "started" and e["segment"] == identity for e in events)
-            ends = sum(e["type"] in ("failed", "completed") and e["segment"] == identity for e in events)
+            ends = sum(
+                e["type"] in ("failed", "completed", "quota_paused") and e["segment"] == identity for e in events
+            )
             saved_responses = [
                 e["response"] for e in events
                 if e["type"] == "response" and e.get("segment") == identity
                 and e["response"].get("failed") is False and e["response"].get("raw_ref")
             ]
+            product = store.product(segment["product_id"])
             # 此接口每段只有一次产品请求。已落盘的原件可完成本地发布，
             # 即使上次退出时还没写结束事件。校验失败也不允许改走网络。
-            resume_empty = (
+            resume_offline = (
                 segment["product_id"] == "cn_a_status" and len(saved_responses) == 1
                 and saved_responses[0].get("api") == "query_history_k_data_plus"
                 and saved_responses[0].get("rows") == 0
             )
-            if starts > ends and not resume_empty:
+            if (product.get("provider") == "tushare" and product.get("cross_section") == "trade_day"
+                    and len(saved_responses) == 1):
+                from hetu_data.providers.tushare import calls_for
+
+                saved = saved_responses[0]
+                resume_offline = [(saved.get("api"), saved.get("params"))] == calls_for(
+                    segment["product_id"], tuple(segment["codes"]),
+                    date.fromisoformat(segment["start"]), date.fromisoformat(segment["end"]),
+                )
+            if starts > ends and not resume_offline:
+                stop_reason = stop_reason or "uncertain"
                 pending.append({**identity, "reason": "previous attempt uncertain; no automatic repeat"})
                 continue
-            failures_before = [e for e in events if e["type"] == "failed" and e["segment"] == identity]
-            had_upstream_attempt = any(
-                e.get("usage", {}).get("network_attempts", 0) > 0 for e in events if e.get("segment") == identity
+            segment_events = [e for e in events if e.get("segment") == identity]
+            last_failure = next(
+                (index for index in reversed(range(len(segment_events))) if segment_events[index]["type"] == "failed"),
+                None,
             )
-            resume_retry = bool(failures_before and had_upstream_attempt and not resume_empty)
+            had_upstream_attempt = any(e.get("usage", {}).get("network_attempts", 0) > 0 for e in segment_events)
+            resume_retry = last_failure is not None and had_upstream_attempt and not resume_offline and not any(
+                e.get("usage", {}).get("retries", 0) > 0 for e in segment_events[last_failure + 1 :]
+            )
+            resend_failure_at = None
             if resume_retry:
-                kind = failures_before[-1]["failure"]["error_type"]
+                failed_event = segment_events[last_failure]
+                failure = failed_event["failure"]
+                kind = failure["error_type"]
                 recoverable = kind in {"ConnectionError", "TimeoutError", "OSError"} or (
-                    kind == "InterruptedError"
-                    and failures_before[-1]["failure"].get("cancelled_before_request") is True
+                    kind == "InterruptedError" and failure.get("cancelled_before_request") is True
                 )
-                if not recoverable or usage["retries"] >= limits.get("retries", 0):
+                failed_at = failed_event.get("at")
+                authorized_resend = (
+                    recoverable and {"segment": identity, "failed_at": failed_at} in plan.get("authorized_resends", [])
+                    and not any(e.get("authorized_failure_at") == failed_at for e in segment_events)
+                )
+                if authorized_resend:
+                    resend_failure_at = failed_at
+                    resume_retry = False
+                elif not recoverable or usage["retries"] >= limits.get("retries", 0):
+                    stop_reason = stop_reason or "failure"
                     pending.append({**identity, "reason": "failed segment retry not authorized or not recoverable"})
                     continue
             req = replace(
@@ -213,6 +392,7 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 start=date.fromisoformat(segment["start"]),
                 end=date.fromisoformat(segment["end"]),
                 refresh_from=date.fromisoformat(segment["start"]) if segment["refresh"] else None,
+                market_day_codes=tuple(segment["market_day_codes"]) if "market_day_codes" in segment else None,
             )
             _write(ledger, {"type": "started", "segment": identity})
             adapter = store._provider(store.product(segment["product_id"])["provider"])
@@ -226,32 +406,50 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
             old_usage = getattr(adapter, "on_usage", None)
             old_resume = getattr(adapter, "resume_responses", [])
             cancelled_before_wire = False
+            blocked = None
+            pending_fetch = False
 
-            def reserve(increments, identity=identity):
-                for name, increment in increments.items():
-                    if increment is None or usage.get(name) is None:
-                        continue
-                    if name in limits and usage[name] + increment > limits[name]:
-                        raise PermissionError(f"{name}: approved limit reached")
+            def reserve(increments, identity=identity, resend_failure_at=resend_failure_at):
+                nonlocal blocked
+                now = _quota_now(quota.zone)
+                day = now.date()
+                try:
+                    for name, increment in increments.items():
+                        if name in limits and increment is not None and usage.get(name) is not None:
+                            if usage[name] + increment > limits[name]:
+                                raise _QuotaLimit("batch_limit", name)
+                    quota.check(day, increments)
+                except _QuotaLimit as error:
+                    blocked = error
+                    raise
+                event = dict(type="usage", segment=identity, usage=increments, at=now.isoformat())
+                if increments.get("authorized_resends"):
+                    event["authorized_failure_at"] = resend_failure_at
+                if quota.limits:
+                    event.update(quota_date=day.isoformat(), quota_timezone=quota.zone.key)
+                _write(ledger, event)
+                if quota.limits:
+                    quota.add(day, increments)
                 for name, increment in increments.items():
                     if increment is not None and usage.get(name) is not None:
                         usage[name] += increment
-                _write(ledger, {"type": "usage", "segment": identity, "usage": increments})
                 progress(
                     dict(
                         completed=len(completed),
                         segments=len(plan["segments"]),
                         actual_usage=dict(usage),
+                        daily_usage=quota.report(),
                         incremental_usage={
                             k: usage[k] - initial_usage[k] if usage[k] is not None else None for k in METERS
                         },
                     )
                 )
 
-            def before(event, old_before=old_before, reserve=reserve, resume_empty=resume_empty):
-                nonlocal previous_call, cancelled_before_wire
-                if resume_empty:
-                    raise PermissionError("saved empty response must recover without upstream requests")
+            def before(event, old_before=old_before, reserve=reserve, resume_offline=resume_offline,
+                       resume_retry=resume_retry, resend_failure_at=resend_failure_at):
+                nonlocal previous_call, cancelled_before_wire, pending_fetch
+                if resume_offline:
+                    raise PermissionError("saved response must recover without upstream requests")
                 if cancelled():
                     cancelled_before_wire = True
                     raise InterruptedError("cancelled before upstream request")
@@ -264,7 +462,13 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 if cancelled():
                     cancelled_before_wire = True
                     raise InterruptedError("cancelled during throttle wait")
+                if pending_fetch:
+                    increments["provider_fetch"] = 1
+                    increments["retries"] += int(resume_retry)
+                    if resend_failure_at:
+                        increments["authorized_resends"] = 1
                 reserve(increments)
+                pending_fetch = False
                 previous_call = time.monotonic()
                 if old_before:
                     old_before(event)
@@ -289,10 +493,9 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
             adapter.before_request, adapter.on_usage = before, on_usage
             segment_failure_type = None
             try:
-                product = store.product(segment["product_id"])
                 if local_scope is not None and (
                     product.get("provider") != "tushare" or not product.get("cross_section")
-                    or segment["refresh"] or store._cross_section_codes(segment["product_id"]) != local_scope
+                    or segment["refresh"] or store._market_day_scope(segment["product_id"], req) != local_scope
                 ):
                     raise PermissionError("local cross-section scope differs from the frozen plan")
                 if hasattr(adapter, "resume_responses"):
@@ -317,36 +520,58 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                     raise PermissionError("per-request upstream metering is not established for this provider")
                 if "quota_bytes" in limits:
                     raise PermissionError("source byte-quota unit cannot be reserved before this request")
-                if not resume_empty and local_scope is None and any(
+                if not resume_offline and local_scope is None and any(
                     "local_cross_section_codes" not in s for s in store.plan(req)["segments"]
                 ):
-                    if resume_retry:
-                        reserve({"retries": 1})
-                    reserve({"provider_fetch": 1})
+                    if quota.limits:
+                        # A blocked send does not use a new fetch/retry allocation.
+                        pending_fetch = True
+                    else:
+                        if resume_retry:
+                            reserve({"retries": 1})
+                        if resend_failure_at:
+                            reserve({"authorized_resends": 1})
+                        reserve({"provider_fetch": 1})
                 ref = store.prepare(req, allow_acquire=False) if local_scope is not None else store.prepare(req)
+                if blocked:
+                    raise blocked
                 manifest = store.load_manifest(ref)
-                proved_empty_status = any(
-                    raw.get("query_observation") == "success_empty"
+                observations = {
+                    raw["query_observation"]
                     for item in manifest["items"] if item["product_id"] == segment["product_id"]
                     for raw in item["raw_files"]
-                )
+                    if raw.get("query_observation")
+                }
+                proved_empty_status = "success_empty" in observations
                 if manifest.get("failures") or (manifest.get("gaps") and not proved_empty_status):
                     own_failures = [
                         f for f in manifest.get("failures", []) if f.get("product_id") == segment["product_id"]
                     ]
                     if own_failures:
-                        segment_failure_type = own_failures[0].get("error", "").partition(":")[0]
+                        segment_failure_type, _, detail = own_failures[0].get("error", "").partition(":")
+                        if detail.strip():
+                            raise RuntimeError(detail.strip())
                     raise RuntimeError("segment remains failed or incomplete; no completed coverage")
                 completed.append(identity)
                 snapshots.append(ref.snapshot_id)
                 done = {"type": "completed", "segment": identity, "snapshot_id": ref.snapshot_id}
-                if proved_empty_status:
-                    done["query_observation"] = "success_empty"
-                _write(ledger, done)
+                if len(observations) == 1:
+                    done["query_observation"], = observations
+                last_success_at = _write(ledger, {**done, "at": _quota_now(quota.zone).isoformat()})["at"]
                 progress(
                     {"completed": len(completed), "segments": len(plan["segments"]), "snapshot_id": ref.snapshot_id}
                 )
             except Exception as error:
+                if blocked:
+                    stop_reason, resume_after = blocked.reason, blocked.resume_after
+                    if stop_reason == "daily_limit":
+                        pending.append({**identity, "reason": stop_reason})
+                        _write(ledger, dict(type="quota_paused", segment=identity, reason=stop_reason))
+                        continue
+                elif cancelled_before_wire:
+                    stop_reason = stop_reason or "cancelled"
+                else:
+                    stop_reason = stop_reason or "failure"
                 failure = {
                     **identity,
                     "error_type": segment_failure_type or type(error).__name__,
@@ -355,11 +580,16 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
                 }
                 failures.append(failure)
                 pending.append(identity)
-                _write(ledger, {"type": "failed", "segment": identity, "failure": failure})
+                if blocked:
+                    _write(ledger, dict(type="quota_paused", segment=identity, reason=stop_reason))
+                else:
+                    _write(ledger, {"type": "failed", "segment": identity, "failure": failure})
             finally:
                 adapter.before_request, adapter.on_usage = old_before, old_usage
                 if hasattr(adapter, "resume_responses"):
                     adapter.resume_responses = old_resume
+        if stop_reason is None and cancelled():
+            stop_reason = "cancelled"
         incremental = {key: usage[key] - initial_usage[key] if usage[key] is not None else None for key in METERS}
         return dict(
             snapshot_ids=snapshots,
@@ -368,22 +598,293 @@ def execute_update(plan, store, ledger: Path, *, cancelled, progress):
             failures=failures,
             actual_usage=usage,
             incremental_usage=incremental,
+            daily_usage=quota.report(),
+            stop_reason=stop_reason,
+            resume_after=resume_after,
+            last_success_at=last_success_at,
+            library_ref=copy.deepcopy(plan.get("library_ref")),
         )
 
 
-def maintenance_plan(store, target_date, products, *, mode, contracts):
+def _maintenance_directory(history, sources, *, tushare_delist_date_exclusive=False):
+    import pandas as pd
+
+    from hetu_data.archive import _source_exit_boundaries
+
+    facts = {}
+    for owner, sid, manifest in sources:
+        for entry in manifest.get("table_files", ()):
+            if entry["table"] != "securities":
+                continue
+            pid = entry["product_id"]
+            try:
+                owner.check_access(manifest["mode"], owner.product(pid), operation="read")
+                path = owner._verified_source(sid, entry["path"], {sid: manifest})
+                frame = pd.read_parquet(path, columns=[
+                    "code", "market", "security_type", "ipo_date", "out_date", "status", "product_id", "source_ref",
+                ])
+                owner._check_paid_rows(pid, frame, "securities")
+            except PermissionError:
+                continue
+            frame = _source_exit_boundaries(frame, tushare_delist_date_exclusive)
+            for row in frame.itertuples(index=False):
+                if (pd.isna(row.security_type) or row.security_type != "stock" or row.market not in {"SH", "SZ", "BJ"}
+                        or pd.isna(row.source_ref) or not row.source_ref):
+                    continue
+                try:
+                    left = date.fromisoformat(str(row.ipo_date)[:10]).isoformat()
+                    right = ""
+                    if pd.notna(row.out_date) and row.out_date:
+                        right = date.fromisoformat(str(row.out_date)[:10]).isoformat()
+                except ValueError:
+                    continue
+                if not str(row.code).endswith("." + row.market) or (right and right < left):
+                    continue
+                key = row.code, left
+                facts.setdefault(key, {}).setdefault(right, dict(
+                    code=row.code, market=row.market, security_type="stock", valid_from=left, valid_to=right,
+                    source_ref=str(path),
+                ))
+    if not facts:
+        return history
+    records = history.fillna("").to_dict("records")
+    known = {row["code"] for row in records}
+    starts = {}
+    for code, left in facts:
+        starts.setdefault(code, []).append(left)
+    for record in records:
+        key = record["code"], str(record.get("valid_from") or record.get("ipo_date") or "")[:10]
+        exits = set(facts.get(key, {})) - {""}
+        if not (record.get("valid_to") or record.get("out_date")) and len(exits) == 1:
+            end = next(iter(exits))
+            record.update(valid_to=end, exit_source_ref=facts[key][end]["source_ref"])
+    for (code, left), versions in facts.items():
+        exits = set(versions) - {""}
+        if code in known or len(starts[code]) != 1 or len(exits) > 1:
+            continue
+        record = dict(versions[next(iter(exits), "")])
+        if "code_period_id" in history:
+            record.update(identity_id=f"source-security:{code}", code_period_id=f"{code}:{left}",
+                          lifecycle_status="known")
+        elif "lifecycle_status" in history:
+            record["lifecycle_status"] = "known"
+        records.append(record)
+    return pd.DataFrame(records)
+
+
+def _market_day_maintenance(store, query, contracts, domain, objects, market_calendars, sources, daily_shortfalls,
+                            completed, library):
+    import pandas as pd
+
+    from hetu_data.archive import _BAR_FIELDS, _ranges, _valid_archive_bars
+    from hetu_data.library import _select_revisions
+
+    pid, = query.product_ids
+    approved_codes = set(store._cross_section_codes(pid))
+    expected = {}
+    for day in sorted({day for flags in market_calendars.values() for day in flags}):
+        active = [o for o in objects if o["required"][0] <= day <= o["required"][1]]
+        if not active:
+            continue
+        states = {o["market"]: market_calendars[o["market"]].get(day) for o in active}
+        if any(flag not in ({"true"}, {"false"}, {"1"}, {"0"}) for flag in states.values()):
+            domain["unknown"].append(dict(day=day, reason="market_day_calendar_date_unproved"))
+            continue
+        codes = {obj["code"] for obj in active if states[obj["market"]] in ({"true"}, {"1"})}
+        if codes:
+            expected[day] = codes
+    target_codes = {o["code"] for o in objects}
+    for code in sorted(target_codes - approved_codes):
+        domain["unknown"].append(dict(code=code, reason="market_day_expected_codes_outside_grant"))
+    expected = {day: codes & approved_codes for day, codes in expected.items() if codes & approved_codes}
+
+    def one_day(day):
+        point = date.fromisoformat(day)
+        return replace(query, start=point, end=point, market_day_codes=tuple(sorted(expected[day])))
+
+    frames = []
+    queried = set()
+    sampled = set()
+    empty = set()
+    table = store.product(pid)["tables"][0]
+    library_files = None if library is None else {
+        (entry["root"], entry["snapshot_id"], entry["path"]) for entry in library["table_files"]
+        if entry["product_id"] == pid and entry["table"] == table
+    }
+    omissions = set()
+    for owner, sid, manifest, _ in sources:
+        root = str(owner.root.resolve())
+        for item in manifest.get("items", ()):
+            if item["product_id"] != pid:
+                continue
+            for raw in item.get("raw_files", ()):
+                day = raw.get("market_day")
+                if day and query.start.isoformat() <= day <= query.end.isoformat():
+                    try:
+                        point = date.fromisoformat(day)
+                        owner._check_scope(replace(query, start=point, end=point), pid, "read")
+                    except PermissionError:
+                        continue
+                    omissions.update((code, day) for code in raw["unconfirmed_market_day_codes"]
+                                     if code in approved_codes and code in owner._cross_section_codes(pid)
+                                     and code not in expected.get(day, ()))
+        for entry in manifest.get("table_files", ()):
+            if entry["product_id"] != pid or entry["table"] != table:
+                continue
+            span = entry.get("coverage") or []
+            if len(span) != 2 or span[0] != span[1] or span[0] not in expected:
+                continue
+            day = span[0]
+            try:
+                owner._check_scope(replace(one_day(day), market_day_codes=None), pid, "read")
+            except PermissionError:
+                continue
+            saved_scope = set(entry.get("cross_section_codes", ()))
+            if ("market_day_codes" not in (manifest.get("request") or {})
+                    and owner.config.get("market_day_code_periods")):
+                saved_scope &= set(owner._market_day_scope(pid, replace(one_day(day), market_day_codes=None)))
+            sampled.add(day)
+            if library_files is not None and (root, sid, entry["path"]) not in library_files:
+                continue
+            full_scope = expected[day] <= saved_scope
+            if full_scope:
+                queried.add(day)
+            source = owner._verified_source(sid, entry["path"], {sid: manifest})
+            frame = pd.read_parquet(source)
+            owner._check_paid_rows(pid, frame, table)
+            if frame.empty and full_scope:
+                empty.add(day)
+            elif not frame.empty:
+                frame["date"] = frame.date.astype(str).str[:10]
+                frames.append(frame.loc[frame.date.eq(day)].assign(
+                    source_root=root, snapshot_id=sid,
+                ))
+    observed = set()
+    if frames:
+        revisions = library["revision_selections"] if library is not None else ()
+        frame = _select_revisions(pd.concat(frames, ignore_index=True), table, revisions)
+        if table == "daily_bars":
+            values = frame[_BAR_FIELDS].apply(pd.to_numeric, errors="coerce")
+            valid = _valid_archive_bars(values) & values.abs().lt(math.inf).all(axis=1)
+            unique = values.groupby([frame.code, frame.date]).transform("nunique", dropna=False).eq(1).all(axis=1)
+            for code, day in frame.loc[~valid, ["code", "date"]].drop_duplicates().itertuples(index=False, name=None):
+                if code in expected[day]:
+                    domain["unknown"].append(dict(code=code, day=day, reason="invalid_market_day_bar"))
+            frame = frame.loc[valid & unique]
+        elif table == "adjustment_factors":
+            values = pd.to_numeric(frame.adj_factor, errors="coerce")
+            frame = frame[values.gt(0) & values.lt(math.inf)]
+        observed = {(code, day) for code, day in frame[["code", "date"]].itertuples(index=False, name=None)
+                    if code in expected[day]}
+    domain["unknown"].extend(dict(code=code, day=day, reason="market_day_lifecycle_unconfirmed")
+                             for code, day in sorted(omissions))
+    domain["target_codes"] = sorted(target_codes)
+    domain["queried_trade_days"] = sorted(queried)
+    domain["successful_empty"] = [dict(start=a, end=b) for a, b in _ranges(empty)]
+    domain["last_success"] = max(queried, default=None)
+    pending = {}
+    lookback = int(contracts["products"][pid].get("revision_lookback_days", 0))
+    target = query.end.isoformat()
+    refresh_start = (query.end - timedelta(days=lookback - 1)).isoformat()
+    for day, codes in expected.items():
+        missing = {c for c in codes if (c, day) not in observed}
+        if table in {"daily_bars", "adjustment_factors"}:
+            domain["covered"].extend(dict(code=c, start=day, end=day) for c in sorted(codes - missing))
+            domain["missing"].extend(dict(code=c, start=day, end=day) for c in sorted(missing))
+            if missing and day in queried:
+                domain["unknown"].append(
+                    dict(day=day, reason="query_returns_incomplete_object_days", count=len(missing))
+                )
+        if table == "daily_bars":
+            daily_shortfalls[day] = bool(missing) if day in queried else None
+        needs_query = daily_shortfalls.get(day) is True if table == "security_events" else bool(missing)
+        refresh = bool(lookback and day >= refresh_start and (table != "security_events" or needs_query))
+        if refresh:
+            domain["refresh"].append(dict(start=day, end=day))
+            evidence_cutoff = contracts["maintenance"].get("verified_market_day_through", "")
+            already_observed = target <= evidence_cutoff and day in queried
+            if (pid, day, target) not in completed and not already_observed:
+                pending[day] = True
+            elif day not in queried:
+                pending[day] = False
+        elif needs_query and day not in queried:
+            pending[day] = False
+    pieces = []
+    for day, refresh in sorted(pending.items()):
+        scoped = one_day(day)
+        try:
+            store._check_scope(scoped, pid, "read")
+            local = False
+            if not refresh and day in sampled:
+                reuse = store.plan(scoped)
+                local = bool(reuse["reused_coverage"]) or any(
+                    "local_cross_section_codes" in segment for segment in reuse["segments"]
+                )
+                if not local:
+                    domain["unknown"].append(
+                        dict(day=day, reason="market_day_scope_expansion_requires_retained_response")
+                    )
+                    continue
+                if not reuse["reused_coverage"]:
+                    store._check_scope(scoped, pid, "import")
+            if not local:
+                store._check_scope(scoped, pid, "acquire")
+        except PermissionError as error:
+            domain["unknown"].append(dict(day=day, reason=str(error)))
+            continue
+        piece = dict(product_id=pid, codes=[], start=day, end=day, refresh=refresh,
+                     market_day_codes=list(scoped.market_day_codes))
+        if local:
+            piece["local_cross_section_codes"] = list(scoped.market_day_codes)
+        if refresh:
+            piece["revision_target"] = target
+        pieces.append(piece)
+    return plan_update(query, store, contracts, audited_segments=pieces)
+
+
+def _maintenance_lookback(product, contract):
+    revision = int(contract.get("revision_lookback_days", 0))
+    if product.get("cross_section") == "trade_day":
+        return max(revision, int(contract.get("review_lookback_days", 0)))
+    return revision
+
+
+def maintenance_plan(store, target_date, products, *, mode, contracts, quota_root=None):
     """独立维护窗口；仅读登记资产/目标事实，不生成研究或滚动旧截止日。"""
     import pandas as pd
     import pyarrow.parquet as pq
 
     from hetu_data.archive import _history_objects, _ranges
-    from hetu_data.models import DataRequest, SnapshotRef
+    from hetu_data.library import load_library
+    from hetu_data.models import DataRequest, LibraryRef, SnapshotRef
     from hetu_data.store import DataStore
+    from hetu_data.worker import approved_usage_ledger
 
     settings = contracts.get("maintenance", {})
+    uses_market_days = any(store.product(pid).get("cross_section") == "trade_day" for pid in products)
+    library = None
+    if uses_market_days and (ref_data := contracts.get("library_ref")):
+        ref = LibraryRef(**ref_data)
+        library_store = store if ref.root.resolve() == store.root.resolve() else DataStore(ref.root, providers={})
+        library = load_library(library_store, ref)
+    object_filter = settings.get("object_filter", {})
+    selected_markets = set(object_filter.get("markets", ()))
+    selected_codes = set(object_filter.get("codes", ()))
     start = date.fromisoformat(settings["start"])
+    if settings.get("window_floor") and start < date.fromisoformat(settings["window_floor"]):
+        raise ValueError("maintenance starts before the approved window")
     if start > target_date:
         raise ValueError("maintenance start exceeds target")
+    if settings.get("end") and target_date > date.fromisoformat(settings["end"]):
+        raise ValueError("maintenance target exceeds approved window")
+    if close := settings.get("completed_by_local_time"):
+        now = _quota_now(ZoneInfo("Asia/Shanghai"))
+        completed_through = now.date() if now.strftime("%H:%M") >= close else now.date() - timedelta(days=1)
+        if target_date > completed_through:
+            raise ValueError("maintenance target has not finished its trading session")
+    max_window = settings.get("maximum_natural_days")
+    if max_window is not None and (target_date - start).days + 1 > max_window:
+        raise ValueError("maintenance backlog exceeds the regular window; use a historical backfill plan")
     history_path = settings.get("history_ref")
     history = (
         pd.DataFrame(settings["history_records"])
@@ -392,18 +893,12 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         if history_path
         else pd.DataFrame()
     )
-    query_start = min(
-        [start]
-        + [
-            min(
-                start,
-                target_date
-                - timedelta(days=int(contracts.get("products", {}).get(pid, {}).get("revision_lookback_days", 0)) - 1),
-            )
-            for pid in products
-            if int(contracts.get("products", {}).get(pid, {}).get("revision_lookback_days", 0)) > 0
-        ]
-    )
+    product_contracts = contracts.get("products", {})
+    starts = {}
+    for pid in products:
+        lookback = _maintenance_lookback(store.product(pid), product_contracts.get(pid, {}))
+        starts[pid] = min(start, target_date - timedelta(days=lookback - 1)) if lookback > 0 else start
+    query_start = min(starts.values(), default=start)
     published = store._published_manifests()
     selected = settings.get("coverage_snapshot_ids")
     if selected is not None:
@@ -426,7 +921,16 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
                 "table_files": [e for e in manifest.get("table_files", []) if e["table"] in reference["tables"]],
             }
         sources.append((owner, ref.snapshot_id, manifest))
+    if uses_market_days:
+        history = _maintenance_directory(
+            history, sources, tushare_delist_date_exclusive=settings.get("tushare_delist_date_exclusive") is True,
+        )
     calendar = {}
+    exchange_calendars = {"SH": {}, "SZ": {}, "BJ": {}}
+    markets_by_calendar = {
+        "cn_trade_calendar": "SH", "ts_trade_calendar": "SH", "ts_trade_calendar_sz": "SZ",
+        "cn_bj_archive_calendar": "BJ",
+    }
     superseded = {}
     for owner, _, manifest in sources:
         for pid, revision in manifest.get("calendar_refresh", {}).items():
@@ -440,10 +944,14 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
                 frame = frame[frame.product_id.isin([e["product_id"] for e in entries])]
             for row in frame.to_dict("records"):
                 day = str(row["date"])[:10]
-                revisions = superseded.get((str(owner.root.resolve()), sid, row.get("product_id")), [])
-                if any(r["start"] <= day <= r["end"] for r in revisions):
+                calendar_revisions = superseded.get((str(owner.root.resolve()), sid, row.get("product_id")), [])
+                if any(r["start"] <= day <= r["end"] for r in calendar_revisions):
                     continue
-                calendar.setdefault(day, set()).add(str(row["is_trading_day"]).lower())
+                flag = str(row["is_trading_day"]).lower()
+                calendar.setdefault(day, set()).add(flag)
+                market = markets_by_calendar.get(row.get("product_id"))
+                if market and row.get("source_ref"):
+                    exchange_calendars[market].setdefault(day, set()).add(flag)
     natural = [d.date().isoformat() for d in pd.date_range(query_start, target_date)]
     trading = [d for d in natural if calendar.get(d) in ({"true"}, {"1"})]
     unknown_calendar = [d for d in natural if calendar.get(d) not in ({"true"}, {"false"}, {"1"}, {"0"})]
@@ -451,19 +959,49 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         (owner, sid, manifest, owner._coverage_index([(sid, manifest)])) for owner, sid, manifest in sources
     ]
     domains, segments, reused, global_unknown = [], [], [], []
+    matched_codes = set()
+    uses_object_scope = False
     codes_by_product = {}
     limits = dict(contracts.get("limits", {}))
+    completed = set()
+    if limits.get("approved_scope_ref"):
+        ledger = approved_usage_ledger(Path(quota_root) if quota_root is not None else store.root,
+                                       limits["approved_scope_ref"])
+        completed = {
+            (segment["product_id"], segment["start"], segment["revision_target"])
+            for event in _read_events(ledger)
+            if event["type"] == "completed" and "revision_target" in (segment := event["segment"])
+        }
     counts = dict.fromkeys(METERS, 0)
     counts["quota_bytes"] = None
-    for pid in products:
+    counts["data_fee_cny"] = _data_fee(contracts)
+    daily_shortfalls = {}
+    def is_market_status(pid):
         product = store.product(pid)
-        contract = contracts.get("products", {}).get(pid, {})
+        return product.get("cross_section") == "trade_day" and product["tables"][0] == "security_events"
+
+    # 日期行情先算，状态截面随后只处理同日仍缺行情的目标。
+    for pid in sorted(products, key=is_market_status):
+        product = store.product(pid)
+        requires_codes = product.get("requires_codes", True)
+        market_day = product.get("cross_section") == "trade_day"
+        contract = product_contracts.get(pid, {})
         basis = contract.get("time_basis")
         lookback = int(contract.get("revision_lookback_days", 0))
-        product_start = min(start, target_date - timedelta(days=lookback - 1)) if lookback > 0 else start
+        product_start = starts[pid]
         objects = (
-            _history_objects(history, product_start.isoformat(), target_date.isoformat())[0] if len(history) else []
+            _history_objects(
+                history, product_start.isoformat(), target_date.isoformat(), segmented="code_period_id" in history
+            )[0] if len(history) else []
         )
+        if requires_codes or market_day:
+            uses_object_scope = True
+            objects = [
+                obj for obj in objects
+                if (not selected_markets or obj["market"] in selected_markets or obj["market"] == "unknown")
+                and (not selected_codes or obj["code"] in selected_codes)
+            ]
+            matched_codes.update(obj["code"] for obj in objects)
         calendar_gaps = [d for d in unknown_calendar if d >= product_start.isoformat()]
         domain = dict(
             product_id=pid,
@@ -485,10 +1023,14 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         if not contract or basis not in ("trading_days", "natural_days"):
             domain["unknown"].append(dict(reason="interface_time_contract_missing"))
             continue
-        if basis == "trading_days" and calendar_gaps:
+        if basis == "trading_days" and calendar_gaps and not market_day:
             domain["unknown"].append(dict(reason="calendar_unknown", ranges=_ranges(calendar_gaps)))
-        if not objects and product.get("requires_codes", True):
-            domain["unknown"].append(dict(reason="independent_historical_target_missing"))
+        if not objects and (requires_codes or market_day):
+            reason = (
+                "no_independent_historical_objects_match_filter"
+                if len(history) else "independent_historical_target_missing"
+            )
+            domain["unknown"].append(dict(reason=reason))
             continue
         allowed = []
         for obj in objects:
@@ -500,7 +1042,50 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
                 and obj["required"][0] <= obj["required"][1]
             ):
                 allowed.append(obj)
-        if not product.get("requires_codes", True):
+        if market_day:
+            approved_markets = set((store._grant(pid) or {}).get("markets", ()))
+            if selected_codes or (selected_markets and selected_markets != approved_markets):
+                domain["unknown"].append(dict(reason="market_day_raw_query_requires_the_approved_market_scope"))
+                continue
+            if not allowed:
+                continue
+            target_markets = approved_markets | {o["market"] for o in allowed}
+            missing_markets = sorted(
+                market
+                for market in target_markets
+                if market not in settings.get("calendar_markets", ()) or not exchange_calendars.get(market)
+            )
+            if missing_markets:
+                domain["unknown"].extend(
+                    dict(market=market, reason="market_day_calendar_scope_unproved") for market in missing_markets
+                )
+                continue
+            market_calendars = {
+                market: {
+                    day: exchange_calendars[market].get(day)
+                    for day in natural
+                    if day >= product_start.isoformat()
+                }
+                for market in target_markets
+            }
+            query = DataRequest(
+                (pid,), (), product_start, target_date, datetime.now(ZoneInfo("Asia/Shanghai")),
+                "daily_archive", mode=mode,
+            )
+            sub = _market_day_maintenance(
+                store, query, contracts, domain, allowed, market_calendars, coverage_sources, daily_shortfalls,
+                completed, library,
+            )
+            if sub is not None:
+                domain["unknown"].extend(dict(reason=r) for r in sub["unresolved"])
+                domain["counts"] = sub["counts"]
+                segments.extend(sub["segments"])
+                reused.extend(domain["covered"])
+                for key, value in sub["counts"].items():
+                    if value is not None and counts[key] is not None:
+                        counts[key] += value
+            continue
+        if not requires_codes:
             allowed = [dict(code="", required=[product_start.isoformat(), target_date.isoformat()], market="")]
         domain["target_codes"] = [o["code"] for o in allowed if o["code"]]
         codes_by_product[pid] = tuple(domain["target_codes"])
@@ -676,6 +1261,10 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         domain["failures"] = [f for _, m in published for f in m.get("failures", []) if f.get("product_id") == pid]
         if contract.get("historical_revisions") is False:
             domain["version_limitation"] = "source_does_not_prove_complete_historical_versions"
+    if uses_object_scope and selected_codes - matched_codes:
+        global_unknown.append(
+            f"证券代码不在本次市场的独立历史目标内：{', '.join(sorted(selected_codes - matched_codes))}"
+        )
     request = DataRequest(
         tuple(products),
         tuple(dict.fromkeys(c for cs in codes_by_product.values() for c in cs)),
@@ -697,10 +1286,13 @@ def maintenance_plan(store, target_date, products, *, mode, contracts):
         segments=segments,
         reused_coverage=reused,
         counts=counts,
+        new_data_fee_cny=counts["data_fee_cny"],
+        library_ref=copy.deepcopy(contracts.get("library_ref")),
         limits=limits,
         unresolved=global_unknown,
         acquisition_grant_required=True,
         planning_basis="maintenance_actual_rows_and_query_evidence",
         target_scope=settings.get("target_scope", {}),
+        object_filter=copy.deepcopy(object_filter),
         maintenance_contracts=frozen_contracts,
     )
