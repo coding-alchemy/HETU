@@ -2,10 +2,10 @@
 
 > 文档版本：v2.0
 > 文档状态：初始建设与系统完善按各自批准范围验收通过；策略研究与验证独立维护
-> 创建日期：2026-11-07；修订日期：2026-11-17
+> 创建日期：2026-11-07；修订日期：2026-11-18
 > 适用范围：个人量化工作台、独立数据模块、正式 A 股日线库、维护与恢复、排名及回测软件
 > 使用入口：[统一使用手册](../docs/quant-research-platform-usage.md) · [数据字典与存储合同](../quant/DATA.md)
-> 策略规格：`2026-11-07-quant-strategy-research-requirements.md`、`2026-11-07-quant-strategy-research-design.md` 原文可从固定提交 `d7172a6a8d639657bd9901f8bf021d99df948ee9` 回查，当前分支未纳入，按其批准状态独立执行
+> 策略规格：[策略研究与验证需求](2026-11-18-quant-strategy-research-requirements.md)、[策略研究与验证设计](2026-11-18-quant-strategy-research-design.md)，当前分支已纳入，均待评审，按各自批准状态独立执行；2026-11-07 历史原文可从固定提交 `d7172a6a8d639657bd9901f8bf021d99df948ee9` 按原路径回查
 > 约束与回源：[AGENTS.md](../AGENTS.md) · [计划索引](plans/README.md) · [历史恢复](#10-条款去向与历史恢复)
 
 ## 1. 现行交付与适用范围

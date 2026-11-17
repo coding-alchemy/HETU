@@ -52,7 +52,7 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 | 阶段 | 设计与现行入口 | 计划状态 |
 | --- | --- | --- |
 | 量化系统（初始建设与系统完善） | [统一实现](../2026-11-07-quant-research-platform-implementation.md)、[统一使用手册](../../docs/quant-research-platform-usage.md) | 原一至三期验收保持；完善 01–04 按批准来源范围收口。计划已清理，[分项结论](../2026-11-07-quant-research-platform-implementation.md#8-分项验收与直接证据)与[原文恢复](../2026-11-07-quant-research-platform-implementation.md#10-条款去向与历史恢复)保留适用范围 |
-| 策略研究与验证 | 两份 `2026-11-07-quant-strategy-research-{requirements,design}.md` 规格在固定提交 `d7172a6a8d639657bd9901f8bf021d99df948ee9` 保存，当前分支未纳入 | 原四期及原五期剩余策略任务；原池、窗口和八次预算保持，真实代表策略平台执行仍需独立验收；执行计划未编写 |
+| 策略研究与验证 | [需求](../2026-11-18-quant-strategy-research-requirements.md)、[设计](../2026-11-18-quant-strategy-research-design.md)已纳入当前分支，均待评审；2026-11-07 历史原文在固定提交 `d7172a6a8d639657bd9901f8bf021d99df948ee9` 保存 | 原四期及原五期剩余策略任务；原池、窗口和八次预算保持，真实代表策略平台执行仍需独立验收；执行计划未编写 |
 
 系统可用、固定来源目标覆盖和严格研究资格分别判定。[策略交接与限制](../2026-11-07-quant-research-platform-implementation.md#9-能力限制与策略交接)保留 PIT、行动、跨码和账户任务。旧四、五期规格可从 Git `1832734f94fe1425b933c47a4850d5e0bc38e449` 按原路径回源；新设计、计划、真实研究及旧结果重跑仍按 AGENTS.md 和具体授权办理。
 
