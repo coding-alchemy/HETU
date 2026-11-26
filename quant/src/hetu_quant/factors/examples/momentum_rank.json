@@ -1,0 +1,101 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A",
+    "B",
+    "C"
+  ],
+  "tables": {
+    "daily_bars": [
+      {
+        "code": "A",
+        "date": "2024-01-30",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "close": 110,
+        "close_raw": 110,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-30",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-31",
+        "close": 110,
+        "close_raw": 110,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "C",
+        "date": "2024-01-30",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "C",
+        "date": "2024-01-31",
+        "close": 120,
+        "close_raw": 120,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      }
+    ],
+    "calendar": [
+      {
+        "date": "2024-01-30",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "date": "2024-01-31",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "memberships": [
+      {
+        "code": "POOL",
+        "member": "A",
+        "valid_from": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "POOL",
+        "member": "B",
+        "valid_from": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "POOL",
+        "member": "C",
+        "valid_from": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "membership_coverage": [
+      {
+        "code": "POOL",
+        "start": "2024-01-31",
+        "end": "2024-01-31",
+        "complete": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ]
+  }
+}

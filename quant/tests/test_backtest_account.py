@@ -16,7 +16,6 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-
 from backtest_cases import make_backtest_case, write_engine_bundle
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -82,6 +81,24 @@ def _cash_on(cash: pd.DataFrame, day: str) -> dict[str, float]:
 
 def _nav_on(nav: pd.DataFrame, day: str) -> float:
     return float(nav[nav["date"] == day].iloc[0]["net_nav"])
+
+
+@ADMITTED
+def test_attribution_evidence_uses_booked_dividend_entitlement(tmp_path):
+    from hetu_quant.backtest_evaluation import account_attribution
+
+    case = make_backtest_case("event_ledger")
+    out = _run_case(tmp_path, "dividend-attribution", case)
+    tables = _tables(out)
+    events = json.loads((out / "backtest.json").read_text()).get("cash_action_flows", [])
+    assert [(event["date"], event["code"], event["entitled_qty"], event["amount_cny"])
+            for event in events if event["kind"] == "cash_dividend"] == [(EL[2], "CODE_A", 500, 500)]
+    result = account_attribution(tables, pd.DataFrame(case["signals"]).assign(signal_value=.5, rank=1),
+                                 {"time_split": {"ex": [EL[2], EL[2]], "pay": [EL[3], EL[3]]}},
+                                 cash_action_flows=events)
+    assert result["by_security"]["CODE_A"]["observed_pnl_cny"] == {"ex": 0, "pay": 0}
+    for period in result["by_period"].values():
+        assert (period["observed_pnl_cny"], period["unallocated_cny"], period["net_nav_change_cny"]) == (0, 0, 0)
 
 
 @ADMITTED
@@ -562,8 +579,11 @@ def test_missing_required_action_date_is_explicitly_restricted(tmp_path):
 
 @ADMITTED
 def test_dividend_withholding_releases_payable_once(tmp_path):
+    from hetu_quant.backtest_evaluation import account_attribution
+
     case = make_backtest_case("execution_clocks", "dividend_tax")
-    t = _tables(_run_case(tmp_path, "tax-payable-withheld", case))
+    out = _run_case(tmp_path, "tax-payable-withheld", case)
+    t = _tables(out)
     ex = t["cash"].query("date == '2024-01-11'").iloc[0]
     final = t["cash"].query("date == '2024-01-12'").iloc[0]
     assert ex.dividend_tax_payable == pytest.approx(100, abs=.01)
@@ -572,25 +592,107 @@ def test_dividend_withholding_releases_payable_once(tmp_path):
     assert t["trades"]["dividend_tax"].sum() == pytest.approx(100, abs=.01)
     tax_costs = t["costs"].query("cost_type in ['dividend_tax', 'dividend_tax_accrual']")
     assert tax_costs["amount"].sum() == pytest.approx(100)
+    events = json.loads((out / "backtest.json").read_text())["cash_action_flows"]
+    assert [(event["date"], event["code"], event["amount_cny"])
+            for event in events if event["kind"] == "dividend_tax_accrual"] == [
+                ("2024-01-11", "CODE_A", -100), ("2024-01-12", "CODE_A", 100)
+            ]
+    result = account_attribution(t, pd.DataFrame(),
+                                 {"time_split": {"ex": ["2024-01-11", "2024-01-11"],
+                                                 "sale": ["2024-01-12", "2024-01-12"]}},
+                                 cash_action_flows=events)
+    assert abs(result["by_period"]["ex"]["unallocated_cny"]) < .01
+    assert abs(result["by_period"]["sale"]["unallocated_cny"]) < .01
 
 
 @ADMITTED
-def test_delisting_cash_disposal_requires_original_evidence(tmp_path):
-    import hashlib
+@pytest.mark.parametrize(("claims", "proved"), [
+    ([(8, 8, "元/股")], True),
+    ([(8, 2, "元/股")], False),
+    ([(8, 8, "元/股"), (2, 2, "元/股")], False),
+    ([(2, 2, "元/股"), (8, 8, "元/股")], False),
+    ([(8, 8, "元/股"), (800, 800, "分/股")], True),
+])
+def test_delisting_cash_disposal_requires_original_evidence(tmp_path, claims, proved):
+    from hetu_quant.backtest_evaluation import account_attribution
 
     case = make_backtest_case("execution_clocks")
     case["tables"]["historical_securities"]["valid_to"] = EL[2]
-    original = b'synthetic announced cash compensation: SYN security, 8 CNY per share, 2024-01-04'
-    case["tables"]["terminal_disposals"] = pd.DataFrame([{
-        "code": "CODE_A", "date": EL[2], "cash_per_share": 8,
-        "available_at": '2024-01-02T18:00:00+08:00',
-        "evidence_ref": "cash-disposal.txt", "sha256": hashlib.sha256(original).hexdigest(),
-    }])
-    case["evidence_files"] = {"cash-disposal.txt": original}
-    t = _tables(_run_case(tmp_path, "proven-disposal", case))
+    for idx, (claim, fact, unit) in enumerate(claims):
+        row = _cash_disposal_original(case, "CODE_A", EL[2], fact, unit=unit, name=f"cash-{idx}.json")
+        row["cash_per_share"] = claim
+        case["tables"]["terminal_disposals"] = pd.concat(
+            [case["tables"].get("terminal_disposals", pd.DataFrame()), pd.DataFrame([row])],
+            ignore_index=True,
+        )
+    out = _run_case(tmp_path, "proven-disposal", case)
+    t = _tables(out)
+    manifest = json.loads((out / "backtest.json").read_text())
+    if not proved:
+        assert _cash_on(t["cash"], EL[3])["cash"] == pytest.approx(4995)
+        assert t["positions"].query("date == @EL[3]").qty.tolist() == [500]
+        assert manifest["disposition_events"] == []
+        gap = manifest["disposition_gaps"][0]
+        assert (gap["code"], gap["date"], gap["source_refs"]) == (
+            "CODE_A", EL[2], [f"cash-{idx}.json" for idx in range(len(claims))],
+        )
+        assert gap["reason"] == ("exit_disposal_terms_unproved" if len(claims) == 1
+                                 else "exit_disposal_conflicting_terms")
+        return
     assert _cash_on(t["cash"], EL[3])["cash"] == pytest.approx(8995, abs=.01)
     assert t["positions"].query("date == '2024-01-05'").empty
     assert len(t["trades"]) == 1, "具证补偿为公司事件，不伪造卖出订单"
+    events = manifest["cash_action_flows"]
+    assert len(manifest["disposition_events"]) == 1
+    result = account_attribution(t, pd.DataFrame(), {"time_split": {"exit": [EL[2], EL[3]]}},
+                                 cash_action_flows=events)
+    assert result["by_security"]["CODE_A"]["observed_pnl_cny"]["exit"] == pytest.approx(-1000)
+    assert result["by_period"]["exit"]["unallocated_cny"] == pytest.approx(0)
+
+
+def _cash_disposal_original(case, code, day, amount, *, unit="元/股", name="cash-disposal.json"):
+    import hashlib
+
+    fields = dict(code=code, date=day, event_id=f"exit-{code}", cash_per_share=amount, currency="CNY",
+                  unit=unit, available_at="2024-01-02T12:00:00+08:00")
+    original = json.dumps(dict(fields, kind="cash_exit"), ensure_ascii=False).encode()
+    case.setdefault("evidence_files", {})[name] = original
+    return dict(fields, evidence_ref=name, sha256=hashlib.sha256(original).hexdigest())
+
+
+@ADMITTED
+def test_cash_disposal_withholds_tax_through_account_cash_delta(tmp_path):
+    from hetu_quant.backtest_evaluation import account_attribution
+
+    case = make_backtest_case("execution_clocks", "dividend_tax")
+    day, code = "2024-01-12", "CODE_A"
+    case["signals"] = case["signals"][:1]
+    case["definition"]["end"] = day
+    case["tables"]["historical_securities"]["valid_to"] = day
+    case["tables"]["terminal_disposals"] = pd.DataFrame([_cash_disposal_original(case, code, day, 8)])
+
+    out = _run_case(tmp_path, "taxable-terminal-disposal", case)
+    ledger = _tables(out)
+    manifest = json.loads((out / "backtest.json").read_text())
+    cash = ledger["cash"].set_index("date")
+    tax, = manifest["dividend_tax_withholdings"]
+    print(f"terminal tax={tax['amount']:.2f} payable={cash.loc[day, 'dividend_tax_payable']:.2f} "
+          f"cash={cash.loc[day, 'cash_available']:.2f} gross_nav={ledger['nav'].iloc[-1].gross_nav:.2f}")
+    assert cash.loc["2024-01-11", "dividend_tax_payable"] == pytest.approx(100)
+    assert cash.loc[day, "dividend_tax_payable"] == 0
+    assert cash.loc[day, "cash_available"] == pytest.approx(10394.90)
+    assert list(ledger["trades"].side) == ["BUY"]
+    assert ledger["positions"].query("date == @day").empty
+    assert tax["trade_id"] is None and tax["amount"] == pytest.approx(100)
+    assert tax["lots"] == [dict(original_code=code, buy_date="2024-01-03", disposed_quantity=1000)]
+    assert tax["cash_settlement"] == dict(event_id="exit-CODE_A", amount_cny=8000,
+                                          source_ref="bundle:evidence/cash-disposal.json")
+    tax_cost, = ledger["costs"].loc[ledger["costs"].cost_type.eq("dividend_tax"), "amount"]
+    assert tax_cost == pytest.approx(100)
+    assert ledger["nav"].iloc[-1].gross_nav == pytest.approx(10500)
+    attribution = account_attribution(ledger, pd.DataFrame(), {"time_split": {"cash_exit": [day, day]}},
+                                      cash_action_flows=manifest["cash_action_flows"])
+    assert attribution["by_period"]["cash_exit"]["unallocated_cny"] == pytest.approx(0)
 
 
 @ADMITTED
@@ -781,3 +883,440 @@ def test_ex_rights_limit_consumes_production_share_ratio(tmp_path, with_cash, op
     assert len(orders) == 1 and "开盘涨停" in orders.iloc[0].reason
     audit = json.loads((out / "backtest.json").read_text())
     assert audit["limit_references"][0]["reference_price"] == pytest.approx(reference)
+
+
+@ADMITTED
+@pytest.mark.parametrize("transition, disposal", [
+    (True, "cash"), (True, "market"), (True, None), (False, None), ("late", None),
+])
+def test_code_change_and_exit_follow_evidence(tmp_path, transition, disposal):
+    import hashlib
+
+    case = make_backtest_case("execution_clocks")
+    case["signals"][0]["target_weight"] = 0.1
+    tables = case["tables"]
+    prior = "2024-01-01"
+    case["definition"]["start"] = prior
+    case["signals"][0].update(signal_at=prior, executable_from=EL[0])
+    for table in ("calendar", "daily_bars", "security_status"):
+        frame = tables[table]
+        tables[table] = pd.concat([frame.iloc[[0]].assign(date=prior), frame], ignore_index=True)
+    old, new, effective = "CODE_A", "CODE_RENAMED", EL[2]
+    hist = tables["historical_securities"]
+    tables["historical_securities"] = pd.concat(
+        [hist.assign(valid_to=EL[1]), hist.assign(code=new, valid_from=effective,
+                                                  valid_to=EL[3])], ignore_index=True
+    )
+    for table in ("daily_bars", "security_status"):
+        frame = tables[table]
+        frame.loc[frame.date.ge(effective), "code"] = new
+    if transition:
+        proof = dict(kind="administrative_rename", from_code=old, effective_date=effective,
+                     published_at=f"{effective}T{('10' if transition == 'late' else '08')}:00:00+08:00", ratio=1)
+        original = json.dumps([
+            dict(code=old, identity_id="SYNTHETIC", valid_from="2020-01-02", valid_to=EL[1]),
+            dict(code=new, identity_id="SYNTHETIC", valid_from=effective, valid_to=EL[3], continuation=proof),
+        ]).encode()
+        case["evidence_files"] = {"identity-roster.json": original}
+        tables["identity_transitions"] = pd.DataFrame([dict(
+            proof, code=new, identity_id="SYNTHETIC", from_valid_to=EL[1],
+            evidence_ref="identity-roster.json", sha256=hashlib.sha256(original).hexdigest(),
+        )])
+    if disposal == "cash":
+        tables["terminal_disposals"] = pd.DataFrame([_cash_disposal_original(case, new, EL[3], 2)])
+    elif disposal == "market":
+        case["signals"].append(dict(signal_at=EL[1], executable_from=effective, code=old, target_weight=0))
+    out = _run_case(tmp_path, "cross-code-disposal", case)
+    t = _tables(out)
+    before = t["positions"].query("date == @EL[1]").iloc[0]
+    after = t["positions"].query("date == @effective")
+    bought = t["positions"].query("date == @EL[0]").iloc[0]
+    assert (bought.code, bought.qty, bought.sellable_qty) == (old, 100, 0)
+    assert (before.code, before.qty, before.sellable_qty) == (old, 100, 100)
+    if disposal == "market":
+        assert after.empty
+        assert [(trade.code, trade.side, trade.qty) for trade in t["trades"].itertuples()] == [
+            (old, "BUY", 100), (new, "SELL", 100),
+        ]
+        target = t["targets"].query("executable_from == @effective").iloc[0]
+        assert target.code == new
+    else:
+        assert [(row.code, row.qty, row.sellable_qty) for row in after.itertuples()] == [
+            (new if transition is True else old, 100, 100)
+        ]
+    cash_delta = _cash_on(t["cash"], EL[3])["cash"] - _cash_on(t["cash"], effective)["cash"]
+    assert cash_delta == pytest.approx(200 if disposal == "cash" else 0)
+    assert t["positions"].query("date == @EL[3]").qty.tolist() == ([] if disposal else [100])
+    assert len(t["trades"]) == (2 if disposal == "market" else 1)
+    manifest = json.loads((out / "backtest.json").read_text())
+    events = manifest.get("identity_transition_events", [])
+    if disposal == "cash":
+        from hetu_quant.backtest_evaluation import account_attribution
+
+        result = account_attribution(
+            t, pd.DataFrame(), {"time_split": {"exit": [EL[3], EL[3]]}},
+            cash_action_flows=manifest["cash_action_flows"], identity_events=events,
+        )
+        assert result["by_period"]["exit"]["cash_action_pnl_cny"] == 200
+        assert result["by_security"][new]["observed_pnl_cny"]["exit"] == -800
+        assert result["by_period"]["exit"]["unallocated_cny"] == 0
+    if transition is True:
+        assert [(row["from_code"], row["code"], row["date"], row["quantity"]) for row in events] == [
+            (old, new, effective, 100)
+        ]
+        assert events[0]["acquisition_lots"] == [[EL[0], 100]]
+        assert events[0]["average_cost"] == pytest.approx(10)
+        assert events[0]["identity_id"] == "SYNTHETIC"
+    else:
+        assert events == []
+
+
+@ADMITTED
+@pytest.mark.parametrize("missing", [
+    None, "new_shares", "fraction_rule", "sellable_date", "existing_successor", "fraction_conflict_a",
+    "fraction_conflict_b", "mutually_exclusive", "mutually_exclusive_cash_prices", "mutually_exclusive_mistyped_cash",
+])
+def test_special_exchange_preserves_proved_entitlements(tmp_path, missing):
+    import hashlib
+
+    from hetu_quant.backtest_evaluation import account_attribution
+
+    case = make_backtest_case("execution_clocks")
+    tables = case["tables"]
+    old, new, day, pay_day, later = "CODE_A", "CODE_SUCCESSOR", EL[2], EL[3], "2024-01-08"
+    case["signals"][0]["target_weight"] = 0.101
+    tables["trading_rules"] = tables["trading_rules"].assign(min_buy_qty="1", qty_step="1")
+    facts = {
+        "kind": "special_exchange", "event_id": "exchange-1", "from_code": old, "to_code": new,
+        "effective_date": day, "available_at": day + "T08:00:00+08:00",
+        "old_shares": 3, "new_shares": 2, "credit_date": day, "share_rule": "whole_shares",
+        "fraction_rule": "cash_in_lieu", "fraction_cash_per_share": 6, "fraction_currency": "CNY",
+        "fraction_unit": "元/股", "fraction_pay_date": pay_day, "sellable_date": pay_day,
+    }
+    existing = missing == "existing_successor"
+    fraction_conflict = str(missing).startswith("fraction_conflict")
+    full_conflict = str(missing).startswith("mutually_exclusive")
+    cash_price_conflict = missing == "mutually_exclusive_cash_prices"
+    if missing in facts:
+        del facts[missing]
+    original = json.dumps(facts, ensure_ascii=False).encode()
+    case["evidence_files"] = {"exchange.json": original}
+    tables["share_exchanges"] = pd.DataFrame([dict(
+        from_code=old, to_code=new, effective_date=day, event_id="exchange-1", evidence_ref="exchange.json",
+        sha256=hashlib.sha256(original).hexdigest(),
+    )] * 2)  # Repeated delivery of the same original does not create extra entitlements.
+    if fraction_conflict:
+        alternate = json.dumps(dict(facts, fraction_cash_per_share=9), ensure_ascii=False).encode()
+        case["evidence_files"]["alternate.json"] = alternate
+        event_rows = tables["share_exchanges"].iloc[:1]
+        event_rows = pd.concat([event_rows, event_rows.assign(evidence_ref="alternate.json",
+                              sha256=hashlib.sha256(alternate).hexdigest())], ignore_index=True)
+        tables["share_exchanges"] = event_rows.iloc[::-1] if missing.endswith("_b") else event_rows
+    if full_conflict:
+        cash_rows = [_cash_disposal_original(case, old, day, 2)]
+        if cash_price_conflict:
+            cash_rows.append(_cash_disposal_original(case, old, day, 8, name="cash-other.json"))
+        if missing == "mutually_exclusive_mistyped_cash":
+            cash_rows[0]["cash_per_share"] = 8
+        tables["terminal_disposals"] = pd.DataFrame(cash_rows)
+    hist = tables["historical_securities"]
+    tables["historical_securities"] = pd.concat(
+        [hist.assign(valid_to=EL[1]), hist.assign(code=new, valid_from="2024-01-01" if existing else day)],
+        ignore_index=True,
+    )
+    for name in ("calendar", "daily_bars", "security_status"):
+        frame = tables[name]
+        frame = pd.concat([frame, frame.iloc[[-1]].assign(date=later)], ignore_index=True)
+        if name != "calendar":
+            frame.loc[frame.date.ge(day), "code"] = new
+        if name == "daily_bars":
+            frame.loc[frame.date.ge(day), ["open_raw", "close_raw", "high_raw", "low_raw"]] = 15
+        if existing:
+            previous = "2024-01-01"
+            frame = pd.concat([frame.iloc[[0]].assign(date=previous), frame], ignore_index=True)
+            if name != "calendar":
+                successor_history = frame.loc[frame.date.lt(day)].assign(code=new)
+                if name == "daily_bars":
+                    price_fields = ["open_raw", "close_raw", "high_raw", "low_raw"]
+                    successor_history[price_fields] = 12
+                    frame.loc[frame.code.eq(new), price_fields] = 12
+                frame = pd.concat([frame, successor_history], ignore_index=True)
+        tables[name] = frame
+    if existing:
+        case["signals"].insert(0, dict(signal_at="2024-01-01", executable_from=EL[0], code=old, target_weight=0.101))
+        case["signals"].append(dict(signal_at=EL[0], executable_from=EL[1], code=new, target_weight=0.119))
+    case["definition"]["end"] = later
+    out = _run_case(tmp_path, "special-exchange", case)
+    ledger = _tables(out)
+    manifest = json.loads((out / "backtest.json").read_text())
+    def lots(d):
+        return [(r.code, r.qty, r.sellable_qty) for r in ledger["positions"].query("date == @d").itertuples()]
+    cash = _cash_on(ledger["cash"], EL[1])["cash"]
+    exchange = manifest["identity_transition_events"]
+    if existing:
+        assert set(lots(EL[1])) == {(old, 101, 101), (new, 99, 0)}
+        assert lots(day) == [(new, 166, 99)]
+        assert lots(pay_day) == lots(later) == [(new, 166, 166)]
+        assert _cash_on(ledger["cash"], day) == dict(cash=cash, receivable=2)
+        assert _cash_on(ledger["cash"], pay_day) == _cash_on(ledger["cash"], later) == dict(cash=cash + 2, receivable=0)
+        event, = exchange
+        assert event["prior_successor"] == dict(quantity=99, average_cost=12, acquisition_lots=[[EL[1], 99]])
+        assert event["successor_acquisition_lots"] == [[EL[0], 67], [EL[1], 99]]
+        assert event["successor_average_cost"] == pytest.approx((99 * 12 + 67 * 15) / 166)
+        return
+    assert lots(EL[1]) == [(old, 101, 0)]
+    assert [(r.code, r.qty) for r in ledger["trades"].itertuples()] == [(old, 101)]
+    if full_conflict:
+        assert lots(day) == lots(later) == [(old, 101, 0)]
+        assert exchange == manifest["disposition_events"] == []
+        assert _cash_on(ledger["cash"], later) == dict(cash=cash, receivable=0)
+        gaps = {gap["reason"]: gap for gap in manifest["disposition_gaps"]}
+        cross = gaps["incompatible_account_dispositions"]
+        expected_sources = ["cash-disposal.json", "cash-other.json", "exchange.json"] if cash_price_conflict else [
+            "cash-disposal.json", "exchange.json",
+        ]
+        assert cross["source_refs"] == expected_sources
+        cash_terms = "2 or 8" if cash_price_conflict else "2"
+        expected_terms = f"cash_exit {cash_terms} CNY/share; share_exchange 2/3 → {new}"
+        if missing == "mutually_exclusive_mistyped_cash":
+            expected_terms += "; cash-disposal.json: prepared 8 CNY/share"
+        assert cross["terms"] == expected_terms
+        if cash_price_conflict:
+            cash_claims = gaps["exit_disposal_conflicting_terms"]["cash_claims"]
+            assert {claim["cash_per_share"] for claim in cash_claims} == {2, 8}
+        if missing == "mutually_exclusive_mistyped_cash":
+            claim, = gaps["exit_disposal_terms_unproved"]["cash_claims"]
+            assert (claim["cash_per_share"], claim["prepared_cash_per_share"]) == (2, 8)
+        return
+    if missing == "new_shares":
+        assert lots(day) == lots(later) == [(old, 101, 0)]
+        assert exchange == []
+        assert _cash_on(ledger["cash"], later) == dict(cash=cash, receivable=0)
+        assert manifest["disposition_gaps"][0]["fields"] == ["ratio"]
+        return
+    assert lots(day) == [(new, 67, 0)]
+    assert lots(pay_day) == lots(later) == [(new, 67, 0 if missing == "sellable_date" else 67)]
+    fraction_cash = 0 if missing == "fraction_rule" or fraction_conflict else 2
+    assert _cash_on(ledger["cash"], day) == dict(cash=cash, receivable=fraction_cash)
+    assert _cash_on(ledger["cash"], pay_day) == _cash_on(ledger["cash"], later) == dict(
+        cash=cash + fraction_cash, receivable=0,
+    )
+    assert len(exchange) == 1
+    assert (exchange[0]["old_quantity"], exchange[0]["quantity"], exchange[0]["fractional_shares"]) == (101, 67, "1/3")
+    assert exchange[0]["acquisition_lots"] == [[EL[1], 67]]
+    if fraction_conflict:
+        assert manifest["disposition_gaps"][0]["fields"] == ["fraction_cash_cny"]
+        assert [(row["source_ref"], row["amount_cny"]) for row in exchange[0]["fraction_cash_candidates"]] == [
+            ("alternate.json", 3), ("exchange.json", 2),
+        ]
+    elif missing:
+        assert manifest["disposition_gaps"][0]["fields"] == [missing]
+    attribution = account_attribution(
+        ledger, pd.DataFrame(), {"time_split": {"exchange": [day, later]}},
+        identity_events=exchange, cash_action_flows=manifest["cash_action_flows"],
+    )
+    assert attribution["by_period"]["exchange"]["unallocated_cny"] == pytest.approx(0)
+
+
+@ADMITTED
+@pytest.mark.parametrize("sell", [True, False, "all", "all-split", "fraction-only", "fraction-no-sale",
+                                  "fraction-no-date", "fraction-no-amount"],
+                         ids=["sell-original-lot", "no-sale", "sell-all-after-ex", "sell-all-split-lots",
+                              "cash-only-fraction", "cash-only-without-sale", "cash-only-no-pay-date",
+                              "cash-only-no-amount"])
+def test_same_day_lots_keep_tax_identity_after_share_exchange(tmp_path, sell):
+    import hashlib
+
+    from hetu_quant.backtest_evaluation import account_attribution
+    from hetu_quant.providers.baostock import BaoStockProvider
+
+    case = make_backtest_case("execution_clocks")
+    tables = case["tables"]
+    old, new = "SYN_A.SZ", "SYN_B.SZ"
+    first, buy_day, ex_day, payday = EL
+    exchange_day, release_day = "2024-01-08", "2024-01-09"
+    split_lots = sell == "all-split"
+    fraction_only = isinstance(sell, str) and sell.startswith("fraction-")
+    sell_successor = sell != "fraction-no-sale"
+    full_sale = sell in ("all", "all-split")
+    later_record = split_lots or fraction_only
+    prices = [10, 10, 10 if later_record else 9, 9, 9, 9]
+    days = [*EL, exchange_day, release_day]
+    for name in ("calendar", "daily_bars", "security_status"):
+        template = tables[name].iloc[[0]]
+        rows = []
+        for day, price in zip(days, prices, strict=True):
+            for code in ((old, new) if name != "calendar" and day <= payday
+                         else (new,) if name != "calendar" else (None,)):
+                row = template.assign(date=day)
+                if code is not None:
+                    row = row.assign(code=code)
+                if name == "daily_bars":
+                    row = row.assign(open_raw=price, close_raw=price, high_raw=price, low_raw=price)
+                rows.append(row)
+        tables[name] = pd.concat(rows, ignore_index=True)
+    hist = tables["historical_securities"]
+    tables["historical_securities"] = pd.concat([hist.assign(code=old, valid_to=payday), hist.assign(code=new)])
+    fee = 'stamp=sell:0;transfer=both:0;dividend=holding_diff(<=1m:20%,1m~1y:10%,>1y:0%)'
+    tables["trading_rules"] = tables["trading_rules"].assign(min_buy_qty="1", qty_step="1", fee_rule=fee)
+    raw = pd.DataFrame([dict(code=f"sz.{code.split('.')[0]}",
+                             dividOperateDate=exchange_day if later_record or full_sale and code == old else ex_day,
+                             dividRegistDate=payday if later_record else buy_day,
+                             dividPayDate=release_day if later_record or full_sale and code == old else payday,
+                             dividStockMarketDate='', dividCashPsBeforeTax='1',
+                             dividStocksPs='0', dividReserveToStockPs='0', dividPreNoticeDate='2023-10-20')
+                        for code in (old, new)])
+    tables["corporate_actions"] = BaoStockProvider().standardize(
+        "cn_a_actions", raw, {"tables": ["corporate_actions"]},
+    )["corporate_actions"]
+    original = json.dumps(dict(kind="special_exchange", event_id="exchange-tax", from_code=old, to_code=new,
+                               effective_date=exchange_day, available_at=exchange_day+"T08:00:00+08:00",
+                               old_shares=3, new_shares=2, credit_date=exchange_day, share_rule="whole_shares",
+                               fraction_rule="cash_in_lieu",
+                               fraction_cash_per_share=None if sell == "fraction-no-amount" else 6,
+                               fraction_currency="CNY", fraction_unit="元/股",
+                               fraction_pay_date=None if sell == "fraction-no-date" else release_day,
+                               sellable_date=release_day)).encode()
+    case["evidence_files"] = {"exchange-tax.json": original}
+    tables["share_exchanges"] = pd.DataFrame([dict(from_code=old, to_code=new, effective_date=exchange_day,
+                                                   event_id="exchange-tax", evidence_ref="exchange-tax.json",
+                                                   sha256=hashlib.sha256(original).hexdigest())])
+    case["definition"]["end"] = release_day
+    case["definition"]["protocol"]["costs"].update(commission_rate=0, min_commission_cny=0)
+    case["signals"] = [dict(signal_at=first, executable_from=buy_day, code=code, target_weight=weight)
+                       for code, weight in ((old, .001 if later_record else .101), (new, .15))]
+    if split_lots:
+        case["signals"].extend(dict(signal_at=buy_day, executable_from=ex_day, code=code, target_weight=weight)
+                               for code, weight in ((old, .101), (new, .15)))
+    if full_sale or fraction_only and sell_successor:
+        case["signals"].append(dict(signal_at=exchange_day, executable_from=release_day, code=new, target_weight=0))
+    elif sell is True:
+        case["signals"].append(dict(signal_at=payday, executable_from=exchange_day, code=new, target_weight=.09))
+
+    out = _run_case(tmp_path, "exchange-lot-tax", case)
+    ledger = _tables(out)
+    manifest = json.loads((out / "backtest.json").read_text())
+    buys = ledger["trades"].loc[ledger["trades"].side.eq("BUY")]
+    old_buys = [(old, 1, buy_day)] if later_record else [(old, 101, buy_day)]
+    if split_lots:
+        old_buys.append((old, 100, ex_day))
+    assert sorted(zip(buys.code, buys.qty, buys.executed_at, strict=True)) == [*old_buys, (new, 150, buy_day)]
+    sells = ledger["trades"].loc[ledger["trades"].side.eq("SELL")]
+    event, = manifest["identity_transition_events"]
+    converted_lot_day = ex_day if split_lots else buy_day
+    liability = ledger["cash"].set_index("date")["dividend_tax_payable"]
+    observed_cash = _cash_on(ledger["cash"], exchange_day)
+    if fraction_only:
+        print(f"{sell}: trade_tax={sells.dividend_tax.tolist()} payable={liability[release_day]:.2f} "
+              f"closing_cash={_cash_on(ledger['cash'], release_day)}")
+        assert (event["old_quantity"], event["quantity"], event["fractional_shares"]) == (1, 0, "2/3")
+        assert event["acquisition_lots"] == []
+        assert event["prior_successor"]["acquisition_lots"] == [[buy_day, 150]]
+        assert observed_cash == {"cash": 8490, "receivable": 151 if sell == "fraction-no-amount" else 155}
+        assert liability[exchange_day] == pytest.approx(30.20)
+        assert list(zip(sells.code, sells.qty, sells.dividend_tax, strict=True)) == (
+            [(new, 150, 30)] if sell_successor else []
+        )
+        entitlements = {row["record_code"]: row["amount_cny"] for row in manifest["cash_action_flows"]
+                        if row["kind"] == "cash_dividend"}
+        assert entitlements == {old: 1, new: 150}
+        settlement = [row for row in manifest["dividend_tax_withholdings"] if row["trade_id"] is None]
+        if sell in ("fraction-no-date", "fraction-no-amount"):
+            assert settlement == []
+            assert liability[release_day] == pytest.approx(.20)
+            assert _cash_on(ledger["cash"], release_day) == {
+                "cash": 9961, "receivable": 4 if sell == "fraction-no-date" else 0,
+            }
+            return
+        assert liability[release_day] == pytest.approx(0 if sell_successor else 30)
+        assert _cash_on(ledger["cash"], release_day) == {
+            "cash": pytest.approx(9964.80 if sell_successor else 8644.80), "receivable": 0,
+        }
+        withheld, = settlement
+        assert withheld["amount"] == pytest.approx(.20)
+        assert withheld["day"] == release_day
+        assert withheld["lots"] == [dict(original_code=old, buy_date=buy_day, disposed_quantity=1)]
+        assert withheld["cash_settlement"] == dict(event_id="exchange-tax", amount_cny=4,
+                                                  source_ref="bundle:evidence/exchange-tax.json")
+        paid_tax = ledger["costs"].loc[ledger["costs"].cost_type.eq("dividend_tax"), "amount"].sum()
+        assert paid_tax == pytest.approx(30.20 if sell_successor else .20)
+        assert _nav_on(ledger["nav"], release_day) == pytest.approx(9964.80)
+        assert ledger["nav"].set_index("date").loc[release_day, "gross_nav"] == pytest.approx(9995)
+        attribution = account_attribution(
+            ledger, pd.DataFrame(), {"time_split": {"cash_settlement": [release_day, release_day]}},
+            identity_events=manifest["identity_transition_events"], cash_action_flows=manifest["cash_action_flows"],
+        )
+        assert attribution["by_period"]["cash_settlement"]["unallocated_cny"] == pytest.approx(0)
+        return
+    assert event["acquisition_lots"] == [[converted_lot_day, 67]]
+    assert event["prior_successor"]["acquisition_lots"] == [[buy_day, 150]]
+    end = ledger["positions"].loc[ledger["positions"].date.eq(exchange_day)]
+    assert list(zip(end.code, end.qty, end.sellable_qty, strict=True)) == [
+        (new, 117, 50) if sell is True else (new, 217, 150),
+    ]
+    flows = [row for row in manifest["cash_action_flows"] if row["date"] == exchange_day
+             and row["kind"] == "dividend_tax_accrual"]
+    print(f"sell={sell}: withholding={sells.dividend_tax.tolist()} payable={liability[exchange_day]:.2f} "
+          f"cash={observed_cash} liability_flows={flows}")
+    if full_sale:
+        sale, = sells.itertuples()
+        assert (sale.code, sale.qty, sale.executed_at) == (new, 217, release_day)
+        print(f"full close: tax={sale.dividend_tax:.2f}, payable={liability[release_day]:.2f}, "
+              f"cash={_cash_on(ledger['cash'], release_day)}")
+        assert sale.dividend_tax == pytest.approx(50.20)
+        assert liability[payday] == pytest.approx(0 if split_lots else 30)
+        assert liability[exchange_day] == pytest.approx(50.20)
+        assert liability[release_day] == 0
+        expected_exchange_cash = {"cash": 7490, "receivable": 253} if split_lots else {"cash": 7640, "receivable": 103}
+        assert observed_cash == expected_exchange_cash
+        assert _cash_on(ledger["cash"], release_day) == {"cash": pytest.approx(9645.80), "receivable": 0}
+        entitled, = [row for row in manifest["cash_action_flows"] if row.get("record_code") == old]
+        assert (entitled["record_date"], entitled["date"], entitled["pay_date"]) == (
+            payday if split_lots else buy_day, exchange_day, release_day,
+        )
+        assert (entitled["entitled_qty"], entitled["amount_cny"]) == (101, 101)
+        entitlements = entitled["entitlement_lots"]
+        if split_lots:
+            assert [(lot["original_code"], lot["buy_date"], lot["registered_quantity"]) for lot in entitlements] == [
+                (old, buy_day, 1), (old, ex_day, 100),
+            ]
+            assert entitlements[0]["tax_lot"] == dict(original_code=old, buy_date=ex_day)
+        else:
+            assert entitlements == [dict(original_code=old, buy_date=buy_day,
+                                         registered_quantity=101, untaxed_quantity=67)]
+        tax_record, = manifest["dividend_tax_withholdings"]
+        assert tax_record["trade_id"] == sale.trade_id
+        assert {(lot["original_code"], lot["buy_date"]): lot["sold_quantity"] for lot in tax_record["lots"]} == {
+            (old, converted_lot_day): 67, (new, buy_day): 150,
+        }
+        assert ledger["positions"].loc[ledger["positions"].date.eq(release_day)].empty
+        attribution = account_attribution(
+            ledger, pd.DataFrame(), {"time_split": {"exchange": [exchange_day, exchange_day],
+                                                   "close": [release_day, release_day]}},
+            identity_events=manifest["identity_transition_events"], cash_action_flows=manifest["cash_action_flows"],
+        )
+        assert attribution["by_security"][new]["observed_pnl_cny"] == {
+            "exchange": pytest.approx(-103.2 if split_lots else -223.2), "close": pytest.approx(0),
+        }
+        assert all(part["unallocated_cny"] == pytest.approx(0) for part in attribution["by_period"].values())
+        return
+    if sell:
+        sale, = sells.itertuples()
+        assert (sale.code, sale.qty, sale.executed_at, sale.dividend_tax) == (new, 100, exchange_day, 20)
+        tax_record, = manifest["dividend_tax_withholdings"]
+        assert tax_record["trade_id"] == sale.trade_id
+        assert tax_record["lots"] == [dict(original_code=new, buy_date=buy_day, sold_quantity=100)]
+        flow, = flows
+        assert flow["code"] == new and flow["amount_cny"] == pytest.approx(20)
+    else:
+        assert sells.empty and flows == []
+        assert manifest["dividend_tax_withholdings"] == []
+    assert liability[payday] == pytest.approx(50.20)
+    assert liability[exchange_day] == pytest.approx(30.20 if sell else 50.20)
+    assert observed_cash == {"cash": 8621 if sell else 7741, "receivable": 2}
+    attribution = account_attribution(
+        ledger, pd.DataFrame(), {"time_split": {"exchange": [exchange_day, exchange_day]}},
+        identity_events=manifest["identity_transition_events"], cash_action_flows=manifest["cash_action_flows"],
+    )
+    assert attribution["by_security"][new]["observed_pnl_cny"]["exchange"] == pytest.approx(-304)
+    assert attribution["by_period"]["exchange"]["unallocated_cny"] == pytest.approx(0)

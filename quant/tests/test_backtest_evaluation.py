@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-
-from hetu_quant.backtest_evaluation import evaluate_backtest
+from backtest_cases import build_case_store
+from hetu_quant.backtest_evaluation import evaluate_backtest, research_exposure_inputs
 
 RESEARCH_DIR = Path(__file__).resolve().parents[1] / "research"
 FINAL_WINDOW = ("2024-01-02", "2024-12-31")
@@ -118,6 +118,135 @@ def test_economic_decision_is_not_execution_status() -> None:
     mechanism = evaluate_backtest(_hand_fact_tables(), _protocol(stage="mechanism"))
     assert mechanism["economic_status"] == "not_evaluated"
     assert mechanism["research_status"] == "not_evaluated"
+
+
+def test_evaluation_uses_verified_size_industry_and_market_state() -> None:
+    tables = _hand_fact_tables()
+    tables["nav"] = pd.DataFrame(
+        [("2024-01-02", 1e6, 1e6, 1e6), ("2024-01-31", 1.2e6, 1.2e6, 1.1e6),
+         ("2024-02-29", 1.08e6, 1.08e6, 0.99e6)],
+        columns=["date", "gross_nav", "net_nav", "benchmark_nav"],
+    )
+    tables["calendar"] = pd.DataFrame({"date": tables["nav"]["date"], "is_trading_day": True})
+    tables["targets"] = pd.DataFrame([
+        dict(signal_at="2023-12-29", executable_from="2024-01-02", code=code, target_weight=0.5)
+        for code in ("A", "B")
+    ])
+    tables["positions"] = pd.DataFrame([
+        dict(date="2024-01-02", code="A", market_value=400_000),
+        dict(date="2024-01-02", code="B", market_value=200_000),
+    ])
+    tables["exposure_facts"] = pd.DataFrame([
+        dict(signal_at="2023-12-29", code="A", market_cap_cny=100e6, market_cap_source="cap-A", industry="I",
+             industry_source="member-A"),
+        dict(signal_at="2023-12-29", code="B", market_cap_cny=200e6, market_cap_source="cap-B"),
+    ])
+    result = evaluate_backtest(tables, _protocol())["metrics"]
+    observed = result["exposures"]["snapshots"][0]
+    assert observed["actual"]["size"]["weighted_mean_market_cap_cny"] == pytest.approx(400e6 / 3)
+    assert observed["target"]["size"]["weighted_mean_market_cap_cny"] == 150e6
+    assert observed["actual"]["industry"]["weights"] == {"I": pytest.approx(0.4)}
+    assert observed["actual"]["industry"]["unknown_weight"] == pytest.approx(0.2)
+    assert observed["actual"]["industry"]["status"] == "limited"
+    assert result["market_states"]["states"]["up"]["net_return"] == pytest.approx(0.20)
+    assert result["market_states"]["states"]["down"]["benchmark_return"] == pytest.approx(-0.10)
+    assert result["market_states"]["states"]["up"]["periods"][0]["window"] == ["2024-01-02", "2024-01-31"]
+
+
+def test_market_state_zero_month_anchor_is_an_evidence_gap() -> None:
+    tables = _hand_fact_tables()
+    tables["nav"] = pd.DataFrame(
+        [("2024-01-02", 1e6, 1e6, 1e6), ("2024-01-31", 0, 0, 1.1e6),
+         ("2024-02-29", 0, 0, 1.2e6)],
+        columns=["date", "gross_nav", "net_nav", "benchmark_nav"],
+    )
+    tables["calendar"] = pd.DataFrame({"date": tables["nav"]["date"], "is_trading_day": True})
+    states = evaluate_backtest(tables, _protocol())["metrics"]["market_states"]
+    assert states["status"] == "limited"
+    assert states["states"]["up"]["net_return"] == -1.0
+    assert states["gaps"][0]["window"] == ["2024-02-29", "2024-02-29"]
+
+
+def test_market_states_do_not_use_an_early_mark_as_month_end() -> None:
+    tables = _hand_fact_tables()
+    tables["nav"] = pd.DataFrame(
+        [("2024-01-02", 1e6, 1e6, 1e6), ("2024-01-10", 1.1e6, 1.1e6, 1.1e6),
+         ("2024-02-01", 1.15e6, 1.15e6, 1.2e6)],
+        columns=["date", "gross_nav", "net_nav", "benchmark_nav"],
+    )
+    tables["calendar"] = pd.DataFrame(
+        {"date": ["2024-01-02", "2024-01-10", "2024-01-31", "2024-02-01", "2024-03-29"], "is_trading_day": True},
+    )
+    states = evaluate_backtest(tables, _protocol())["metrics"]["market_states"]
+    assert not states["states"]
+    assert [item["reason"] for item in states["gaps"]] == [
+        "缺完整交易日历或月段配对净值", "缺月段开始前的配对净值", "整个月段无配对净值",
+    ]
+
+
+def test_market_month_requires_daily_paired_nav() -> None:
+    tables = _hand_fact_tables()
+    tables["nav"] = pd.DataFrame([
+        ("2024-01-02", 1e6, 1e6, 1e6), ("2024-01-15", 1e6, 1e6, float("nan")),
+        ("2024-01-31", 1.05e6, 1.05e6, 1.01e6), ("2024-02-29", 1.1e6, 1.1e6, 1.02e6),
+    ], columns=tables["nav"].columns)
+    tables["calendar"] = pd.DataFrame({"date": tables["nav"]["date"], "is_trading_day": True})
+    report = evaluate_backtest(tables, _protocol())
+    assert report["economic_status"] == "insufficient_evidence"
+    states = report["metrics"]["market_states"]
+    assert [(g["date"], g["field"], g["side"]) for g in states["gaps"][0]["daily"]] == [
+        ("2024-01-15", "benchmark_nav", "benchmark"),
+    ]
+    assert [part["window"] for part in states["states"]["up"]["periods"]] == [["2024-02-29", "2024-02-29"]]
+
+
+def test_pressure_without_same_pool_series_keeps_main_comparison() -> None:
+    tables = _hand_fact_tables()
+    report = evaluate_backtest(tables, _protocol(comparison={"purpose": "sensitivity_vs_main"}))
+    metrics = report["metrics"]
+    assert metrics["comparison"]["reference_trial"] == "final_main"
+    assert metrics["comparison"]["reference_return"] == pytest.approx(0)
+    states = metrics["market_states"]
+    assert states["status"] == "unknown"
+    assert states["states"] == {}
+    assert states["gaps"][0]["reason"] == "缺同池 universe_vw 账户净值"
+
+
+def test_exposure_inputs_preserve_historical_classification_and_selected_size(tmp_path) -> None:
+    purpose = "backtest_low_volatility"
+    signal = "2024-01-31"
+    board = dict(board_id="I1", board_kind="industry", name="合成行业", provider="fixture", classification_version="v1")
+    member = dict(board_id="I1", observed_at="2024-01-01", available_at="2024-01-01T12:00:00+08:00",
+                  effective_from="2024-01-01", effective_to="", membership_kind="historical")
+    store, source = build_case_store(tmp_path, {
+        "obtained_at": "2024-02-01T18:00:00+08:00",
+        "csvs": {
+            "boards": pd.DataFrame([board]).to_csv(index=False),
+            "memberships": pd.DataFrame([
+                dict(member, code="A"), dict(member, code="B", available_at=f"{signal}T18:00:00+08:00"),
+                dict(member, code="C", membership_kind="current_snapshot"),
+            ]).to_csv(index=False),
+        },
+        "table_products": {
+            "boards": ("test_exposure_boards", "catalog"), "memberships": ("test_exposure_members", "catalog"),
+        },
+        "permissions": {table: {"allowed_uses": [purpose]} for table in ("boards", "memberships")},
+    })
+    bundle = tmp_path / "bundle-tables"
+    bundle.mkdir()
+    pd.DataFrame([
+        dict(code="A", date=signal, market_cap_cny=100e6, available_at=f"{signal}T14:00:00+08:00", source_ref="cap-A"),
+        dict(code="A", date=signal, market_cap_cny=200e6, available_at=f"{signal}T18:00:00+08:00", source_ref="late-A"),
+    ]).to_parquet(bundle / "market_cap.parquet")
+    pd.DataFrame().to_parquet(bundle / "knowledge_evidence.parquet")
+    targets = pd.DataFrame([dict(signal_at=signal, executable_from="2024-02-01", code=code)
+                            for code in ("A", "B", "C")])
+    rows = research_exposure_inputs(store, source, purpose, {"targets": targets}, bundle).set_index("code")
+    assert rows.at["A", "market_cap_cny"] == 100e6
+    assert rows.at["A", "market_cap_source"] == "cap-A"
+    assert rows.at["A", "industry"] == "I1"
+    assert rows.at["B", "industry"] is None or pd.isna(rows.at["B", "industry"])
+    assert rows.at["C", "industry"] is None or pd.isna(rows.at["C", "industry"])
 
 
 def test_zero_excess_is_not_income_target() -> None:
@@ -523,3 +652,108 @@ def test_statistics_ignore_nav_after_evaluation_end():
     second = evaluate_backtest(changed, _protocol())
     assert first['statistics'] == second['statistics']
     assert first['metrics']['net_return_window'] == second['metrics']['net_return_window']
+
+
+def test_rename_attribution_carries_pretransfer_value_without_fake_flows():
+    from hetu_quant.backtest_evaluation import account_attribution
+
+    positions = pd.DataFrame([
+        dict(date="2024-01-01", code="OLD", qty=100, market_value=600),
+        dict(date="2024-01-02", code="NEW", qty=100, market_value=660),
+    ])
+    nav = pd.DataFrame([dict(date="2024-01-01", net_nav=600), dict(date="2024-01-02", net_nav=660)])
+    result = account_attribution(
+        {"positions": positions, "nav": nav}, pd.DataFrame(), _protocol(),
+        identity_events=[dict(from_code="OLD", code="NEW", date="2024-01-02", quantity=100)],
+    )
+    assert result["by_security"]["OLD"]["observed_pnl_cny"]["final"] == 0
+    assert result["by_security"]["NEW"]["observed_pnl_cny"]["final"] == 60
+    assert result["by_period"]["final"]["unallocated_cny"] == 0
+    assert result["identity_transfers"][0]["transferred_market_value_cny"] == 600
+
+
+def test_attribution_uses_source_signal_and_actual_fills():
+    from hetu_quant import backtest_evaluation
+
+    tables = {
+        "signals": pd.DataFrame([{"code": "A", "signal_value": 0.6}]),
+        "orders": pd.DataFrame([
+            {"code": "A", "status": "FILLED", "reason": "", "requested_qty": 100, "filled_qty": 60},
+            {"code": "B", "status": "REJECTED", "reason": "suspended", "requested_qty": 100, "filled_qty": 0},
+        ]),
+        "costs": pd.DataFrame([
+            {"code": "A", "amount": 5, "cost_type": "commission"},
+            {"code": "A", "amount": 1, "cost_type": "slippage_cost"},
+        ]),
+    }
+    source = pd.DataFrame([{"code": "A", "signal_at": "2024-01-31", "signal_value": 0.02,
+                            "rank": 1, "target_weight": 0.6}])
+    attribution = getattr(backtest_evaluation, "account_attribution", None)
+    assert attribution is not None
+    result = attribution(tables, source, _protocol())
+    a, b = result["by_security"]["A"], result["by_security"]["B"]
+    assert a["signal_values"] == [0.02]
+    assert a["unfilled_qty"] == 40 and a["explicit_fees_cny"] == 5
+    assert b["unfilled_pnl_cny"] is None and b["unfilled_reasons"] == ["suspended"]
+
+
+@pytest.mark.parametrize(("has_action_evidence", "pnl", "unallocated"), [(True, 0, 0), (False, -100, 100)])
+def test_cash_dividend_attribution_requires_security_evidence(has_action_evidence, pnl, unallocated):
+    from hetu_quant.backtest_evaluation import account_attribution
+
+    tables = {
+        "positions": pd.DataFrame([
+            {"date": "2024-01-01", "code": "A", "qty": 100, "market_value": 1000},
+            {"date": "2024-01-02", "code": "A", "qty": 100, "market_value": 900},
+        ]),
+        "cash": pd.DataFrame([
+            {"date": "2024-01-01", "cash_available": 0, "receivable": 0, "dividend_tax_payable": 0},
+            {"date": "2024-01-02", "cash_available": 0, "receivable": 100, "dividend_tax_payable": 0},
+        ]),
+        "nav": pd.DataFrame([{"date": day, "net_nav": 1000} for day in ("2024-01-01", "2024-01-02")]),
+    }
+    evidence = [{"code": "A", "date": "2024-01-02", "kind": "cash_dividend",
+                 "amount_cny": 100, "entitled_qty": 100, "cash_per_share": 1,
+                 "record_date": "2024-01-01", "pay_date": "2024-01-03",
+                 "source_ref": "bundle:corporate_actions.parquet"}] if has_action_evidence else []
+    result = account_attribution(tables, pd.DataFrame(), _protocol(), cash_action_flows=evidence)
+    assert result["by_security"]["A"]["observed_pnl_cny"]["final"] == pnl
+    final = result["by_period"]["final"]
+    assert final["cash_action_pnl_cny"] == (100 if has_action_evidence else 0)
+    assert (final["observed_pnl_cny"], final["unallocated_cny"], final["net_nav_change_cny"]) == (pnl, unallocated, 0)
+
+
+def test_attribution_traces_actual_holdings_and_orders_by_signal_date():
+    from hetu_quant.backtest_evaluation import account_attribution
+
+    targets = pd.DataFrame([
+        {"signal_at": "2024-01-31", "executable_from": "2024-02-01", "code": "A", "target_weight": .6},
+        {"signal_at": "2024-02-29", "executable_from": "2024-03-01", "code": "A", "target_weight": 0},
+    ])
+    tables = {
+        "targets": targets,
+        "nav": pd.DataFrame([{"date": "2024-02-01", "net_nav": 1500}, {"date": "2024-03-01", "net_nav": 1200}]),
+        "positions": pd.DataFrame([
+            {"date": "2024-02-01", "code": "A", "qty": 60, "market_value": 600},
+            {"date": "2024-03-01", "code": "A", "qty": 60, "market_value": 480},
+        ]),
+        "orders": pd.DataFrame([
+            {"signal_at": "2024-01-31", "order_id": "buy-1", "code": "A", "submitted_at": "2024-02-01",
+             "requested_qty": 100, "filled_qty": 60, "status": "PARTIAL", "reason": "capacity"},
+            {"signal_at": "2024-02-29", "order_id": "", "code": "A", "submitted_at": "2024-03-01",
+             "requested_qty": 60, "filled_qty": 0, "status": "REJECTED", "reason": "suspended"},
+        ]),
+    }
+    source = pd.DataFrame([
+        {"signal_at": "2024-01-31", "code": "A", "signal_value": .02, "rank": 1, "target_weight": .6},
+    ])
+    result = account_attribution(tables, source, _protocol())
+    before_exit, after_exit = result["by_security"]["A"]["position_deviations"]
+    assert before_exit["signal_at"] == "2024-01-31" and before_exit["executable_from"] == "2024-02-01"
+    assert before_exit["actual_qty"] == 60 and before_exit["actual_market_value_cny"] == 600
+    assert before_exit["actual_weight"] == pytest.approx(.4)
+    assert before_exit["weight_deviation"] == pytest.approx(-.2)
+    assert before_exit["orders"][0]["order_id"] == "buy-1"
+    assert after_exit["signal_at"] == "2024-02-29" and after_exit["executable_from"] == "2024-03-01"
+    assert after_exit["target_weight"] == 0 and after_exit["weight_deviation"] == pytest.approx(.4)
+    assert after_exit["orders"][0]["reason"] == "suspended"

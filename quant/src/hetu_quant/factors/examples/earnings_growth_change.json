@@ -1,0 +1,50 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "financial_reports": [
+      {
+        "code": "A",
+        "period": "2022Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 10
+      },
+      {
+        "code": "A",
+        "period": "2022Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 10
+      },
+      {
+        "code": "A",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 11
+      },
+      {
+        "code": "A",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 12
+      }
+    ]
+  }
+}

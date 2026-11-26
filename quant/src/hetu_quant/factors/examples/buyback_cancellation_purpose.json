@@ -1,0 +1,24 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "events": [
+      {
+        "code": "A",
+        "event_id": "EV1",
+        "kind": "buyback",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成公开事项原件",
+        "state": "已通过",
+        "plan_amount_upper": 1000000.0,
+        "paid": 200000.0,
+        "currency": "CNY",
+        "price_cap": 1250,
+        "price_unit": "分/股",
+        "purpose": "注销并减少注册资本"
+      }
+    ]
+  }
+}

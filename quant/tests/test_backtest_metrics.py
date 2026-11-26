@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
-
 from hetu_quant.backtest_evaluation import (
     block_bootstrap_intervals,
     factor_diagnostics,
@@ -156,6 +155,10 @@ def test_monthly_aligned_returns() -> None:
     assert monthly["benchmark_return"].tolist()[0] == pytest.approx(0.0)
     assert monthly["benchmark_return"].tolist()[1] == pytest.approx(0.05)
 
+    gapped = monthly_aligned_returns(nav[nav["date"].ne("2024-02-29")])
+    assert gapped["month"].tolist() == ["2024-03"]
+    assert gapped[["net_return", "benchmark_return"]].isna().all().all()
+
 
 def test_block_bootstrap_contract_and_determinism() -> None:
     """合同：块长 3 月、1,000 次、seed 20261017；同输入同区间（确定性）；
@@ -254,6 +257,35 @@ def test_factor_diagnostics_requires_label_return() -> None:
                 }
             )
         )
+
+
+@pytest.mark.parametrize("months, expected", [
+    (["01", "02", "03", "04"], 2),
+    (["01", "04", "07", "10"], 4),
+])
+def test_effective_windows_count_nonoverlapping_dates(months, expected) -> None:
+    rows = pd.DataFrame([
+        dict(code="A", signal_at=f"2024-{month}-29", horizon_months=3, factor_value=0.2 * i, label_return=0.1 * i)
+        for i, month in enumerate(months, start=1)
+    ])
+    result = factor_diagnostics(rows)["horizons"]["3"]
+    assert result["effective_nonoverlapping_windows"] == expected
+    assert len(result["nonoverlapping_windows"]) == expected
+
+
+def test_effective_windows_use_actual_maturity_and_skip_missing_returns() -> None:
+    rows = pd.DataFrame([
+        ("2024-01-31", "2024-04-30", 0.01),
+        ("2024-04-29", "2024-07-31", 0.03),
+        ("2024-04-30", "2024-07-31", 0.02),
+        ("2024-07-31", "2024-10-31", None),
+    ], columns=["signal_at", "mature_at", "label_return"]).assign(code="A", horizon_months=3)
+    rows["factor_value"] = [1.0, 3.0, 2.0, 4.0]
+    result = factor_diagnostics(rows)["horizons"]["3"]
+    assert result["nonoverlapping_windows"] == [
+        {"signal_at": "2024-01-31", "mature_at": "2024-04-30"},
+        {"signal_at": "2024-04-30", "mature_at": "2024-07-31"},
+    ]
 
 
 def test_industry_exposure_unknown_without_historical_classification() -> None:

@@ -16,10 +16,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from zoneinfo import ZoneInfo
 
 CN = ZoneInfo("Asia/Shanghai")
@@ -53,7 +55,9 @@ def _count_runs(trials: list[dict]) -> int:
     return sum(1 for row in trials if row.get("status") != "refused_budget")
 
 
-def _gaps(protocol_path: Path, payload: dict, data_root: Path) -> list[str]:
+def _gaps(payload: dict, data_root: Path) -> list[str]:
+    from hetu_quant.backtest import EngineNotAdmittedError, _default_admission_path, _require_admission
+
     gaps: list[str] = []
     definition = payload["definition"]
     snapshot_id = str(definition.get("snapshot_id", ""))
@@ -64,11 +68,24 @@ def _gaps(protocol_path: Path, payload: dict, data_root: Path) -> list[str]:
     admission = Path(data_root) / "qualification" / "phase2"
     if not admission.exists():
         gaps.append("引擎／数据准入证据目录缺失，formal 数值运行受阻")
+    else:
+        try:
+            _require_admission(_default_admission_path(data_root))
+        except (EngineNotAdmittedError, OSError, ValueError) as error:
+            gaps.append(str(error))
     return gaps
+
+
+def _check_admission_evidence(payload: dict, data_root: Path) -> None:
+    gaps = _gaps(payload, data_root)
+    if gaps:
+        raise ValueError("run_validation blocked: " + "; ".join(gaps))
 
 
 def plan_validation(protocol_path: Path, data_root: Path, output_dir: Path) -> dict:
     """只读现有资产，返回范围／缺口／次数与成本；不计算策略、不调引擎。"""
+    from hetu_quant.data_research import frozen_trial_qualification
+
     payload = _load_protocol(Path(protocol_path))
     definition = payload["definition"]
     protocol = definition["protocol"]
@@ -90,9 +107,10 @@ def plan_validation(protocol_path: Path, data_root: Path, output_dir: Path) -> d
         },
         "planned_runs": max_runs,
         "definitions": validation_definitions(payload),
+        "signal_qualification": frozen_trial_qualification(payload, Path(data_root), trials),
         "completed_trials": used,
         "remaining_budget": max_runs - used,
-        "gaps": _gaps(Path(protocol_path), payload, Path(data_root)),
+        "gaps": _gaps(payload, Path(data_root)),
         "costs": dict(ZERO_COSTS),
         "note": "plan-only 不产生任何信号／引擎调用；execute 须另获本次范围授权",
     }
@@ -158,6 +176,14 @@ def _resolved(trials: list[dict]) -> dict[str, dict]:
             if row.get("trial_id") and row.get("status") == "complete"}
 
 
+def _published_benchmark_rows(trials):
+    for row in reversed(trials):
+        run_id = row.get("run_id")
+        if (row.get("kind") == "benchmark" and row.get("status") == "complete"
+                and isinstance(run_id, str) and re.fullmatch(r"[A-Za-z0-9_-]+", run_id)):
+            yield row
+
+
 def _resolve_references(definitions: list[dict], trials: list[dict], data_root: Path) -> dict[str, dict]:
     from hetu_quant.backtest import validate_benchmark_reference
     from hetu_quant.backtest_models import BacktestRef, backtest_definition_from_dict
@@ -166,9 +192,7 @@ def _resolve_references(definitions: list[dict], trials: list[dict], data_root: 
     for row in definitions:
         if row["reference_trial"] is not None or row["trial_id"] in done:
             continue
-        for prior in reversed(trials):
-            if prior.get("kind") != "benchmark" or prior.get("status") != "complete" or not prior.get("run_id"):
-                continue
+        for prior in _published_benchmark_rows(trials):
             ref = BacktestRef(run_id=prior["run_id"], root=data_root, status="complete")
             try:
                 validate_benchmark_reference(backtest_definition_from_dict(row["definition"]), ref)
@@ -179,42 +203,208 @@ def _resolve_references(definitions: list[dict], trials: list[dict], data_root: 
     return done
 
 
-def _run_engine_once(protocol_path: Path, data_root: Path, output_dir: Path,
-                     *, phase: str = "development_validation", trial_id: str | None = None,
-                     payload: dict | None = None, progress=None, cancelled=None) -> dict:
-    from hetu_quant.backtest import run_backtest, validate_benchmark_reference
-    from hetu_quant.backtest_models import BacktestRef, backtest_definition_from_dict
-    from hetu_quant.data import DataStore
-
-    queued_payload = payload is not None
-    payload = payload if queued_payload else _load_protocol(protocol_path)
-    ledger = _ledger_path(data_root, payload["study_id"])
-    trials = _read_trials(ledger)
-    definitions = validation_definitions(payload)
+def _execution_scope(definitions, trials, data_root, phase, trial_id):
     by_id = {row["trial_id"]: row for row in definitions}
     done = _resolve_references(definitions, trials, data_root)
-    selected = next(row for row in definitions if row["trial_id"] == trial_id)
-    needed = []
+    attempted = {row.get("trial_id") for row in trials if row.get("status") != "refused_budget"}
+    candidates = (row for row in definitions if row["phase"] == phase
+                  and row["trial_id"] not in attempted and row["reference_trial"] is not None)
+    selected = by_id.get(trial_id) if trial_id else next(candidates, None)
+    if selected is None:
+        return None, [], done
+    key = selected["trial_id"]
+    completed_benchmark = selected["reference_trial"] is None and any(
+        row.get("trial_id") == key and row.get("kind") == "benchmark" and row.get("status") == "complete"
+        for row in trials
+    )
+    if selected["phase"] != phase or (key in attempted and not completed_benchmark):
+        raise ValueError("trial already attempted or phase mismatch; no automatic retry")
+    needed = {}
 
     def collect(row):
-        if row["trial_id"] in done:
+        key = row["trial_id"]
+        if key in done or key in needed:
             return
         for dependency in row["dependencies"]:
             collect(by_id[dependency])
-        if row not in needed:
-            needed.append(row)
+        needed[key] = row
+
     collect(selected)
-    runs = []
-    store = DataStore(data_root)
-    for index, row in enumerate(needed):
+    if attempted.intersection(needed):
+        raise ValueError("failed dependency retained; explicit review required before further execution")
+    return selected, list(needed.values()), done
+
+
+def _read_reused_benchmark(selected, prior, store, trials, *, cancelled=None, qualification_delivery=None):
+    from hetu_quant.backtest import BacktestCancelled, prepare_backtest
+    from hetu_quant.backtest_models import backtest_definition_from_dict
+
+    candidates = [prior]
+    if selected["trial_id"] not in _resolved(trials):
+        # 依赖解析许可候选使用基准前缀。整账户复用须继续检查其余原发布物。
+        candidates.extend(row for row in _published_benchmark_rows(trials) if row["run_id"] != prior["run_id"])
+    definition = backtest_definition_from_dict(selected["definition"])
+    failures = []
+    with TemporaryDirectory(prefix="hetu-benchmark-reuse-") as workdir:
+        bundle = Path(workdir) / "bundle"
+        input_options = {"qualification_delivery": qualification_delivery} if qualification_delivery is not None else {}
+        report = prepare_backtest(definition, store, bundle, record_qualification=False, **input_options)
+        if not report.can_run:
+            raise ValueError(", ".join(report.limitations) or "cannot verify comparable benchmark inputs")
+        for row in candidates:
+            if cancelled is not None and cancelled():
+                raise BacktestCancelled("cancelled during benchmark verification")
+            try:
+                evaluation = _verify_reused_benchmark(definition, store.root, bundle, row.get("run_id"))
+            except (ValueError, OSError, KeyError) as error:
+                failures.append(error)
+                continue
+            if cancelled is not None and cancelled():
+                raise BacktestCancelled("cancelled during benchmark verification")
+            return row, evaluation
+    raise failures[0]
+
+
+def _verify_reused_benchmark(definition, data_root, bundle, run_id):
+    from hetu_quant.backtest import validate_benchmark_reference
+    from hetu_quant.backtest_models import BacktestRef
+
+    if not isinstance(run_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
+        raise ValueError("completed benchmark lacks a valid published run")
+    reference = BacktestRef(run_id=run_id, root=data_root, status="complete")
+    manifest = validate_benchmark_reference(definition, reference, bundle)
+    published = manifest["definition"]
+    requested_interval = (definition.start.isoformat(), definition.end.isoformat())
+    published_interval = (published.get("start"), published.get("end"))
+    if published_interval != requested_interval:
+        raise ValueError(f"incompatible_benchmark: execution_interval {published_interval} != {requested_interval}")
+    if (manifest.get("run_id") != run_id or published.get("mode") != definition.mode
+            or published.get("market") != definition.market or published["protocol"].get("stage") != "formal"):
+        raise ValueError("incompatible_benchmark: publication identity, market, mode or stage")
+    evaluation = json.loads((data_root / "backtests" / run_id / "evaluation.json").read_text())
+    required = {"research_status", "economic_status", "research_conclusion", "next_decision"}
+    if not isinstance(evaluation, dict) or not required.issubset(evaluation):
+        raise ValueError("incompatible_benchmark: published evaluation is incomplete")
+    if evaluation["research_status"] == "blocked":
+        raise ValueError("incompatible_benchmark: published evaluation is blocked")
+    return evaluation
+
+
+def _qualify_candidate_reference(definition, data_root, bundle, prior, alternatives):
+    from hetu_quant.backtest import validate_benchmark_reference
+    from hetu_quant.backtest_models import BacktestRef
+
+    failures = []
+    for row in (prior, *alternatives):
+        reference = BacktestRef(run_id=row["run_id"], root=data_root, status="complete")
+        try:
+            validate_benchmark_reference(definition, reference, bundle)
+        except (ValueError, OSError, KeyError) as error:
+            failures.append(error)
+        else:
+            return row
+    raise failures[0]
+
+
+def _qualification_input_options(payload, store):
+    from hetu_quant.data_research import frozen_trial_delivery
+
+    if payload["definition"]["protocol"]["universe"]["rule"] == "historical_sh_sz_common_stock":
+        return {"qualification_delivery": frozen_trial_delivery(payload, store.root)}
+    return {}
+
+
+def _qualify_pending_trials(payload, store, needed, done, trials, *, preview=False, cancelled=None):
+    from hetu_quant.backtest import BacktestCancelled, prepare_backtest, validate_prepared_universe
+    from hetu_quant.backtest_models import backtest_definition_from_dict
+    from hetu_quant.data_research import require_frozen_trial_inputs
+
+    trial_ids = {row["trial_id"] for row in needed}
+    input_universes = require_frozen_trial_inputs(payload, store.root, trial_ids, trials) if trial_ids else {}
+    input_options = _qualification_input_options(payload, store)
+    record_qualification = preview or bool(input_universes)
+    report = None
+    explicit = _resolved(trials)
+    for row in needed:
+        reference_trial = row["reference_trial"]
+        prior = done.get(reference_trial)
+        unbound = prior is not None and reference_trial not in explicit
+        if not (record_qualification or unbound):
+            continue
+        if cancelled is not None and cancelled():
+            raise BacktestCancelled("cancelled during formal input qualification")
+        key = row["trial_id"]
         definition = backtest_definition_from_dict(row["definition"])
+        with TemporaryDirectory(prefix="hetu-formal-qualification-") as workdir:
+            bundle = Path(workdir) / "bundle"
+            try:
+                report = prepare_backtest(
+                    definition, store, bundle, record_qualification=record_qualification, **input_options,
+                )
+                if not report.can_run:
+                    raise ValueError(", ".join(report.limitations) or "account inputs not qualified")
+                validate_prepared_universe(bundle, input_universes[key] if input_universes else None)
+                if prior is not None:
+                    alternatives = (item for item in _published_benchmark_rows(trials)
+                                    if item["run_id"] != prior["run_id"]) if unbound else ()
+                    done[reference_trial] = _qualify_candidate_reference(
+                        definition, store.root, bundle, prior, alternatives,
+                    )
+            except (ValueError, FileNotFoundError) as error:
+                raise ValueError(f"{key}: {error}") from error
+    return input_universes, report
+
+
+def preview_validation(payload, store, *, phase, trial_id):
+    """Read-only qualification of the same pending accounts the driver would run."""
+    from hetu_data.models import QualityReport
+
+    ledger = _ledger_path(store.root, payload["study_id"])
+    trials = _read_trials(ledger)
+    definitions = validation_definitions(payload)
+    selected, needed, done = _execution_scope(definitions, trials, store.root, phase, trial_id)
+    if selected is None:
+        raise ValueError(f"unknown trial: {trial_id}")
+    if not needed:
+        prior, _ = _read_reused_benchmark(
+            selected, done[selected["trial_id"]], store, trials, **_qualification_input_options(payload, store),
+        )
+        return QualityReport(True, (), (), {}, (f"复用已发布账户 {prior['run_id']}",))
+    _check_budget(payload, trials, needed)
+    _, report = _qualify_pending_trials(payload, store, needed, done, trials, preview=True)
+    _check_final_entry(payload, definitions, done, phase, ledger.parent / "final-entry.json")
+    _check_admission_evidence(payload, store.root)
+    return report
+
+
+def _run_engine_once(payload, store, selected, needed, done, *, phase, queued_payload, input_universes,
+                     progress=None, cancelled=None) -> dict:
+    from hetu_quant.backtest import run_backtest, validate_benchmark_reference
+    from hetu_quant.backtest_models import BacktestRef, backtest_definition_from_dict
+
+    data_root = store.root
+    ledger = _ledger_path(data_root, payload["study_id"])
+    scheduled = [(row, backtest_definition_from_dict(row["definition"])) for row in needed]
+
+    runs = []
+    for index, (row, definition) in enumerate(scheduled):
         reference = None
         if row["reference_trial"]:
             prior = done[row["reference_trial"]]
             reference = BacktestRef(run_id=prior["run_id"], root=data_root, status="complete")
             validate_benchmark_reference(definition, reference)
+        started = False
+
+        def mark_started():
+            nonlocal started
+            started = True
+
         try:
-            callbacks = {}
+            callbacks = {"on_engine_start": mark_started}
+            if row["reference_trial"] == "final_main" and "final_benchmark" in done:
+                callbacks["market_benchmark"] = BacktestRef(
+                    run_id=done["final_benchmark"]["run_id"], root=data_root, status="complete",
+                )
             if queued_payload:
                 callbacks['research_context'] = dict(study_id=payload['study_id'],
                     trial_id=row['trial_id'], phase=phase, payload=payload)
@@ -222,25 +412,39 @@ def _run_engine_once(protocol_path: Path, data_root: Path, output_dir: Path,
                 callbacks['progress'] = lambda value, i=index: progress((i + value) / len(needed))
             if cancelled is not None:
                 callbacks['cancelled'] = cancelled
+            if input_universes:
+                callbacks["expected_universe"] = input_universes[row["trial_id"]]
+                callbacks.update(_qualification_input_options(payload, store))
             ref = run_backtest(definition, store, data_root, benchmark=reference, **callbacks)
+            if not started:
+                manifest = json.loads((data_root / "backtests" / ref.run_id / "backtest.json").read_text())
+                detail = "; ".join(manifest.get("limitations", ()))
+                raise ValueError(f"trial blocked before engine start: {row['trial_id']}: {detail}")
+            evaluation = json.loads((data_root / "backtests" / ref.run_id / "evaluation.json").read_text())
+            status = "blocked" if evaluation["research_status"] == "blocked" else ref.status
+            economic_status = evaluation["economic_status"]
         except Exception as exc:
-            _append_trial(ledger, dict(trial_id=row["trial_id"], phase=phase, run_id=None,
-                kind="benchmark" if row["reference_trial"] is None else "candidate",
-                status="failed", economic_status="not_evaluated",
-                recorded_at=datetime.now(tz=CN).isoformat(), detail=f"{type(exc).__name__}: {exc}"))
+            if started:
+                _append_trial(ledger, dict(trial_id=row["trial_id"], phase=phase, run_id=None,
+                    kind="benchmark" if row["reference_trial"] is None else "candidate",
+                    status="failed", economic_status="not_evaluated",
+                    recorded_at=datetime.now(tz=CN).isoformat(), detail=f"{type(exc).__name__}: {exc}"))
             raise
-        evaluation = json.loads((data_root / "backtests" / ref.run_id / "evaluation.json").read_text())
         record = dict(trial_id=row["trial_id"], phase=phase, run_id=ref.run_id,
             kind="benchmark" if row["reference_trial"] is None else "candidate",
-            status="blocked" if evaluation["research_status"] == "blocked" else ref.status,
-            economic_status=evaluation["economic_status"], recorded_at=datetime.now(tz=CN).isoformat())
+            status=status, economic_status=economic_status, recorded_at=datetime.now(tz=CN).isoformat())
         _append_trial(ledger, record)
-        if ref.status != "complete" or evaluation["research_status"] == "blocked":
+        if status != "complete":
             raise ValueError(f"trial blocked: {row['trial_id']}; retained against budget")
         done[row["trial_id"]] = record
         runs.append({**record, "reused": False})
     result = done[selected["trial_id"]]
     evaluation = json.loads((data_root / "backtests" / result["run_id"] / "evaluation.json").read_text())
+    return _validation_result(payload, selected, done, phase, runs, evaluation)
+
+
+def _validation_result(payload, selected, done, phase, runs, evaluation):
+    result = done[selected["trial_id"]]
     reference_row = done.get(selected["reference_trial"])
     return dict(mode="execute", study_id=payload["study_id"], phase=phase, runs=runs,
         trial_id=selected["trial_id"], definition=selected["definition"],
@@ -277,69 +481,65 @@ def _source_identity(definition: dict) -> dict:
                 statutory_rules_ref=definition["protocol"]["costs"].get("statutory_rules_ref"))
 
 
+def _check_budget(payload, trials, needed, *, ledger=None):
+    used = _count_runs(trials)
+    maximum = int(payload["definition"]["protocol"]["trial_budget"]["max_runs"])
+    if used + len(needed) > maximum:
+        if ledger is not None:
+            _append_trial(ledger, dict(run_id=f"refused-{used + 1}", status="refused_budget",
+                recorded_at=datetime.now(tz=CN).isoformat(), needed_runs=len(needed)))
+        raise ValueError(f"trial_budget exhausted: {used}/{maximum}; need {len(needed)}")
+
+
+def _check_final_entry(payload, definitions, done, phase, freeze):
+    if phase != "final":
+        return
+    if any(row["trial_id"] not in done for row in definitions if row["phase"] != "final"):
+        raise ValueError("final stage blocked: development/validation incomplete")
+    viewing = payload["definition"]["protocol"]["viewing_record"]
+    if (payload.get("status") != "frozen_pre_result" or not payload.get("frozen_at")
+            or viewing.get("final_used_for_tuning")):
+        raise ValueError("final stage requires pre-result freeze and viewing record")
+    if (freeze.exists() and _behavior_definitions(json.loads(freeze.read_text())["frozen_definitions"])
+            != _behavior_definitions(definitions)):
+        raise ValueError("final definitions changed after entry; cannot tune after viewing")
+
+
 def run_validation(protocol_path: Path, data_root: Path, output_dir: Path,
                    *, phase: str = "development_validation", trial_id: str | None = None,
                    payload: dict | None = None, progress=None, cancelled=None) -> dict:
+    from hetu_quant.data import DataStore
+
     supplied_payload = payload is not None
     payload = payload if supplied_payload else _load_protocol(protocol_path)
     ledger = _ledger_path(data_root, payload["study_id"])
     trials = _read_trials(ledger)
     definitions = validation_definitions(payload)
-    by_id = {row["trial_id"]: row for row in definitions}
-    done = _resolve_references(definitions, trials, data_root)
-    attempted = {row.get("trial_id") for row in trials if row.get("status") != "refused_budget"}
-    candidates = [row for row in definitions if row["phase"] == phase
-                  and row["trial_id"] not in attempted and row["reference_trial"] is not None]
-    selected = by_id.get(trial_id) if trial_id else next(iter(candidates), None)
+    selected, needed, done = _execution_scope(definitions, trials, data_root, phase, trial_id)
     if selected is None:
         return dict(mode="execute", phase=phase, execution_status="phase_complete", costs=dict(ZERO_COSTS))
-    if selected["phase"] != phase or selected["trial_id"] in attempted:
-        raise ValueError("trial already attempted or phase mismatch; no automatic retry")
-    needed = set()
-    def collect(row):
-        if row["trial_id"] in done:
-            return
-        needed.add(row["trial_id"])
-        for dependency in row["dependencies"]:
-            collect(by_id[dependency])
-    collect(selected)
-    used = _count_runs(trials)
-    maximum = int(payload["definition"]["protocol"]["trial_budget"]["max_runs"])
-    if used + len(needed) > maximum:
-        _append_trial(ledger, dict(run_id=f"refused-{used + 1}", status="refused_budget",
-            recorded_at=datetime.now(tz=CN).isoformat(), needed_runs=len(needed)))
-        raise ValueError(f"trial_budget exhausted: {used}/{maximum}; need {len(needed)}")
-    if any(key in attempted and key not in done for key in needed):
-        raise ValueError("failed dependency retained; explicit review required before further execution")
-    if phase == "final":
-        if any(row["trial_id"] not in done for row in definitions if row["phase"] != "final"):
-            raise ValueError("final stage blocked: development/validation incomplete")
-        viewing = payload["definition"]["protocol"]["viewing_record"]
-        if (payload.get("status") != "frozen_pre_result" or not payload.get("frozen_at")
-                or viewing.get("final_used_for_tuning")):
-            raise ValueError("final stage requires pre-result freeze and viewing record")
-        freeze = ledger.parent / "final-entry.json"
-        if not freeze.exists():
-            freeze.write_text(json.dumps(dict(recorded_at=datetime.now(tz=CN).isoformat(),
-                frozen_definitions=definitions, viewing_record=viewing), ensure_ascii=False, indent=2))
-        elif (_behavior_definitions(json.loads(freeze.read_text())["frozen_definitions"])
-                != _behavior_definitions(definitions)):
-            raise ValueError("final definitions changed after entry; cannot tune after viewing")
-    gaps = _gaps(protocol_path, payload, data_root)
-    if gaps:
-        raise ValueError("run_validation blocked: " + "; ".join(gaps))
+    if needed:
+        _check_budget(payload, trials, needed, ledger=ledger)
+    store = DataStore(data_root)
+    if not needed:
+        key = selected["trial_id"]
+        prior, evaluation = _read_reused_benchmark(
+            selected, done[key], store, trials, cancelled=cancelled, **_qualification_input_options(payload, store),
+        )
+        done[key] = prior
+        return _validation_result(payload, selected, done, phase, [], evaluation)
+    input_universes, _ = _qualify_pending_trials(payload, store, needed, done, trials, cancelled=cancelled)
+    freeze = ledger.parent / "final-entry.json"
+    _check_final_entry(payload, definitions, done, phase, freeze)
+    _check_admission_evidence(payload, data_root)
+    if phase == "final" and not freeze.exists():
+        freeze.write_text(json.dumps(dict(recorded_at=datetime.now(tz=CN).isoformat(), frozen_definitions=definitions,
+            viewing_record=payload["definition"]["protocol"]["viewing_record"]), ensure_ascii=False, indent=2))
     _append_trial(ledger.parent / "source-uses.jsonl", dict(
         recorded_at=datetime.now(tz=CN).isoformat(), trial_id=selected["trial_id"],
         phase=phase, source=_source_identity(selected["definition"])))
-    options = {}
-    if supplied_payload:
-        options['payload'] = payload
-    if progress is not None:
-        options['progress'] = progress
-    if cancelled is not None:
-        options['cancelled'] = cancelled
-    return _run_engine_once(protocol_path, data_root, output_dir, phase=phase,
-                            trial_id=selected["trial_id"], **options)
+    return _run_engine_once(payload, store, selected, needed, done, phase=phase, queued_payload=supplied_payload,
+                            input_universes=input_universes, progress=progress, cancelled=cancelled)
 
 
 def main(argv: list[str] | None = None) -> int:

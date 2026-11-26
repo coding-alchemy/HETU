@@ -65,7 +65,7 @@ PURPOSE_TABLES: dict[str, tuple[str, ...]] = {
 }
 
 
-def qualify_data(self, request: DataRequest, ref: SnapshotRef) -> QualityReport:
+def qualify_data(self, request: DataRequest, ref: SnapshotRef, *, record: bool = True) -> QualityReport:
     """按对象、窗口、字段和用途检查资格；资格记录持久化，旧记录不被新请求改写。"""
     if request.purpose == "daily_archive":
         from hetu_quant.data_archive import archive_requirements, audit_archive
@@ -89,7 +89,8 @@ def qualify_data(self, request: DataRequest, ref: SnapshotRef) -> QualityReport:
             {},
             tuple(["daily_archive_limited"] if audit["status"] != "complete" else []),
         )
-        self._persist_qualification(request, ref, report)
+        if record:
+            self._persist_qualification(request, ref, report)
         return report
     for product_id in request.product_ids:
         product = self.product(product_id)
@@ -252,7 +253,8 @@ def qualify_data(self, request: DataRequest, ref: SnapshotRef) -> QualityReport:
         excluded={key: tuple(value) for key, value in excluded.items() if value},
         limitations=tuple(limitations),
     )
-    self._persist_qualification(request, ref, report)
+    if record:
+        self._persist_qualification(request, ref, report)
     return report
 
 

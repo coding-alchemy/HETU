@@ -134,7 +134,7 @@ def _history_csvs() -> dict[str, str]:
                 continue
             bars.append(f"{day},{code},10.0,10.0,10.0,10.0,10.0,10.0,1000,20000")
             status.append(f"{day},{code},False,False,True")
-            mcap.append(f"{code},{day},1000000,{day}T18:00:00+08:00")
+            mcap.append(f"{code},{day},1000000,{day}T15:00:00+08:00")
     hist_rows = "\n".join(",".join(row) for row in _HIST_SECURITIES_ROWS)
     knowledge_rows = "\n".join(",".join(row) for row in _KNOWLEDGE_ROWS)
     rules_rows = "\n".join(",".join(row) for row in _TRADING_RULES_ROWS)
@@ -296,7 +296,7 @@ def _signal_pool_csvs() -> dict[str, str]:
         cap = (index + 1) * 1000000000
         for day in SIGNAL_POOL_SIGNAL_DATES:
             available = (
-                "2025-01-01T00:00:00+08:00" if code == "FUTURE_MCAP" else f"{day}T18:00:00+08:00"
+                "2025-01-01T00:00:00+08:00" if code == "FUTURE_MCAP" else f"{day}T15:00:00+08:00"
             )
             mcap.append(f"{code},{day},{cap},{available}")
     hist_rows = "\n".join(
@@ -446,6 +446,7 @@ def build_case_store(
     for table in selected:
         product_id, kind = table_products[table]
         products[product_id] = _case_product(kind, [table])
+        products[product_id]["permission"].update(case.get("permissions", {}).get(table, {}))
         items.append(
             {
                 "product_id": product_id,
@@ -457,13 +458,15 @@ def build_case_store(
                     "permission_basis": "合成测试材料，无第三方权利",
                     "source_url": "",
                     "obtained_at": (obtained_overrides or {}).get(table, case["obtained_at"]),
+                    **case.get("source_metadata", {}).get(table, {}),
                 },
             }
         )
         path = tmp_path / f"{table}.csv"
         path.write_text(csvs[table], encoding="utf-8")
         files.append(path)
-    config_path = tmp_path / "products.json"
+    config_path = tmp_path / "products.json" if not case.get("root_config") else tmp_path / "store/data-products.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         json.dumps({"schema_version": 1, "products": products}, ensure_ascii=False),
         encoding="utf-8",
@@ -479,6 +482,98 @@ def build_case_store(
     )
     ref = store.import_files(manifest_path, tuple(files))
     return store, ref
+
+
+def build_disposition_case_store(tmp_path, *, cash_exit=False, late_exchange=False, cash_variant=None,
+                                 effective=None, reverse=False, independent_exchange=False):
+    """One formal synthetic snapshot for an exit, its admission and the matching open."""
+    from io import StringIO
+
+    from fixtures import annotate_actions_coverage
+
+    case = make_backtest_case("formal", variant="workflow")
+    old, new, last, day = "VOL_01", "VOL_SUCCESSOR", "2024-06-30", "2024-07-31"
+    published = day + ("T10:00:00+08:00" if late_exchange else "T08:00:00+08:00")
+    alternating = cash_variant in ("alternating", "alternating_mismatch")
+    if cash_variant == "chain" or alternating:
+        case["obtained_at"] = day + "T08:10:00+08:00"
+    if alternating:
+        published = day + "T07:50:00+08:00"
+    case["root_config"] = True
+    case["csvs"]["historical_securities"] = case["csvs"]["historical_securities"].replace(
+        f"{old},2020-01-02,,", f"{old},2020-01-02,{last},"
+    ) + f"{new},{last},,True,SH,main,{last}T08:00:00+08:00,ev-special-new\n"
+    case["csvs"]["knowledge_evidence"] += (
+        f"historical_securities,{new},orig,,{last}T08:00:00+08:00,ev-special-new,{_evidence_sha('ev-special-new')},True\n"
+    )
+    case["codes"] += (new,)
+    case["evidence_refs"] += ("ev-special-new",)
+    for name in ("daily_bars", "security_status", "market_cap"):
+        frame = pd.read_csv(StringIO(case["csvs"][name]), dtype=str)
+        previous = frame.loc[frame.code.eq(old) & frame.date.eq(last)].assign(code=new)
+        frame.loc[frame.code.eq(old) & frame.date.ge(day), "code"] = new
+        if name == "daily_bars":
+            price_fields = ["open_raw", "close_raw", "high_raw", "low_raw"]
+            previous[price_fields] = "150"
+            frame.loc[frame.code.eq(new), price_fields] = "150"
+        case["csvs"][name] = pd.concat([frame, previous], ignore_index=True).to_csv(index=False)
+    originals = {}
+    exchange = dict(
+        kind="special_exchange", event_id="ratio-exchange", from_code=old, to_code=new, effective_date=day,
+        available_at=published, old_shares=3, new_shares=2, credit_date=day, share_rule="whole_shares",
+        fraction_rule="cash_in_lieu", fraction_cash_per_share=6, fraction_currency="CNY", fraction_unit="元/股",
+        fraction_pay_date="2024-08-31", sellable_date=day,
+    )
+
+    def add(table, name, fields, keys, **prepared):
+        raw = json.dumps(fields, ensure_ascii=False).encode()
+        originals[name] = raw
+        row = dict({key: fields[key] for key in keys}, evidence_ref=name, sha256=hashlib.sha256(raw).hexdigest())
+        row.update(prepared)
+        case["table_products"][table] = (f"test_{table}", "event")
+        case.setdefault("permissions", {})[table] = {"allowed_uses": ["backtest_low_volatility"]}
+        previous = [pd.read_csv(StringIO(case["csvs"][table]))] if table in case["csvs"] else []
+        rows = pd.concat([*previous, pd.DataFrame([row])], ignore_index=True)
+        case["csvs"][table] = (rows.iloc[::-1] if reverse else rows).to_csv(index=False)
+
+    if cash_variant == "revision":
+        exchange["revision_id"] = "v1"
+    revised = cash_variant in ("revision", "chain")
+    cash_source = "cash-v2.json" if revised else "cash-exit.json"
+    if effective == "exchange":
+        exchange["supersedes"] = cash_source
+    exchange_keys = ("event_id", "from_code", "to_code", "effective_date")
+    add("share_exchanges", "share-exchange.json", exchange, exchange_keys)
+    if alternating:
+        add("share_exchanges", "share-replacement.json",
+            dict(exchange, new_shares=1, available_at=day + "T08:30:00+08:00", supersedes="cash-exit.json"),
+            exchange_keys)
+    if independent_exchange:
+        add("share_exchanges", "independent-exchange.json", {**exchange, "event_id": "independent"}, exchange_keys)
+    if cash_exit or cash_variant or effective:
+        cash = dict(kind="cash_exit", event_id="cash-exit", code=old, date=day, cash_per_share=2, currency="CNY",
+                    unit="元/股", available_at=day + "T08:00:00+08:00")
+        if (effective == "cash" and not revised) or cash_variant == "chain" or alternating:
+            cash["supersedes"] = "share-exchange.json"
+        if revised:
+            cash["revision_id"] = "v1"
+        keys = ("event_id", "code", "date", "cash_per_share", "currency", "unit", "available_at")
+        add("terminal_disposals", "cash-exit.json", cash, keys,
+            **({"cash_per_share": 8} if cash_variant in ("mismatch", "alternating_mismatch") else {}))
+        if cash_variant == "conflict":
+            add("terminal_disposals", "cash-other.json", {**cash, "cash_per_share": 8}, keys)
+        if revised:
+            correction = dict(cash, cash_per_share=3, revision_id="v2", supersedes="v1")
+            if cash_variant == "chain":
+                correction["available_at"] = day + "T08:30:00+08:00"
+            add("terminal_disposals", cash_source, correction, keys)
+    store, ref = build_case_store(tmp_path, case)
+    for name, raw in originals.items():
+        (store.root / "evidence" / name).write_bytes(raw)
+    coverage = case["actions_coverage"]
+    annotate_actions_coverage(store, ref, coverage["start"], coverage["end"], codes=list(case["codes"]),
+                              query_basis="ex_date")
+    return case, store, ref
 
 
 def build_prepared_case_store(tmp_path: Path, case: dict[str, object], monkeypatch):
@@ -668,7 +763,7 @@ def _hist_df(rows: list[tuple]) -> pd.DataFrame:
             "listed": ["True"] * len(rows),
             "market": [r[2] for r in rows],
             "board": [r[3] for r in rows],
-            "available_at": [f"{r[1]}T18:00:00+08:00" for r in rows],
+            "available_at": [f"{r[1]}T15:00:00+08:00" for r in rows],
             "evidence_ref": [f"ev-acct-{r[0].lower()}" for r in rows],
         }
     )
@@ -705,7 +800,7 @@ def _actions_df(rows: list[tuple]) -> pd.DataFrame:
             "m": [r[3] for r in rows],
             "d": [r[4] for r in rows],
             "terms_raw": [""] * len(rows),
-            "available_at": [f"{r[1]}T18:00:00+08:00" for r in rows],
+            "available_at": [f"{r[1]}T15:00:00+08:00" for r in rows],
             "record_date": [r[5] for r in rows],
             "pay_date": [r[6] for r in rows],
             "stock_listing_date": [r[7] for r in rows],
@@ -980,7 +1075,7 @@ def _formal_case(variant: str) -> dict[str, object]:
         bars = _bars_df([(code, day, price, price, 1_000_000)
                         for code, price in zip(codes, (10.0, 20.0), strict=True) for day in days])
         caps = pd.DataFrame([dict(code=code, date=day, market_cap_cny=cap,
-                                 available_at=f'{day}T18:00:00+08:00')
+                                 available_at=f'{day}T15:00:00+08:00')
                              for code, cap in zip(codes, (100_000_000, 300_000_000), strict=True)
                              for day in days])
         csvs = dict(case['csvs'])
@@ -1026,7 +1121,7 @@ def _formal_case(variant: str) -> dict[str, object]:
         cap = (index + 1) * 1000000000
         for day in [day for day in month_ends if day >= "2023-12-31"]:
             available = (
-                "2025-01-01T00:00:00+08:00" if code == "FUTURE_MCAP" else f"{day}T18:00:00+08:00"
+                "2025-01-01T00:00:00+08:00" if code == "FUTURE_MCAP" else f"{day}T15:00:00+08:00"
             )
             mcap.append(f"{code},{day},{cap},{available}")
     hist_rows = "\n".join(

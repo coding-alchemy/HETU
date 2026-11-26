@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
-
 from hetu_data import DataRequest, DataStore
 from hetu_data.access import AccessDenied
 from hetu_data.library import load_library, publish_library, query_library, query_library_sql
@@ -78,12 +77,16 @@ def test_library_queries_pin_selection_and_permissions(tmp_path, source_facts):
     assert first is not None
     predicate = {"field": "close_raw", "op": "ge", "value": 10}
     before = query_library(store, first, codes=CODES, start=START, end=END, predicates=(predicate,))
-    publish_library(store, asset_snapshots=(right,), previous=first)
+    combined = publish_library(store, asset_snapshots=(right,), previous=first)
     predicate["value"] = 90
     frozen = before["selection"]
     assert frozen["predicates"][0]["value"] == 10
     sql = "SELECT * FROM daily_bars"
     pd.testing.assert_frame_equal(before["bars"], query_library_sql(store, frozen, sql), check_dtype=False)
+    scoped = query_library(store, combined, codes=CODES, start=START, end=END,
+                           daily_products={(left["root"], left["snapshot_id"]): ("ts_a_daily",)})
+    pd.testing.assert_frame_equal(before["bars"], scoped["bars"], check_dtype=False)
+    pd.testing.assert_frame_equal(scoped["bars"], query_library_sql(store, scoped["selection"], sql), check_dtype=False)
     for unsafe in ("SELECT * FROM read_parquet('/absent')", "DELETE FROM daily_bars", "SELECT 1; SELECT 2",
                    "SELECT * FROM duckdb_settings()"):
         with pytest.raises((ValueError, AccessDenied)):
@@ -236,3 +239,65 @@ def test_listed_tushare_identity_and_auxiliary_permission(tmp_path, source_facts
     grants.write_text(json.dumps(document))
     with pytest.raises(AccessDenied):
         query_library(store, ref, codes=CODES, start=START, end=START)
+
+
+def test_daily_bar_versions_at_original_close(tmp_path, source_facts):
+    from hashlib import sha256
+
+    from hetu_data.library import read_known_closes
+    from hetu_data.models import SnapshotRef
+
+    day = date(2024, 1, 31)
+    root = tmp_path / "source"
+    old = _shard(root, source_facts, day)
+    new = _shard(root, source_facts, day, price=12, refresh=True)
+    store = DataStore(root)
+    for asset, price, revision, supersedes, stamp in (
+        (old, 10, "original", "", "2024-01-31T15:00:00+08:00"),
+        (new, 12, "revised", "original", "2024-02-02T12:00:00+08:00"),
+    ):
+        ref = SnapshotRef(asset["snapshot_id"], root)
+        base = root / "snapshots" / ref.snapshot_id
+        manifest = store.load_manifest(ref)
+        product = "ts_a_daily"
+        key = f"{CODES[0]}|{day}|close_raw"
+        record = dict(product_id=product, record_key=key, revision_id=revision, published_at=stamp, value=price)
+        body = json.dumps(record).encode()
+        evidence = root / "evidence" / f"{revision}.json"
+        evidence.write_bytes(body)
+        product = "local_pit_knowledge"
+        config = root / "data-products.json"
+        products = dict(store.config["products"])
+        products[product] = dict(products["ts_a_daily"], fee_class="free", kind="catalog",
+                                 tables=["knowledge_evidence"], permission={"status": "verified_free"})
+        config.write_text(json.dumps(dict(store.config, products=products)))
+        frame = pd.DataFrame([dict(table_name="daily_bars", record_key=key, revision_id=revision,
+                                  supersedes=supersedes, published_at=stamp, verified=True,
+                                  evidence_ref=evidence.name, sha256=sha256(body).hexdigest(),
+                                  product_id=product, source_ref=evidence.name)])
+        relative = "tables/knowledge_evidence/pit.parquet"
+        file = base / relative
+        file.parent.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(file, index=False)
+        manifest["table_files"].append(dict(product_id=product, table="knowledge_evidence", path=relative,
+                                            sha256=sha256(file.read_bytes()).hexdigest()))
+        (base / "manifest.json").write_text(json.dumps(manifest))
+        asset["tables"].append("knowledge_evidence")
+    rule = dict(root=str(root), product_id="ts_a_daily", table="daily_bars",
+                superseded_snapshot_id=old["snapshot_id"], selected_snapshot_id=new["snapshot_id"],
+                codes=list(CODES), start=str(day), end=str(day), evidence_ref="evidence/revision.json")
+    (root / rule["evidence_ref"]).write_text(json.dumps(rule))
+    new["revision_selections"] = [rule]
+    store = DataStore(root)
+    library = publish_library(store, asset_snapshots=(old, new))
+    scope = dict(codes=CODES, start=day, end=day)
+    at = datetime(2024, 1, 31, 15, tzinfo=ZoneInfo("Asia/Shanghai"))
+    assert query_library(store, library, **scope)["bars"].close_raw.tolist() == [12]
+    known, gaps = read_known_closes(store, library, at=at, **scope)
+    assert known.close_raw.tolist() == [10] and known.evidence_ref.item() == "original.json" and gaps.empty
+    known, gaps = read_known_closes(store, SnapshotRef(new["snapshot_id"], root), at=at, **scope)
+    assert known.empty and gaps.field.tolist() == ["close_raw"]
+    assert gaps.revised_value.item() == 12 and pd.Timestamp(gaps.revised_published_at.item()).date() == date(2024, 2, 2)
+    (root / "evidence" / "original.json").unlink()
+    known, gaps = read_known_closes(store, library, at=at, **scope)
+    assert known.empty and gaps.field.tolist() == ["close_raw"]

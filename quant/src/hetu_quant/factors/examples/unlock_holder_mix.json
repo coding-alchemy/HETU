@@ -1,0 +1,38 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "events": [
+      {
+        "code": "A",
+        "event_id": "EV1",
+        "kind": "unlock",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成公开事项原件",
+        "effective_date": "2024-02-05",
+        "unlock_shares": 100,
+        "prior_float": 1000
+      }
+    ],
+    "event_holders": [
+      {
+        "code": "A",
+        "event_id": "EV1",
+        "fact_key": "控股股东",
+        "holder_type": "控股股东",
+        "shares": 70,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "A",
+        "event_id": "EV1",
+        "fact_key": "员工",
+        "holder_type": "员工",
+        "shares": 30,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ]
+  }
+}

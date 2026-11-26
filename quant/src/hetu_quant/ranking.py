@@ -298,6 +298,8 @@ def run_ranking(
     definition: RankingDefinition,
     data: SnapshotRef,
     output_root: Path,
+    *,
+    as_of_boundary: bool = False,
 ) -> ResultRef:
     """执行一次两榜研究并发布结构化结果到 ``results/<result_id>/``。"""
     if definition.mode != "free":
@@ -422,6 +424,18 @@ def run_ranking(
     boards_tbl = store.read_table(data, "boards")
     members_tbl = store.read_table(data, "memberships")
     index_bars = store.read_table(data, "index_bars")
+    if as_of_boundary:
+        stamp = pd.Timestamp(definition.as_of)
+        bars = bars[bars.date.astype(str).le(cutoff_str)]
+        status = status[status.date.astype(str).le(cutoff_str)]
+        index_bars = index_bars[index_bars.date.astype(str).le(cutoff_str)]
+        published = pd.to_datetime(actions.available_at, format="ISO8601", utc=True, errors="coerce")
+        actions = actions[(actions.ex_date.isna() | actions.ex_date.astype(str).le(cutoff_str))
+                          & (published.isna() | published.le(stamp))]
+        member_stamp = pd.to_datetime(members_tbl.available_at, format="ISO8601", utc=True, errors="coerce")
+        members_tbl = members_tbl[member_stamp.le(stamp)]
+        if purpose == "ranking_historical":
+            members_tbl = members_tbl[members_tbl.membership_kind.ne("current_snapshot")]
     basis = assert_single_return_basis([index_bars])
     if basis != benchmark_cfg["return_basis"]:
         raise ValueError(
@@ -464,7 +478,9 @@ def run_ranking(
         purpose=purpose,
         mode="free",
     )
-    report = store.qualify(request, data)
+    report = store.qualify(request, data, record=not as_of_boundary)
+    if as_of_boundary and not report.can_run:
+        raise ValueError("榜单时点或用途缺证：" + "；".join(report.limitations))
 
     exclusions: list[dict[str, object]] = []
     as_of_str = definition.as_of.isoformat()

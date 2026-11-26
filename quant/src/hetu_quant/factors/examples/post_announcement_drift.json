@@ -1,0 +1,88 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "daily_bars": [
+      {
+        "code": "A",
+        "date": "2024-01-29",
+        "close": 8,
+        "close_raw": 8,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "A",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-29",
+        "close": 90,
+        "close_raw": 90,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-30",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-31",
+        "close": 102,
+        "close_raw": 102,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      }
+    ],
+    "calendar": [
+      {
+        "date": "2024-01-29",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "date": "2024-01-30",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "date": "2024-01-31",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "initial_reports": [
+      {
+        "code": "A",
+        "period": "2023Q4",
+        "available_at": "2024-01-29T18:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 12,
+        "first_disclosure": true
+      }
+    ]
+  }
+}

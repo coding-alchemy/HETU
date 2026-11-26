@@ -52,7 +52,9 @@ Q01–Q08／S01–S08及适用验证已通过，Deep仅整理；S04采用用户2
 | 阶段 | 设计与现行入口 | 计划状态 |
 | --- | --- | --- |
 | 量化系统（初始建设与系统完善） | [统一实现](../2026-11-07-quant-research-platform-implementation.md)、[统一使用手册](../../docs/quant-research-platform-usage.md) | 原一至三期验收保持；完善 01–04 按批准来源范围收口。计划已清理，[分项结论](../2026-11-07-quant-research-platform-implementation.md#8-分项验收与直接证据)与[原文恢复](../2026-11-07-quant-research-platform-implementation.md#10-条款去向与历史恢复)保留适用范围 |
-| 策略研究与验证 | 两份 `2026-11-07-quant-strategy-research-{requirements,design}.md` 规格在固定提交 `d7172a6a8d639657bd9901f8bf021d99df948ee9` 保存，当前分支未纳入 | 原四期及原五期剩余策略任务；原池、窗口和八次预算保持，真实代表策略平台执行仍需独立验收；执行计划未编写 |
+| 策略研究与验证 | [研究增量实现 §2](../2026-11-26-quant-research-implementation.md#2-冻结策略研究与账户准入) | 01–02 已交付。03–05 的真实验收退出本期，正式预算 0/8。[收尾记录](#quant-branch-closeout) |
+| 盘后日线策略研究 | [研究增量实现 §3](../2026-11-26-quant-research-implementation.md#3-盘后日线研究) | 01–03 已归档。盘后生成、重开和证据关联已完成离线验收。[收尾记录](#quant-branch-closeout) |
+| 因子库与基础档案 | [研究增量实现 §4–5](../2026-11-26-quant-research-implementation.md#4-因子库公共取数与独立复算) | 01–07 已归档。103 个标识及共用取数层已交付，效果仍待验证。[收尾记录](#quant-branch-closeout) |
 
 系统可用、固定来源目标覆盖和严格研究资格分别判定。[策略交接与限制](../2026-11-07-quant-research-platform-implementation.md#9-能力限制与策略交接)保留 PIT、行动、跨码和账户任务。旧四、五期规格可从 Git `1832734f94fe1425b933c47a4850d5e0bc38e449` 按原路径回源；新设计、计划、真实研究及旧结果重跑仍按 AGENTS.md 和具体授权办理。
 
@@ -120,6 +122,14 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 | Standard Token 机械优化与核账 | [实现范围与规则](../2026-10-15-standard-token-efficiency-design.md)、[局部验证](../../.hetu/validation/standard-token-efficiency-appendix-20261015/report.md)及[实际差额归因](../../.hetu/validation/standard-token-comparison-20261015/input-delta-attribution-20261017.md)；默认策略未切换，金额与分项纯因果贡献未证 |
 
 ## 历史与未启动范围
+
+<a id="quant-branch-closeout"></a>
+
+### 量化增量计划收尾
+
+2026-11-26 分支评审通过后，盘后研究 01–03、因子库 01–07 的路线图及阶段计划，以及已交付的策略研究 01–02 退出执行目录。按用户确认，策略研究 03–05 的真实冻结研究、真实产物交接和代表实跑退出本期，三份计划和路线图一并移出执行目录。六份现行需求与设计统一归入[量化研究增量实现](../2026-11-26-quant-research-implementation.md)。18 份计划、9 份一次性执行记录和 6 份原规格按原路径保存在本地 [归档清单](../../.hetu/quant/acceptance/branch-closeout-20261126/manifest.json)同级的 `originals/`，可按校验值核对原稿。
+
+盘后工程、因子自测及策略研究资格与准入的证据按原验收范围继续有效。[资格复评摘要](../../.hetu/quant/acceptance/quant-strategy-research-20261118/trial-summary-rereview.json)记录八项试验的输入缺口，正式研究预算已用 0/8。因子效果仍待验证。
 
 P2 已在 A2 资格门后停止，A3／AQ／AD 未启动；新设计和真实运行须另行批准。
 既有结果按原验收范围继续有效，长期完整认证与性能未验收事实保留，不因计划清理重跑。

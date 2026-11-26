@@ -46,6 +46,19 @@ def export_result(result: ResultRef, destination: Path) -> Path:
         else destination / f"{result.result_id}.zip"
     )
     zip_path.parent.mkdir(parents=True, exist_ok=True)
+    if manifest.get("kind") == "after_close":
+        if not manifest.get("export_allowed"):
+            raise PermissionError("该盘后结果含未获导出许可的输入")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.write(manifest_path, "result.json")
+            relative = manifest["rankings"].get("relative")
+            if relative:
+                source = (result_dir / relative).resolve()
+                if not source.is_relative_to(result_dir.resolve()):
+                    raise ValueError("invalid nested ranking path")
+                for path in sorted(source.glob("*.parquet")):
+                    archive.writestr(f"ranking/{path.stem}.csv", pd.read_parquet(path).to_csv(index=False))
+        return zip_path
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(
             "definition.json",

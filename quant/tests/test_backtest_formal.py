@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-
 from backtest_cases import build_case_store as _build_store
 from backtest_cases import case_definition as _definition
 from backtest_cases import make_backtest_case
@@ -298,18 +297,32 @@ def test_formal_diagnostics_all_horizons_are_mature_and_cross_split_isolated(tmp
 @READY
 def test_pressure_reference_is_main_and_cannot_claim_matched_cost_pass(tmp_path):
     from copy import deepcopy
+
     case, store, ref = _qualified_formal(tmp_path)
-    base = _run(case, store, ref, tmp_path, "main")
+    market_case = deepcopy(case)
+    market_case["definition"]["strategy_id"] = "universe_vw"
+    market = _run(market_case, store, ref, tmp_path, "same-pool")
+    base = _run(case, store, ref, tmp_path, "main", benchmark=market)
     facts = deepcopy(case)
     protocol = facts["definition"]["protocol"]
     protocol["comparison"] = {"purpose": "sensitivity_vs_main", "changed_assumptions": ["costs"]}
     protocol["costs"]["commission_rate"] *= 2
-    pressure = _run(facts, store, ref, tmp_path, "pressure", benchmark=base)
+    pressure = _run(facts, store, ref, tmp_path, "pressure", benchmark=base, market_benchmark=market)
     evaluation = json.loads((Path(pressure.root)/"backtests"/pressure.run_id/"evaluation.json").read_text())
     assert evaluation["research_status"] == "evaluated"
     assert evaluation["economic_status"] == "not_evaluated"
     assert evaluation["income_target_met"] is None
     assert evaluation["metrics"]["excess_cagr"] < 0
+    comparison = evaluation["metrics"]["comparison"]
+    states = evaluation["metrics"]["market_states"]
+    assert comparison["reference"]["run_id"] == base.run_id
+    assert states["reference"]["run_id"] == market.run_id
+    assert states["reference"]["strategy_id"] == "universe_vw"
+    market_nav = read_backtest(market)["tables"]["nav"]
+    main_nav = read_backtest(base)["tables"]["nav"]
+    initial = float(protocol["initial_cash_cny"])
+    assert states["states"]["down"]["benchmark_return"] == pytest.approx(market_nav.iloc[-1].net_nav / initial - 1)
+    assert comparison["reference_return"] == pytest.approx(main_nav.iloc[-1].net_nav / initial - 1)
 
 
 @READY
@@ -345,6 +358,242 @@ def test_benchmark_rejects_different_terminal_disposal_facts(tmp_path):
                  ).to_parquet(candidate/'tables/terminal_disposals.parquet', index=False)
     with pytest.raises(ValueError, match='incompatible_benchmark.*terminal_disposals'):
         validate_benchmark_reference(_definition(case, ref.snapshot_id), benchmark, candidate)
+
+
+@READY
+def test_benchmark_compares_held_identity_event_without_requiring_same_storage(tmp_path):
+    import hashlib
+    import shutil
+    from datetime import date
+
+    from hetu_quant.backtest import validate_benchmark_reference
+
+    case, store, ref = _qualified_formal(tmp_path, "workflow")
+    case["definition"]["strategy_id"] = "universe_vw"
+    case["definition"]["end"] = date(2024, 7, 31)
+    benchmark = _run(case, store, ref, tmp_path, "held-benchmark")
+    directory = benchmark.root / "backtests" / benchmark.run_id
+    content = read_backtest(benchmark)
+    last_old, day, old, new = "2024-06-30", "2024-07-31", "VOL_01", "SYN_RENAMED"
+    positions = content["tables"]["positions"].query("date == @last_old and code == @old")
+    assert positions.qty.tolist() == [300]
+    original = directory / "bundle"
+    candidate = tmp_path / "identity-candidate"
+    shutil.copytree(original, candidate)
+    event = dict(kind="administrative_rename", from_code=old, effective_date=day,
+                 published_at=day + "T08:00:00+08:00", ratio=1)
+    roster = json.dumps([
+        dict(code=old, identity_id="SYN", valid_from="2020-01-02", valid_to=last_old),
+        dict(code=new, identity_id="SYN", valid_from=day, valid_to="", continuation=event),
+    ]).encode()
+    table = candidate / "tables" / "identity_transitions.parquet"
+    (candidate / "evidence").mkdir(exist_ok=True)
+    (candidate / "evidence" / "notice.json").write_bytes(roster)
+    pd.DataFrame([dict(event, code=new, identity_id="SYN", from_valid_to=last_old,
+                       evidence_ref="notice.json", sha256=hashlib.sha256(roster).hexdigest())]).to_parquet(
+        table, index=False,
+    )
+    hist = candidate / "tables" / "historical_securities.parquet"
+    identities = pd.read_parquet(hist)
+    added = identities[identities.code.eq(old)].astype({"valid_to": "string"}).assign(
+        code=new, valid_from=day, valid_to="",
+    )
+    identities = identities.astype({"valid_to": "string"})
+    identities.loc[identities.code.eq(old), "valid_to"] = last_old
+    pd.concat([identities, added], ignore_index=True).to_parquet(hist, index=False)
+    bars = candidate / "tables" / "daily_bars.parquet"
+    quotes = pd.read_parquet(bars)
+    quotes.loc[quotes.code.eq(old) & quotes.date.eq(day), "code"] = new
+    quotes.to_parquet(bars, index=False)
+    definition = _definition(case, ref.snapshot_id)
+    with pytest.raises(ValueError, match=rf"data_values:identity_transitions:{old}@{day}"):
+        validate_benchmark_reference(definition, benchmark, candidate)
+
+    same_facts = tmp_path / "same-economic-facts"
+    shutil.copytree(original, same_facts)
+    hist = same_facts / "tables" / "historical_securities.parquet"
+    pd.read_parquet(hist).assign(evidence_ref="restored-location").to_parquet(hist, index=False)
+    assert validate_benchmark_reference(definition, benchmark, same_facts)["run_id"] == benchmark.run_id
+
+
+@READY
+def test_coincident_exchange_and_rebalance_publish_real_exit_target(tmp_path):
+    from copy import deepcopy
+    from datetime import date
+
+    from backtest_cases import build_disposition_case_store
+    from hetu_quant.backtest_reporting import read_backtest as reopen
+
+    case, store, ref = build_disposition_case_store(tmp_path / "facts")
+    case["definition"]["end"] = date(2024, 7, 31)
+    case["definition"]["protocol"]["evaluation_window"] = ["2023-12-31", "2024-07-31"]
+    baseline = deepcopy(case)
+    baseline["definition"]["strategy_id"] = "universe_vw"
+    launches = []
+    benchmark = _run(baseline, store, ref, tmp_path, "benchmark", on_engine_start=lambda: launches.append("benchmark"))
+    candidate = _run(case, store, ref, tmp_path, "published", benchmark=benchmark,
+                     on_engine_start=lambda: launches.append("candidate"))
+    assert launches == ["benchmark", "candidate"]
+    released = reopen(candidate)
+    assert released["manifest"]["status"] == "complete", released["manifest"]["limitations"]
+    assert released["evaluation"]["research_status"] == "evaluated", released["evaluation"]["reasons"]
+    observed = released["tables"]
+    day, old, new, last = "2024-07-31", "VOL_01", "VOL_SUCCESSOR", "2024-06-30"
+    assert observed["signals"].loc[observed["signals"].executable_from.eq(day), "code"].tolist() == [old]
+    target, = observed["targets"].loc[
+        observed["targets"].executable_from.eq(day) & observed["targets"].code.eq(new),
+    ].itertuples()
+    assert target.target_weight == 0
+    assert target.source_ref == f"bundle:signals.parquet#full-rebalance/{last}"
+    orders, trades = observed["orders"], observed["trades"]
+    order, = orders.loc[orders.submitted_at.eq(day) & orders.code.eq(new)].itertuples()
+    trade, = trades.loc[trades.executed_at.eq(day) & trades.code.eq(new)].itertuples()
+    assert order.order_id == trade.order_id and order.side == "SELL" and order.filled_qty == trade.qty
+    positions = observed["positions"]
+    previous, = positions.loc[positions.date.eq(last) & positions.code.eq(old), "qty"].tolist()
+    assert trade.qty == previous * 2 // 3
+    assert positions.loc[positions.date.eq(day) & positions.code.isin([old, new])].empty
+    print(f"formal publish {candidate.run_id}: original VOL_01, successor exit 0; SELL {trade.qty}; engine={launches}")
+
+
+@READY
+def test_old_benchmark_reuses_proved_disposal_after_original_relocation(tmp_path):
+    import shutil
+    from datetime import date
+
+    from hetu_quant.backtest import validate_benchmark_reference
+    from test_backtest_account import _cash_disposal_original
+
+    case = make_backtest_case("formal", variant="workflow")
+    day, old, table = "2024-07-31", "VOL_01", "terminal_disposals"
+    case["definition"]["strategy_id"] = "universe_vw"
+    case["definition"]["end"] = date.fromisoformat(day)
+    case["csvs"]["historical_securities"] = case["csvs"]["historical_securities"].replace(
+        f"{old},2020-01-02,,", f"{old},2020-01-02,{day},",
+    )
+    case["table_products"][table] = ("synthetic_disposal", "event")
+    case["permissions"] = {table: {"allowed_uses": ["backtest_low_volatility"]}}
+    row = _cash_disposal_original(case, old, day, 2)
+    case["csvs"][table] = pd.DataFrame([row]).to_csv(index=False)
+    store, ref = _build_store(tmp_path / "facts", case)
+    source = row["evidence_ref"]
+    (store.root / "evidence" / source).write_bytes(case["evidence_files"][source])
+    coverage = case["actions_coverage"]
+    annotate_actions_coverage(store, ref, coverage["start"], coverage["end"],
+                              codes=list(case["codes"]), query_basis="ex_date")
+    baseline = _run(case, store, ref, tmp_path, "proved-exit-benchmark")
+    content = read_backtest(baseline)
+    assert content["manifest"]["status"] == "complete"
+    positions = content["tables"]["positions"]
+    assert positions.query("date == '2024-06-30' and code == @old").qty.tolist() == [300]
+    assert positions.query("date == @day and code == @old").empty
+    original = baseline.root / "backtests" / baseline.run_id / "bundle"
+    candidate = tmp_path / "reorganized-evidence"
+    shutil.copytree(original, candidate)
+    new_source = "restored-notice.json"
+    (candidate / "evidence" / source).rename(candidate / "evidence" / new_source)
+    rows = candidate / "tables" / f"{table}.parquet"
+    pd.read_parquet(rows).assign(evidence_ref=new_source).to_parquet(rows, index=False)
+    assert validate_benchmark_reference(_definition(case, ref.snapshot_id), baseline, candidate
+                                        )["run_id"] == baseline.run_id
+    assert (original / "evidence" / source).read_bytes() == (candidate / "evidence" / new_source).read_bytes()
+
+
+@READY
+@pytest.mark.parametrize("reverse", [False, True])
+def test_account_keeps_cross_announcement_withdrawal_through_cash_revision(tmp_path, reverse):
+    from copy import deepcopy
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+
+    from backtest_cases import build_disposition_case_store
+    from hetu_data.archive import archive_requirements
+    from hetu_quant.data_research import audit_research_coverage
+
+    case, store, ref = build_disposition_case_store(tmp_path / "facts", cash_variant="chain", reverse=reverse)
+    history = store.read_table(ref, "historical_securities")
+    history = history.loc[history.code.eq("VOL_01")].assign(security_type="stock")
+    calendar = store.read_table(ref, "calendar")
+    requirements = archive_requirements(history, calendar, date(2024, 7, 31), start=date(2024, 1, 2))
+    requirements.update(study_start="2024-01-02", signal_dates=[], definitions=[], legal_exclusions=[])
+    assert not [row for row in audit_research_coverage(requirements, store, ref)["event_limitations"]
+                if row["domain"] == "terminal_disposals"]
+    launches = []
+    deltas = []
+    for clock, payout in (("08:15", 2), ("08:45", 3)):
+        version = deepcopy(case)
+        version["definition"].update(strategy_id="universe_vw", end=date(2024, 7, 31),
+                                     as_of=datetime.fromisoformat(f"2024-07-31T{clock}:00").replace(
+                                         tzinfo=ZoneInfo("Asia/Shanghai")))
+        version["definition"]["protocol"]["evaluation_window"] = ["2023-12-31", "2024-07-31"]
+        run = _run(version, store, ref, tmp_path, f"cash-{payout}",
+                   on_engine_start=lambda p=payout: launches.append(p))
+        published = read_backtest(run)
+        assert run.status == "complete", published["manifest"]["limitations"]
+        positions = published["tables"]["positions"]
+        assert positions.loc[positions.date.eq("2024-06-30") & positions.code.eq("VOL_01"), "qty"].tolist() == [300]
+        assert positions.loc[positions.date.eq("2024-07-31") & positions.code.eq("VOL_SUCCESSOR")].empty
+        assert positions.loc[positions.date.eq("2024-07-31") & positions.code.eq("VOL_01")].empty
+        cash_delta = published["tables"]["cash"].cash_available.diff().iloc[-1]
+        assert cash_delta == pytest.approx(300 * payout)
+        artifact = run.root / "backtests" / run.run_id / "engine-out" / "backtest.json"
+        result = json.loads(artifact.read_text())
+        event, = result["disposition_events"]
+        assert event["cash_per_share"] == payout and not result["identity_transition_events"]
+        original, = event["original_versions"]
+        history = original["prior_local_versions"]
+        if payout == 3:
+            assert original["source_ref"] == "cash-v2.json"
+            assert [(item["source_ref"], item["supersedes"]) for item in history] == [
+                ("cash-exit.json", "share-exchange.json"),
+            ]
+        else:
+            assert original["supersedes"] == "share-exchange.json" and history == []
+        deltas.append(round(cash_delta, 2))
+    assert launches == [2, 3]
+    print(f"cash withdrawal chain reverse={reverse}: 08:15 {deltas[0]:.2f}, 08:45 {deltas[1]:.2f}; launches=2")
+
+
+@READY
+def test_benchmark_compares_actual_disposition_after_cross_announcement_supersession(tmp_path):
+    import shutil
+    from datetime import date
+
+    from backtest_cases import build_disposition_case_store
+    from hetu_quant.backtest import validate_benchmark_reference
+
+    results = {}
+    launches = []
+    for adopted in ("cash", "exchange"):
+        case, store, ref = build_disposition_case_store(tmp_path / adopted, effective=adopted)
+        case["definition"].update(strategy_id="universe_vw", end=date(2024, 7, 31))
+        case["definition"]["protocol"]["evaluation_window"] = ["2023-12-31", "2024-07-31"]
+        result = _run(case, store, ref, tmp_path, adopted + "-out",
+                      on_engine_start=lambda item=adopted: launches.append(item))
+        published = read_backtest(result)
+        assert result.status == "complete", published["manifest"]["limitations"]
+        positions = published["tables"]["positions"]
+        before = positions.loc[positions.date.eq("2024-06-30") & positions.code.eq("VOL_01")]
+        assert before.qty.tolist() == [300]
+        results[adopted] = result, _definition(case, ref.snapshot_id), published
+    cash, _, paid = results["cash"]
+    swap, definition, exchanged = results["exchange"]
+    assert launches == ["cash", "exchange"]
+    cash_balances = paid["tables"]["cash"].iloc[-2:].cash_available
+    assert cash_balances.diff().iloc[-1] == pytest.approx(600)
+    fills = exchanged["tables"]["trades"]
+    assert fills.loc[fills.code.eq("VOL_SUCCESSOR") & fills.side.eq("SELL"), "qty"].tolist() == [200]
+    paid_nav = paid["tables"]["nav"].iloc[-1].net_nav
+    swap_nav = exchanged["tables"]["nav"].iloc[-1].net_nav
+    swap_bundle = swap.root / "backtests" / swap.run_id / "bundle"
+    assert paid_nav == pytest.approx(959_355.66, abs=.01)
+    assert swap_nav == pytest.approx(988_716.36, abs=.01)
+    with pytest.raises(ValueError, match=r"VOL_01@2024-07-31.*candidate=.*share_exchange.*reference=.*cash_exit"):
+        validate_benchmark_reference(definition, cash, swap_bundle)
+    moved = tmp_path / "moved-bundle"
+    shutil.copytree(swap_bundle, moved)
+    assert validate_benchmark_reference(definition, swap, moved)["run_id"] == swap.run_id
+    print(f"actual NAV cash {paid_nav:.2f}, exchange {swap_nav:.2f}, difference {swap_nav - paid_nav:.2f}")
 
 
 @READY
@@ -395,3 +644,46 @@ def test_transparent_benchmark_mechanism_generates_real_periodic_signals(
         assert group.set_index('code')['target_weight'].to_dict() == {'VOL_01': .25, 'VOL_02': .75}
     assert not content['tables']['trades'].empty
     assert content['evaluation']['economic_status'] == 'not_evaluated'
+
+
+def test_representative_uses_account_without_spending_frozen_trials(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+
+    from hetu_quant import backtest
+    from hetu_quant.backtest_models import BacktestRef, backtest_definition_from_dict
+
+    case = make_backtest_case("formal", variant="workflow")
+    encoded = backtest.backtest_definition_to_dict(_definition(case, "sample"))
+    encoded["protocol"]["representative_execution"] = {
+        "study_id": "phase2-lowvol", "submission_id": "approved",
+    }
+    definition = backtest_definition_from_dict(encoded)
+    directory = tmp_path / "research/phase2-lowvol"
+    directory.mkdir(parents=True)
+    approvals = tmp_path / "research/representative-runs/approved"
+    approvals.mkdir(parents=True)
+    ledger = directory / "trials.jsonl"
+    ledger.write_text("".join(json.dumps({"status": "complete", "run_id": f"old-{i}"}) + "\n"
+                              for i in range(8)))
+    original = ledger.read_bytes()
+    (approvals / "scope.json").write_text(json.dumps({
+        "definition": encoded, "submission_id": "approved", "benchmark_run_id": "bench",
+        "study_id": "phase2-lowvol", "approval_ref": "test-approval", "run_count": 1,
+    }))
+
+    def account(actual, store, output_root, *, benchmark, **options):
+        assert actual == definition and benchmark.run_id == "bench"
+        options["before_engine"]()
+        return BacktestRef("representative-trace", tmp_path, "complete")
+
+    monkeypatch.setattr(backtest, "run_backtest", account)
+    runner = getattr(backtest, "run_representative_job", None)
+    assert runner is not None
+    result = runner(definition, SimpleNamespace(root=tmp_path), submission_id="approved")
+    assert result.run_id == "representative-trace"
+    with pytest.raises(ValueError, match="submission"):
+        runner(definition, SimpleNamespace(root=tmp_path), submission_id="other")
+    with pytest.raises(FileExistsError):
+        runner(definition, SimpleNamespace(root=tmp_path), submission_id="approved")
+    assert ledger.read_bytes() == original

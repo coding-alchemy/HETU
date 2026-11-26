@@ -1,0 +1,25 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "daily_bars": [
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "close": 108,
+        "close_raw": 108,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      }
+    ],
+    "calendar": [
+      {
+        "date": "2024-01-31",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ]
+  }
+}

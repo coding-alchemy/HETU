@@ -1,0 +1,31 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "events": [
+      {
+        "code": "A",
+        "event_id": "H1",
+        "kind": "actual_holding",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成公开事项原件",
+        "effective_date": "2024-01-31",
+        "direction": "增持",
+        "shares": 30,
+        "holder_type": "控股股东"
+      },
+      {
+        "code": "A",
+        "event_id": "H2",
+        "kind": "actual_holding",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成公开事项原件",
+        "effective_date": "2024-01-31",
+        "direction": "减持",
+        "shares": 10
+      }
+    ]
+  }
+}

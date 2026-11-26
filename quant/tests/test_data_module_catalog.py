@@ -58,3 +58,36 @@ def test_maintenance_frozen_and_submission_conflict(tmp_path):
         jobs.submit(other, "same")
     with pytest.raises((ValueError, KeyError)):
         tasks.save_definition("maintenance", {"request": {}, "segments": []})
+
+
+def test_legacy_job_records_remain_readable_without_proven_retry_origin(tmp_path):
+    store = ExperimentStore(tmp_path)
+    definition_id = store._save_payload("data", {})
+    jobs = JobService(store)
+    first = jobs.submit(definition_id, "legacy-click")
+    jobs.cancel(first.job_id)
+    old_retry = jobs.retry(first.job_id, "legacy-retry")
+    jobs.cancel(old_retry.job_id)
+    # The old catalog held the same jobs and submissions without any lineage table.
+    with store._connect() as connection:
+        connection.execute("DROP TABLE IF EXISTS job_lineage")
+    reopened = JobService(ExperimentStore(tmp_path))
+    assert reopened.original_submission_id(first.job_id) == first.submission_id
+    assert reopened.get(old_retry.job_id).submission_id == "legacy-retry"
+    assert reopened.get(old_retry.job_id).attempt == 2
+    assert reopened.original_submission_id(old_retry.job_id) is None
+    retry = reopened.retry(old_retry.job_id, "reopened-retry")
+    assert retry.retry_of_job_id == old_retry.job_id
+    assert reopened.original_submission_id(retry.job_id) is None
+    with store._connect() as connection:
+        connection.execute("UPDATE submissions SET definition_id = ? WHERE submission_id = ?",
+                           ("another-definition", first.submission_id))
+    assert reopened.original_submission_id(first.job_id) is None
+
+    fresh = reopened.submit(definition_id, "fresh-click")
+    reopened.cancel(fresh.job_id)
+    next_job = reopened.retry(fresh.job_id, "fresh-retry")
+    reopened.cancel(next_job.job_id)
+    latest = reopened.retry(next_job.job_id, "fresh-second-retry")
+    assert latest.retry_of_job_id == next_job.job_id
+    assert reopened.original_submission_id(latest.job_id) == fresh.submission_id

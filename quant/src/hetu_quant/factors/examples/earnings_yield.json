@@ -1,0 +1,51 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "financial_reports": [
+      {
+        "code": "A",
+        "period": "2023Q4",
+        "unit": "亿元",
+        "currency": "CNY",
+        "flow_basis": "single",
+        "available_at": "2024-01-01T14:00:00+08:00",
+        "source_ref": "合成财报原件",
+        "coordinate": "2023Q4-扣非利润",
+        "net_profit_ex": 6,
+        "revision_id": "original"
+      },
+      {
+        "code": "A",
+        "period": "2023Q4",
+        "unit": "亿元",
+        "currency": "CNY",
+        "flow_basis": "single",
+        "available_at": "2024-01-31T18:00:00+08:00",
+        "source_ref": "合成晚披露更正",
+        "coordinate": "2023Q4-扣非利润",
+        "net_profit_ex": 8,
+        "revision_id": "revised",
+        "supersedes": "original"
+      }
+    ],
+    "market_cap": [
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "market_cap_cny": 10000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成时点市值"
+      },
+      {
+        "code": "A",
+        "date": "2024-02-01",
+        "market_cap_cny": 10000000000.0,
+        "available_at": "2024-02-01T14:50:00+08:00",
+        "source_ref": "合成时点市值"
+      }
+    ]
+  }
+}

@@ -191,12 +191,18 @@ def _execute_with_rqalpha(
     for row in signals.itertuples():
         signals_by_exec_day.setdefault(str(row.executable_from), []).append(row)
 
-    state: dict[str, list] = {"orders": [], "rejected": [], "attempts": [], "trades": [], "daily": [], "divtaxes": []}
+    state: dict[str, list] = {"orders": [], "rejected": [], "attempts": [], "trades": [],
+                             "daily": [], "divtaxes": [], "cash_action_flows": []}
+    prior_tax_by_code: dict[str, float] = {}
 
     def init(context) -> None:
         env = Environment.get_instance()
         mod = env.mod_dict["hetu_local_bundle"]
         decider = mod.cost_decider
+        state["identity_transition_events"] = mod.identity_transition_events
+        state["disposition_gaps"] = env.data_source.disposition_gaps
+        account = next(iter(context.portfolio.accounts.values()))
+        env.event_bus.prepend_listener(EVENT.PRE_BEFORE_TRADING, lambda _: mod.apply_identity_transitions(account))
 
         def on_order_rejected(event) -> None:
             # 前端校验拒绝（如 T+1 超可卖卖出）：api.order 不返回订单对象，
@@ -243,8 +249,7 @@ def _execute_with_rqalpha(
             )
 
         def on_pay_taxes(event) -> None:
-            # 股息差别化个税在卖出成交后扣缴。事件先于本监听器登记顺序到达时，
-            # 对应卖出可能尚未入账：先归集，写表时归并到当日该代码的卖出一笔。
+            # 扣税事件可以先于成交流水到达，写表时按实际成交 ID 关联。
             if str(event.tax_type) != "TAX_TYPE.DIVIDEND" and "DIVIDEND" not in str(event.tax_type):
                 return
             state["divtaxes"].append(
@@ -252,6 +257,8 @@ def _execute_with_rqalpha(
                     "code": str(event.order_book_id),
                     "day": event.trading_dt.date().isoformat(),
                     "amount": float(event.delta_amount),
+                    "trade_id": getattr(event, "trade_id", None),
+                    "lots": getattr(event, "lots", []),
                 }
             )
 
@@ -263,12 +270,21 @@ def _execute_with_rqalpha(
 
         无历史成交量记录时返回 None（不设容量上限），不静默按零处理。
         """
-        history = [
-            v
-            for day, v in volume_by_day.get(code, [])
-            if day_rank.get(day, 10**9) <= day_rank.get(signal_day, -1)
-        ]
-        window = history[-volume_lookback_days:]
+        cutoff = signal_day
+        pieces = []
+        renames = Environment.get_instance().data_source.identity_transitions
+        while code:
+            rename = renames.get(code)
+            pieces.append([
+                (day, v) for day, v in volume_by_day.get(code, [])
+                if day_rank.get(day, 10**9) <= day_rank.get(cutoff, -1)
+                and (rename is None or day >= rename["effective_date"])
+            ])
+            if rename is None:
+                break
+            cutoff = min(cutoff, rename["from_valid_to"])
+            code = rename["from_code"]
+        window = [volume for _, volume in sorted(pair for piece in pieces for pair in piece)[-volume_lookback_days:]]
         if not window:
             return None
         ordered = sorted(window)
@@ -285,7 +301,14 @@ def _execute_with_rqalpha(
         # 故先报送买入（冻结按当时现金），再报送卖出。
         today = context.now.date().isoformat()
         account = next(iter(context.portfolio.accounts.values()))
+        source = Environment.get_instance().data_source
         todays_targets = list(signals_by_exec_day.get(today, []))
+        for i, target in enumerate(todays_targets):
+            rename = source.renames_from.get(str(target.code))
+            if rename and str(target.signal_at) < rename["effective_date"] <= today:
+                converted = dict(target._asdict(), code=rename["code"])
+                todays_targets[i] = SimpleNamespace(**converted)
+                state.setdefault("target_codes", {})[str(target.signal_at), today, str(target.code)] = rename["code"]
         if todays_targets:
             present = {str(row.code) for row in todays_targets}
             template = todays_targets[0]
@@ -293,11 +316,15 @@ def _execute_with_rqalpha(
                 code = str(held.order_book_id)
                 if held.quantity > 0 and code not in present:
                     exit_signal = SimpleNamespace(signal_at=str(template.signal_at), executable_from=today,
-                                                  code=code, target_weight=0.0)
+                                                  code=code, target_weight=0.0,
+                                                  source_ref=f"bundle:signals.parquet#full-rebalance/{template.signal_at}")
                     todays_targets.append(exit_signal)
                     state.setdefault("implicit_targets", []).append(vars(exit_signal))
         for signal in todays_targets:
             code = str(signal.code)
+            # The official event has already removed the old security from today's tradable holdings.
+            if (code, today) in source.terminal_disposals or (code, today) in source.share_exchanges:
+                continue
             signal_day = str(signal.signal_at)
             price = open_price.get((code, today))
             if price is None or price <= 0:
@@ -384,27 +411,44 @@ def _execute_with_rqalpha(
         cash_total = float(account.cash) + float(account.frozen_cash)
         positions = []
         receivable = 0.0
-        tax_payable = 0.0
+        tax_by_code = {}
         for position in account.positions.values():
+            code = str(position.order_book_id)
             long_position = getattr(position, "_long", position)
             receivable += float(getattr(long_position, "dividend_receivable", 0.0))
-            tax_payable += float(getattr(long_position, "dividend_tax_payable", 0.0))
+            receivable += float(getattr(long_position, "exchange_receivable", 0.0))
+            payable = float(getattr(long_position, "dividend_tax_payable", 0.0))
+            if payable:
+                tax_by_code[code] = payable
             if position.quantity == 0:
                 continue
-            price = close_price.get((str(position.order_book_id), today), float(position.last_price))
+            price = close_price.get((code, today), float(position.last_price))
             positions.append(
                 {
                     "date": today,
-                    "code": str(position.order_book_id),
+                    "code": code,
                     "qty": int(position.quantity),
                     "sellable_qty": int(position.sellable),
                     "price_raw": price,
                     "market_value": int(position.quantity) * price,
                 }
             )
+        for event in state["identity_transition_events"]:
+            if event["date"] == today and event["from_code"] in prior_tax_by_code:
+                old_payable = prior_tax_by_code.pop(event["from_code"])
+                prior_tax_by_code[event["code"]] = prior_tax_by_code.get(event["code"], 0.0) + old_payable
+        for code in sorted(tax_by_code.keys() | prior_tax_by_code.keys()):
+            change = prior_tax_by_code.get(code, 0.0) - tax_by_code.get(code, 0.0)
+            if abs(change) > 1e-10:
+                state["cash_action_flows"].append({
+                    "code": code, "date": today, "kind": "dividend_tax_accrual", "amount_cny": change,
+                    "source_ref": "engine:HetuStockPosition.dividend_tax_payable",
+                })
+        prior_tax_by_code.clear()
+        prior_tax_by_code.update(tax_by_code)
         state["daily"].append(
             {"date": today, "cash": cash_total, "receivable": receivable,
-             "tax_payable": tax_payable, "positions": positions}
+             "tax_payable": sum(tax_by_code.values()), "positions": positions}
         )
 
     config = {
@@ -438,8 +482,15 @@ def _execute_with_rqalpha(
 
     state["restrictions"] = HetuStockPosition.restrictions + state.get("reference_restrictions", [])
     state["disposition_events"] = HetuStockPosition.disposition_events
-    if state.get("implicit_targets"):
-        signals = pd.concat([signals, pd.DataFrame(state["implicit_targets"])], ignore_index=True)
+    state["cash_action_flows"].extend(HetuStockPosition.cash_dividend_events)
+    state["cash_action_flows"].extend(HetuStockPosition.exchange_cash_events)
+    state["divtaxes"].extend(HetuStockPosition.cash_exit_tax_events)
+    state["divtaxes"].sort(key=lambda item: (item["day"], item["trade_id"] is not None))
+    state["cash_action_flows"].extend({
+        "code": str(event["code"]), "date": str(event["date"]), "kind": "cash_disposal",
+        "amount_cny": float(event["cash_amount"]), "quantity": int(event["quantity"]),
+        "cash_per_share": float(event["cash_per_share"]), "source_ref": f"bundle:evidence/{event['evidence_ref']}",
+    } for event in HetuStockPosition.disposition_events)
     _write_outputs(
         output_dir,
         state,
@@ -474,19 +525,23 @@ def _write_outputs(
                     "signal_at": str(row.signal_at),
                     "executable_from": str(row.executable_from),
                     "code": str(row.code),
-                    "signal_value": float(row.target_weight),
-                    "rank": rank,
-                    "source_ref": "bundle:signals.parquet",
+                    "signal_value": float(getattr(row, "signal_value", row.target_weight)),
+                    "rank": int(getattr(row, "rank", rank)),
+                    "source_ref": str(getattr(row, "source_ref", "bundle:signals.parquet")),
                 }
             )
             targets_rows.append(
                 {
                     "signal_at": str(row.signal_at),
                     "executable_from": str(row.executable_from),
-                    "code": str(row.code),
+                    "code": state.get("target_codes", {}).get(
+                        (str(row.signal_at), str(row.executable_from), str(row.code)), str(row.code)
+                    ),
                     "target_weight": float(row.target_weight),
+                    "source_ref": str(getattr(row, "source_ref", "bundle:signals.parquet")),
                 }
             )
+    targets_rows.extend(state.get("implicit_targets", []))
 
     order_rows = []
     for record in state["orders"]:
@@ -519,21 +574,16 @@ def _write_outputs(
             }
         )
 
-    # 股息差别化个税归并到当日该代码的卖出一笔（trades.dividend_tax 与 costs 一致）；
-    # 找不到对应卖出一笔时保留独立行，不丢费用。
+    # 股息差别化个税按实际成交 ID 入账，现金处置等独立扣税仍保留费用。
+    trades_by_id = {trade["trade_id"]: trade for trade in state["trades"]}
+    cost_rows = []
     for divtax in state.get("divtaxes", []):
-        target = next(
-            (
-                trade
-                for trade in state["trades"]
-                if trade["code"] == divtax["code"]
-                and trade["executed_at"] == divtax["day"]
-                and trade["side"] == "SELL"
-            ),
-            None,
-        )
+        target = trades_by_id.get(divtax["trade_id"])
         if target is not None:
             target["dividend_tax"] += divtax["amount"]
+        elif "cash_settlement" in divtax:
+            cost_rows.append(dict(date=divtax["day"], order_id="", code=divtax["code"],
+                                  cost_type="dividend_tax", amount=divtax["amount"]))
         else:
             state["trades"].append(
                 {
@@ -553,7 +603,6 @@ def _write_outputs(
                 }
             )
 
-    cost_rows = []
     for trade in state["trades"]:
         for cost_type, key in (
             ("commission", "commission"),
@@ -584,7 +633,7 @@ def _write_outputs(
 
     tables = {
         "signals": pd.DataFrame(signal_rows, columns=TABLE_COLUMNS["signals"]),
-        "targets": pd.DataFrame(targets_rows, columns=TABLE_COLUMNS["targets"]),
+        "targets": pd.DataFrame(targets_rows, columns=[*TABLE_COLUMNS["targets"], "source_ref"]),
         "orders": pd.DataFrame(order_rows, columns=TABLE_COLUMNS["orders"]),
         "trades": pd.DataFrame(state["trades"], columns=TABLE_COLUMNS["trades"]),
         "positions": pd.DataFrame(
@@ -605,18 +654,15 @@ def _write_outputs(
     cash_rows = []
     nav_rows = []
     cumulative_costs = 0.0
-    trades_by_day: dict[str, list] = {}
-    for trade in state["trades"]:
-        trades_by_day.setdefault(trade["executed_at"], []).append(trade)
+    paid_costs_by_day: dict[str, float] = {}
+    for cost in cost_rows:
+        if cost["cost_type"] in {"commission", "stamp_tax", "transfer_fee", "dividend_tax"}:
+            day = cost["date"]
+            paid_costs_by_day[day] = paid_costs_by_day.get(day, 0.0) + cost["amount"]
     for day in state["daily"]:
         market_value = sum(row["market_value"] for row in day["positions"])
         net_nav = day["cash"] + day["receivable"] + market_value - day["tax_payable"]
-        trade_costs = sum(
-            trade["commission"] + trade["stamp_tax"] + trade["transfer_fee"]
-            + trade["dividend_tax"]
-            for trade in trades_by_day.get(day["date"], [])
-        )
-        cumulative_costs += trade_costs
+        cumulative_costs += paid_costs_by_day.get(day["date"], 0.0)
         cash_rows.append(
             {
                 "date": day["date"],
@@ -648,6 +694,10 @@ def _write_outputs(
         "status": "limited" if state.get("restrictions") else "complete",
         "limitations": [reason for _day, _code, reason in state.get("restrictions", [])],
         "disposition_events": state.get("disposition_events", []),
+        "disposition_gaps": state.get("disposition_gaps", []),
+        "identity_transition_events": state.get("identity_transition_events", []),
+        "cash_action_flows": state.get("cash_action_flows", []),
+        "dividend_tax_withholdings": state.get("divtaxes", []),
         "limit_references": state.get("limit_references", []),
         "submitted_prices": [dict(code=str(record["order"].order_book_id),
                                   date=record["submitted_at"], price=float(record["order"].price))

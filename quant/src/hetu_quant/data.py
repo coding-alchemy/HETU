@@ -56,8 +56,8 @@ class DataStore(KernelDataStore):
             config_path = legacy
         super().__init__(root, config_path, providers)
 
-    def qualify(self, request, ref):
-        return qualify_data(self, request, ref)
+    def qualify(self, request, ref, *, record=True):
+        return qualify_data(self, request, ref, record=record)
 
     def _persist_qualification(self, request, ref, report):
         return _persist_qualification(self, request, ref, report)
