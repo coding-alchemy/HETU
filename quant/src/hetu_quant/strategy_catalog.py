@@ -17,8 +17,10 @@ _FIELDS = (
 )
 _ATTACHMENTS = ("rules_ref", "adaptation_refs", "code_refs", "notebook_refs", "data_refs", "evidence_refs")
 _STATUSES = ("execution_status", "research_status", "research_conclusion", "economic_status")
-# 旧台账在未发布时只登记候选／基准角色，归属来自二期冻结协议。
-_PHASE2_TRIAL_STRATEGIES = {"candidate": "low_volatility", "benchmark": "universe_vw"}
+_REDISTRIBUTABLE_LICENSES = frozenset({
+    "apache-2.0", "bsd-2-clause", "bsd-3-clause", "cc0-1.0", "cc-by-4.0", "cc-by-sa-4.0", "mit",
+    "允许导出附件",
+})
 
 
 def _identifier(value: str) -> str:
@@ -37,32 +39,107 @@ def _records(trials_file: Path) -> list:
     return [json.loads(line) for line in trials_file.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
-def _trial_evidence(root: Path, study_id: str, trial: dict) -> tuple[str | None, dict]:
-    strategy_id = trial.get("strategy_id")
+def _frozen_behavior_differences(actual: dict, expected: dict) -> list[str]:
+    different = [key for key in ("start", "end", "market", "parameters") if actual.get(key) != expected[key]]
+    protocol = actual.get("protocol", {})
+    frozen = expected["protocol"]
+    for key in ("stage", "universe", "warmup_months", "initial_cash_cny", "currency", "account_type", "leverage",
+                "cash_interest_rate", "investor_tax_profile", "rebalance", "benchmark_id", "time_split",
+                "research_phase", "evaluation_window", "comparison"):
+        if protocol.get(key) != frozen.get(key):
+            different.append(f"protocol.{key}")
+    for key in ("execution", "costs"):
+        values = protocol.get(key, {})
+        if not isinstance(values, dict):
+            different.append(f"protocol.{key}")
+            continue
+        for field in sorted(values.keys() | frozen[key].keys()):
+            if field != "statutory_rules_ref" and values.get(field) != frozen[key].get(field):
+                different.append(f"protocol.{key}.{field}")
+    viewing = protocol.get("viewing_record") or {}
+    if frozen["research_phase"] == "final" and viewing.get("final_used_for_tuning"):
+        different.append("protocol.viewing_record.final_used_for_tuning")
+    return different
+
+
+def research_trial_strategy(study_id: str, trial: dict, account: dict | None = None) -> str | None:
+    """核对台账、冻结定义与账户，返回有证据支持的试验归属。"""
+    trial_id = trial.get("trial_id")
     run_id = trial.get("run_id")
+    entry_role = trial.get("kind")
+    roles = {entry_role} if entry_role in ("candidate", "benchmark") else set()
+    strategies = {trial["strategy_id"]} if trial.get("strategy_id") else set()
+    frozen = None
+    if study_id == "phase2-lowvol":
+        from hetu_quant.data_research import _definitions
+
+        protocol = json.loads((_INDEX.parent / "phase2-protocol.json").read_text(encoding="utf-8"))
+        study_definition = protocol["definition"]
+        row = next((row for row in _definitions(protocol) if row["trial_id"] == trial_id), None)
+        if row:
+            frozen = row["definition"]
+            roles.add("benchmark" if row["reference_trial"] is None else "candidate")
+            strategies.add(frozen["strategy_id"])
+        known = {
+            "candidate": study_definition["strategy_id"],
+            "benchmark": study_definition["protocol"]["benchmark_id"],
+        }
+        strategies.update(known[role] for role in roles)
+    conflict = f"trial/account ownership differs: trial_id={trial_id}, run_id={run_id}"
+    if len(strategies) > 1:
+        raise ValueError(conflict)
+    if account is None:
+        return next(iter(strategies), None)
+    definition = account.get("definition") or {}
+    actual = definition.get("strategy_id")
+    contexts = [value for value in (account.get("research"),
+                                   definition.get("protocol", {}).get("research_execution")) if value]
+    if (account.get("run_id") != run_id or account.get("status") not in ("complete", "limited")
+            or not actual or (strategies and actual not in strategies)
+            or (roles and account.get("kind") and account["kind"] not in roles)
+            or any(ctx.get("study_id") != study_id or ctx.get("trial_id") != trial_id for ctx in contexts)
+            or not (strategies or contexts)):
+        raise ValueError(conflict)
+    if frozen is not None:
+        different = _frozen_behavior_differences(definition, frozen)
+        if different:
+            raise ValueError(f"{conflict}; frozen behavior differs: {', '.join(different)}")
+    return actual
+
+
+def _trial_evidence(root: Path, study_id: str, trial: dict) -> tuple[str | None, dict]:
+    run_id = trial.get("run_id")
+    manifest = None
     if isinstance(run_id, str) and re.fullmatch(r"[A-Za-z0-9_-]+", run_id):
-        run_dir = root / "backtests" / run_id
+        backtests = root / "backtests"
+        run_dir = backtests / run_id
         path = run_dir / "backtest.json"
-        if path.resolve().is_relative_to(run_dir) and path.is_file():
+        if path.resolve().is_relative_to(run_dir) and run_dir.resolve().is_relative_to(backtests) and path.is_file():
             manifest = json.loads(path.read_text(encoding="utf-8"))
-            actual_strategy = manifest["definition"]["strategy_id"]
-            research = manifest.get("research")
-            if (manifest.get("run_id") != run_id or manifest.get("status") not in ("complete", "limited")
-                    or (strategy_id and strategy_id != actual_strategy)
-                    or (research is not None and (research.get("study_id") != study_id
-                        or research.get("trial_id") != trial.get("trial_id")))):
-                return None, {}
-            path = run_dir / "evaluation.json"
-            evaluation = (json.loads(path.read_text(encoding="utf-8"))
-                          if path.resolve().is_relative_to(run_dir) and path.is_file() else {})
-            return actual_strategy, evaluation
-    if strategy_id is None and study_id == "phase2-lowvol":
-        strategy_id = _PHASE2_TRIAL_STRATEGIES.get(trial.get("kind"))
-    return strategy_id, {}
+    try:
+        owner = research_trial_strategy(study_id, trial, manifest)
+    except ValueError:
+        return None, {}
+    if manifest is None:
+        return owner, {}
+    path = run_dir / "evaluation.json"
+    evaluation = (json.loads(path.read_text(encoding="utf-8"))
+                  if path.resolve().is_relative_to(run_dir) and path.is_file() else {})
+    return owner, evaluation
 
 
 def _explicit_states(record: dict) -> dict:
     return {key: record[key] for key in _STATUSES if record.get(key)}
+
+
+def research_trial_states(trial: dict, evaluation: dict) -> dict:
+    """指定试验的原记录和评价状态；无证据的字段维持未知。"""
+    defaults = dict.fromkeys(_STATUSES, "unknown")
+    if trial.get("status") == "failed":
+        defaults.update(execution_status="failed", economic_status="not_evaluated")
+    elif trial.get("status") == "blocked":
+        defaults["research_status"] = "blocked"
+    return {**defaults, **_explicit_states(trial), **_explicit_states(evaluation)}
 
 
 def read_strategy_asset(root: Path, strategy_id: str) -> dict:
@@ -99,6 +176,7 @@ def read_strategy_asset(root: Path, strategy_id: str) -> dict:
     return {
         "strategy_id": strategy_id,
         **{key: item.get(key) for key in _FIELDS},
+        **({"attachment_licenses": item["attachment_licenses"]} if item.get("attachment_licenses") else {}),
         "trials": trials,
         "statuses": {
             "evidence_import": "imported" if imported else "catalogued",
@@ -154,21 +232,22 @@ def import_strategy_evidence(root: Path, manifest_path: Path) -> dict:
             raise ValueError(f"invalid strategy metadata: {field}")
     for study_id in item.get("study_ids", []):
         _identifier(study_id)
+    refs = strategy_attachment_refs(item)
+    licenses = item.get("attachment_licenses", {})
+    if not isinstance(licenses, dict) or any(
+        relative not in refs or not isinstance(license_text, str) or not license_text.strip()
+        for relative, license_text in licenses.items()
+    ):
+        raise ValueError("invalid attachment_licenses: supply a license for each named attachment")
     source = manifest_path.parent.resolve()
     attachments = {}
-    for field in _ATTACHMENTS:
-        values = item.get(field) or []
-        if isinstance(values, str):
-            values = [values]
-        if not isinstance(values, list):
-            raise ValueError(f"invalid attachments: {field}")
-        for value in values:
-            relative = Path(value)
-            original = (source / relative).resolve()
-            if (relative.is_absolute() or ".." in relative.parts or relative == Path("manifest.json")
-                    or not original.is_relative_to(source) or not original.is_file()):
-                raise ValueError(f"invalid or unavailable attachment: {value}")
-            attachments[relative] = original
+    for value in refs:
+        relative = Path(value)
+        original = (source / relative).resolve()
+        if (relative.is_absolute() or ".." in relative.parts or relative == Path("manifest.json")
+                or not original.is_relative_to(source) or not original.is_file()):
+            raise ValueError(f"invalid or unavailable attachment: {value}")
+        attachments[relative] = original
     target.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".strategy-", dir=target.parent) as tmp:
         staged = Path(tmp) / "evidence"
@@ -184,6 +263,12 @@ def import_strategy_evidence(root: Path, manifest_path: Path) -> dict:
 
 def strategy_text_attachments(root: Path, item: dict) -> dict[str, Path]:
     """仅定位该策略已登记的本地附件，供页面按需查看文本。"""
+    return {relative: path for relative, path in strategy_attachments(root, item).items()
+            if path.suffix in (".md", ".json", ".py", ".ipynb")}
+
+
+def strategy_attachments(root: Path, item: dict) -> dict[str, Path]:
+    """定位已登记的本地原件。"""
     if item["statuses"]["evidence_import"] == "catalogued":
         source = _INDEX.parent
         allowed = source.parent
@@ -191,10 +276,28 @@ def strategy_text_attachments(root: Path, item: dict) -> dict[str, Path]:
         source = Path(root).resolve() / "strategy-assets" / _identifier(item["strategy_id"])
         allowed = source
     output = {}
+    for relative in strategy_attachment_refs(item):
+        path = (source / relative).resolve()
+        if path.is_relative_to(allowed) and path.is_file():
+            output[relative] = path
+    return output
+
+
+def strategy_attachment_refs(item: dict) -> dict[str, str]:
+    """按登记顺序返回附件路径及用途，合并对同一原件的重复引用。"""
+    refs = {}
     for field in _ATTACHMENTS:
         values = item.get(field) or []
         for relative in ([values] if isinstance(values, str) else values):
-            path = (source / relative).resolve()
-            if path.is_relative_to(allowed) and path.is_file() and path.suffix in (".md", ".json", ".py", ".ipynb"):
-                output[relative] = path
-    return output
+            refs.setdefault(relative, field)
+    return refs
+
+
+def strategy_attachment_license(item: dict, relative: str) -> tuple[str | None, bool]:
+    """优先使用按原件登记的许可，策略许可提供默认值。"""
+    license_text = item.get("attachment_licenses", {}).get(relative, item.get("license"))
+    if license_text:
+        return license_text, license_text.strip().lower() in _REDISTRIBUTABLE_LICENSES
+    # 内置目录的文件均为仓库登记的本地规则、代码或复做说明。
+    catalogued = item["statuses"]["evidence_import"] == "catalogued"
+    return ("HETU 本地规则与实现" if catalogued else None), catalogued

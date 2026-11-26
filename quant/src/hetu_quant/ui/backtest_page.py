@@ -147,6 +147,14 @@ def _render_configuration(root: Path, store, experiments: ExperimentStore) -> No
     if definitions:
         with st.expander("复制已保存的回测定义"):
             _render_copy(store, experiments, definitions)
+    approvals = sorted((root / "research" / "representative-runs").glob("*/scope.json"))
+    approvals = [path for path in approvals if path.resolve().is_relative_to(root.resolve())]
+    if approvals:
+        with st.expander("已授权的免费代表任务"):
+            selected = st.selectbox("代表任务定义", approvals, index=None,
+                                    format_func=lambda path: str(path.relative_to(root)))
+            if selected is not None:
+                _render_representative(store, experiments, selected, entry="configuration")
     stage = st.radio("运行用途", ("formal", "mechanism"), horizontal=True, key="bt_stage")
     mode = st.selectbox("来源模式", ("free", "paid"), key="bt_mode")
     if mode == "paid":
@@ -256,7 +264,7 @@ def _render_configuration(root: Path, store, experiments: ExperimentStore) -> No
         # prepare_backtest 要求 bundle 目录尚不存在：用临时父目录下的新路径
         try:
             with tempfile.TemporaryDirectory(prefix="hetu-bt-qual-") as workdir:
-                report = prepare_backtest(definition, store, Path(workdir) / "bundle")
+                report = _preview_qualification(definition, store, Path(workdir) / "bundle")
         except Exception as error:  # noqa: BLE001 - 缺口如实展示
             st.error(f"资格检查失败：{type(error).__name__}: {error}")
         else:
@@ -278,6 +286,54 @@ def _render_configuration(root: Path, store, experiments: ExperimentStore) -> No
 
 def _formal_payload(protocol_path: Path) -> dict:
     return json.loads(protocol_path.read_text(encoding="utf-8"))
+
+
+def _preview_qualification(definition, store, bundle):
+    selection = backtest_definition_to_dict(definition)["protocol"].get("research_execution")
+    if selection:
+        entry = Path(__file__).resolve().parents[3] / "research" / "run_validation.py"
+        return runpy.run_path(str(entry))["preview_validation"](
+            selection["payload"], store, phase=selection["phase"], trial_id=selection["trial_id"])
+    return prepare_backtest(definition, store, bundle)
+
+
+def _render_representative(store, experiments, path: Path, *, entry: str) -> None:
+    from hetu_quant.backtest import read_representative_approval
+    from hetu_quant.data_research import require_representative_inputs
+    from hetu_quant.jobs import JobService
+
+    try:
+        draft = json.loads(path.read_text(encoding="utf-8"))
+        definition = backtest_definition_from_dict(draft["definition"])
+        approval = read_representative_approval(definition, store.root)
+        require_representative_inputs(approval, store.root)
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        st.error(f"代表任务定义无效：{error}")
+        return
+    st.json(approval)
+    if st.button("提交已授权代表任务", key=f"bt_representative_submit::{entry}"):
+        try:
+            service = JobService(experiments)
+            submission_id = approval["submission_id"]
+            existing = next((job for job in service.list() if job.submission_id == submission_id), None)
+            if existing and experiments.read_definition(existing.definition_id) != definition:
+                raise ValueError("提交标识已关联其他定义")
+            definition_id = existing.definition_id if existing else experiments.save_definition("backtest", definition)
+            job = service.submit(definition_id, submission_id)
+        except (TypeError, ValueError) as error:
+            st.error(f"提交失败：{error}")
+        else:
+            st.success(f"代表任务 {job.job_id} · {job.state}")
+
+
+def _copy_execution_facts(payload: dict, *, frozen_trial: bool = False) -> dict:
+    facts = deepcopy(payload)
+    protocol = facts["protocol"]
+    protocol.pop("research_execution", None)
+    protocol.pop("representative_execution", None)
+    if frozen_trial:
+        protocol.pop("comparison", None)
+    return facts
 
 
 def render_backtest_page(root: Path, store) -> None:
@@ -320,8 +376,9 @@ def _render_results(experiments: ExperimentStore) -> None:
         st.markdown(f"- 限制：{limitation}")
     for limitation in evaluation.get("limitations", []):
         st.markdown(f"- 限制：{limitation}")
-    st.json({"metrics": evaluation.get("metrics", {}), "statistics": evaluation.get("statistics", {}),
-             "exposure": evaluation.get("exposure", "not_available"),
+    metrics = evaluation.get("metrics", {})
+    st.json({"metrics": metrics, "statistics": evaluation.get("statistics", {}),
+             **({"exposure": evaluation.get("exposure", "not_available")} if "exposures" not in metrics else {}),
              "capacity": evaluation.get("capacity", "not_available")})
 
     tables = payload["tables"]
@@ -407,6 +464,11 @@ def copy_backtest_definition(
         if before != after:
             mapping[key] = after
             differences.append(dict(path=path, before=before, after=after))
+            if path == "parameters.lookback_months" and payload["protocol"]["stage"] == "formal":
+                prior_warmup = payload["protocol"]["warmup_months"]
+                if prior_warmup != after:
+                    payload["protocol"]["warmup_months"] = after
+                    differences.append(dict(path="protocol.warmup_months", before=prior_warmup, after=after))
     definition = backtest_definition_from_dict(payload)
     require_formal_protocol(definition)
     return definition, differences
@@ -442,6 +504,35 @@ def _render_copy(store, experiments, definitions) -> None:
                                      frozen["trial_id"])
         )
     )
+    if formal and candidate.mode == "free" and not conforms:
+        facts = _copy_execution_facts(payload)
+        if frozen:
+            selected_payload = payload["protocol"]["research_execution"]["payload"]
+            frozen_facts = _copy_execution_facts(payload, frozen_trial=True)
+            for row in _validation_definitions(selected_payload):
+                if _copy_execution_facts(row["definition"], frozen_trial=True) == frozen_facts:
+                    candidate = _build_formal_definition(selected_payload, row["phase"], row["trial_id"])
+                    payload = backtest_definition_to_dict(candidate)
+                    conforms = True
+                    st.caption(f"复制后的实际定义对应冻结试验 {row['trial_id']}")
+                    break
+        if not conforms:
+            possible = []
+            for path in sorted((store.root / "research" / "representative-runs").glob("*/scope.json")):
+                if not path.resolve().is_relative_to(store.root.resolve()):
+                    continue
+                try:
+                    registered = json.loads(path.read_text(encoding="utf-8"))["definition"]
+                    if _copy_execution_facts(registered) == facts:
+                        possible.append(path)
+                except (OSError, TypeError, KeyError, ValueError):
+                    continue
+            if possible:
+                path = st.selectbox("与复制条件相符的代表授权", possible, index=None,
+                                    format_func=lambda path: path.parent.name)
+                if path is not None:
+                    _render_representative(store, experiments, path, entry="copy")
+                return
     if candidate.mode != "free" or not conforms:
         st.warning("草稿超出当前冻结试验定义或研究来源范围。正式研究账本和原定义保持。")
         if st.button("保存草稿", key="bt_copy_save"):
@@ -449,9 +540,13 @@ def _render_copy(store, experiments, definitions) -> None:
         return
     if st.button("检查复制定义资格", key="bt_copy_qualification"):
         st.session_state.pop("bt_copy_qualified", None)
-        with tempfile.TemporaryDirectory(prefix="hetu-bt-copy-") as workdir:
-            report = prepare_backtest(candidate, store, Path(workdir) / "bundle")
-        st.session_state["bt_copy_qualified"] = (payload, report.can_run, list(report.limitations))
+        try:
+            with tempfile.TemporaryDirectory(prefix="hetu-bt-copy-") as workdir:
+                report = _preview_qualification(candidate, store, Path(workdir) / "bundle")
+        except ValueError as error:
+            st.error(f"资格检查失败：{error}")
+        else:
+            st.session_state["bt_copy_qualified"] = (payload, report.can_run, list(report.limitations))
     checked = st.session_state.get("bt_copy_qualified")
     current = checked is not None and checked[0] == payload
     if current:

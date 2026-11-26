@@ -52,6 +52,10 @@ class CatalogStore:
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS job_lineage (
+                    job_id TEXT PRIMARY KEY REFERENCES jobs(job_id),
+                    retry_of_job_id TEXT REFERENCES jobs(job_id)
+                );
                 """
             )
 

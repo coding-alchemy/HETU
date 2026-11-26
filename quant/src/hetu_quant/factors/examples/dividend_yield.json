@@ -1,0 +1,65 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "daily_bars": [
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      }
+    ],
+    "calendar": [
+      {
+        "date": "2024-01-31",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "corporate_actions": [
+      {
+        "code": "A",
+        "event_id": "D1",
+        "kind": "distribution",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成公开事项原件",
+        "d": 0.2,
+        "ex_date": "2023-08-01",
+        "same_share_basis": true
+      },
+      {
+        "code": "A",
+        "event_id": "D2",
+        "kind": "distribution",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成公开事项原件",
+        "d": 0.3,
+        "ex_date": "2023-10-01",
+        "same_share_basis": true
+      },
+      {
+        "code": "A",
+        "event_id": "D3",
+        "kind": "distribution",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成公开事项原件",
+        "d": 0.4,
+        "ex_date": "2024-02-02",
+        "same_share_basis": true
+      }
+    ],
+    "action_coverage": [
+      {
+        "code": "A",
+        "start": "2023-01-31",
+        "end": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ]
+  }
+}

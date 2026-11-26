@@ -1,0 +1,1404 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "S1",
+    "S2",
+    "S3"
+  ],
+  "tables": {
+    "membership_coverage": [
+      {
+        "code": "S1",
+        "start": "2024-01-01",
+        "end": "2024-01-31",
+        "complete": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2",
+        "start": "2024-01-01",
+        "end": "2024-01-31",
+        "complete": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3",
+        "start": "2024-01-01",
+        "end": "2024-01-31",
+        "complete": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "daily_bars": [
+      {
+        "code": "S1",
+        "date": "2024-01-30",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1",
+        "date": "2024-01-31",
+        "close": 110,
+        "close_raw": 110,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2",
+        "date": "2024-01-30",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2",
+        "date": "2024-01-31",
+        "close": 120,
+        "close_raw": 120,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3",
+        "date": "2024-01-30",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3",
+        "date": "2024-01-31",
+        "close": 130,
+        "close_raw": 130,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-0",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-0",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-1",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-1",
+        "date": "2024-01-31",
+        "close": 9,
+        "close_raw": 9,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-2",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-2",
+        "date": "2024-01-31",
+        "close": 9,
+        "close_raw": 9,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-3",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-3",
+        "date": "2024-01-31",
+        "close": 9,
+        "close_raw": 9,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-0",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-0",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-1",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-1",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-2",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-2",
+        "date": "2024-01-31",
+        "close": 9,
+        "close_raw": 9,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-3",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-3",
+        "date": "2024-01-31",
+        "close": 9,
+        "close_raw": 9,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-0",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-0",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-1",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-1",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-2",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-2",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-3",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-3",
+        "date": "2024-01-31",
+        "close": 9,
+        "close_raw": 9,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1",
+        "date": "2024-01-29",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2",
+        "date": "2024-01-29",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3",
+        "date": "2024-01-29",
+        "close": 100,
+        "close_raw": 100,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-0",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-1",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-2",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S1-3",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-0",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-1",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-2",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S2-3",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-0",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-1",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-2",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "S3-3",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      }
+    ],
+    "memberships": [
+      {
+        "code": "S1",
+        "member": "S1-0",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1",
+        "member": "S1-1",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1",
+        "member": "S1-2",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1",
+        "member": "S1-3",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2",
+        "member": "S2-0",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2",
+        "member": "S2-1",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2",
+        "member": "S2-2",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2",
+        "member": "S2-3",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3",
+        "member": "S3-0",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3",
+        "member": "S3-1",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3",
+        "member": "S3-2",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3",
+        "member": "S3-3",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "market_cap": [
+      {
+        "code": "S1-0",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1-0",
+        "date": "2024-01-31",
+        "market_cap_cny": 6000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1-1",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1-1",
+        "date": "2024-01-31",
+        "market_cap_cny": 6000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1-2",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1-2",
+        "date": "2024-01-31",
+        "market_cap_cny": 6000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1-3",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S1-3",
+        "date": "2024-01-31",
+        "market_cap_cny": 6000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2-0",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2-0",
+        "date": "2024-01-31",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2-1",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2-1",
+        "date": "2024-01-31",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2-2",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2-2",
+        "date": "2024-01-31",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2-3",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S2-3",
+        "date": "2024-01-31",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3-0",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3-0",
+        "date": "2024-01-31",
+        "market_cap_cny": 10000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3-1",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3-1",
+        "date": "2024-01-31",
+        "market_cap_cny": 10000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3-2",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3-2",
+        "date": "2024-01-31",
+        "market_cap_cny": 10000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3-3",
+        "date": "2024-01-30",
+        "market_cap_cny": 8000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S3-3",
+        "date": "2024-01-31",
+        "market_cap_cny": 10000000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "calendar": [
+      {
+        "date": "2024-01-29",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "date": "2024-01-30",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "date": "2024-01-31",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "forecasts": [
+      {
+        "code": "S1-0",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S1-0|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S1-0",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 11,
+        "institution": "X",
+        "fact_key": "S1-0|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S1-1",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S1-1|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S1-1",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S1-1|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S1-2",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S1-2|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S1-2",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S1-2|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S1-3",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S1-3|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S1-3",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S1-3|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S2-0",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S2-0|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S2-0",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 11,
+        "institution": "X",
+        "fact_key": "S2-0|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S2-1",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S2-1|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S2-1",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 11,
+        "institution": "X",
+        "fact_key": "S2-1|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S2-2",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S2-2|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S2-2",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S2-2|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S2-3",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S2-3|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S2-3",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S2-3|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S3-0",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S3-0|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S3-0",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 11,
+        "institution": "X",
+        "fact_key": "S3-0|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S3-1",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S3-1|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S3-1",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 11,
+        "institution": "X",
+        "fact_key": "S3-1|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S3-2",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S3-2|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S3-2",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 11,
+        "institution": "X",
+        "fact_key": "S3-2|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "S3-3",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S3-3|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "S3-3",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "S3-3|X|2024|2024-01-30T14:00:00+08:00"
+      }
+    ],
+    "financial_reports": [
+      {
+        "code": "S1-0",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-0",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-0",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-0",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-1",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-1",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-1",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-1",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-2",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-2",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-2",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-2",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-3",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-3",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-3",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S1-3",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-0",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-0",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-0",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-0",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-1",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-1",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-1",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-1",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-2",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-2",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-2",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-2",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-3",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-3",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-3",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S2-3",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-0",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-0",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-0",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-0",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-1",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-1",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-1",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-1",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-2",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-2",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-2",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-2",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-3",
+        "period": "2023Q1",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-3",
+        "period": "2023Q2",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-3",
+        "period": "2023Q3",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      },
+      {
+        "code": "S3-3",
+        "period": "2023Q4",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "parent_net_profit": 2.5
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+[
+  {
+    "id": "legacy-quarterly-report",
+    "table": "financial_reports",
+    "coordinate": "2023Q4-扣非利润",
+    "basis": "第二阶段合成材料生成器 build_stage02.py 的 report 与 financial 登记把这两件材料列为同一报告的原报和更正。现行 examples/earnings_yield.json 保留两份原件及共同坐标。",
+    "previous": {
+      "code": "A",
+      "period": "2023Q4",
+      "source_ref": "合成财报原件",
+      "revision_id": "original",
+      "available_at": "2024-01-01T14:00:00+08:00"
+    },
+    "replacement": {
+      "code": "A",
+      "period": "2023Q4",
+      "source_ref": "合成晚披露更正",
+      "revision_id": "revised",
+      "supersedes": "original",
+      "available_at": "2024-01-31T18:00:00+08:00"
+    }
+  }
+]

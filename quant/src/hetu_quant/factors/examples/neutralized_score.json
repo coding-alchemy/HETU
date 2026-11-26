@@ -1,0 +1,147 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A",
+    "B",
+    "C",
+    "D"
+  ],
+  "tables": {
+    "daily_bars": [
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线",
+        "amount_cny": 6
+      },
+      {
+        "code": "B",
+        "date": "2024-01-31",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线",
+        "amount_cny": 7
+      },
+      {
+        "code": "C",
+        "date": "2024-01-31",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线",
+        "amount_cny": 14
+      },
+      {
+        "code": "D",
+        "date": "2024-01-31",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线",
+        "amount_cny": 19
+      }
+    ],
+    "calendar": [
+      {
+        "date": "2024-01-31",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "memberships": [
+      {
+        "code": "POOL",
+        "member": "A",
+        "valid_from": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "POOL",
+        "member": "B",
+        "valid_from": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "POOL",
+        "member": "C",
+        "valid_from": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "POOL",
+        "member": "D",
+        "valid_from": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "membership_coverage": [
+      {
+        "code": "POOL",
+        "start": "2024-01-31",
+        "end": "2024-01-31",
+        "complete": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "market_cap": [
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "market_cap_cny": 2.718281828459045,
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成时点市值"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-31",
+        "market_cap_cny": 7.38905609893065,
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成时点市值"
+      },
+      {
+        "code": "C",
+        "date": "2024-01-31",
+        "market_cap_cny": 2.718281828459045,
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成时点市值"
+      },
+      {
+        "code": "D",
+        "date": "2024-01-31",
+        "market_cap_cny": 7.38905609893065,
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成时点市值"
+      }
+    ],
+    "classifications": [
+      {
+        "code": "A",
+        "valid_from": "2024-01-31",
+        "industry": "X",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "B",
+        "valid_from": "2024-01-31",
+        "industry": "X",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "C",
+        "valid_from": "2024-01-31",
+        "industry": "Y",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "D",
+        "valid_from": "2024-01-31",
+        "industry": "Y",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ]
+  }
+}

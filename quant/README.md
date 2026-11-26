@@ -22,6 +22,16 @@ quant/.venv/bin/python -m streamlit run quant/src/hetu_quant/ui/app.py
 
 默认数据根为 `.hetu/quant`，用 `HETU_QUANT_ROOT` 指向其他根时，worker 的 `--root` 也须相同。网页刷新、查询和导出不取数。独立研究脚本位于 `research/`， [Notebook](notebooks/read_result.ipynb) 可读已发布排名和回测。真实研究资格仍为 `blocked`，预算 0/8。
 
+本工作区已归档的因子库自测收据位于 `.hetu/quant/factor-evidence/factor-selftests/`。从仓库根启动时可显式选用这份归档：
+
+```bash
+PYTHONPATH="$PWD/quant/src:$PWD/data/src" \
+HETU_FACTOR_EVIDENCE_ROOT="$PWD/.hetu/quant/factor-evidence" \
+  "${hetu_quant_python:-quant/.venv/bin/python}" -m streamlit run quant/src/hetu_quant/ui/app.py
+```
+
+`HETU_FACTOR_EVIDENCE_ROOT` 指向包含 `factor-selftests/` 的目录。复用其他量化虚拟环境时，可将 `hetu_quant_python` 设为该环境的 Python 路径。工作台在「因子库」按因子、版本和参数读取已保存的执行收据，并显示实际读取的目录。
+
 配置、任务预览／执行／恢复及结果使用见[统一使用手册](../docs/quant-research-platform-usage.md)。字段和存储见[数据字典](DATA.md)，验收见[统一实现与验收](../specs/2026-11-07-quant-research-platform-implementation.md)。仅需数据管理时可使用[独立数据模块](../data/README.md)。
 
 ## 开发检查

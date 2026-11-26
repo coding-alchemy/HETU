@@ -34,6 +34,8 @@
     "hypothesis": "价值",
     "frequency": "monthly",
     "rules_ref": "ep-value.md",
+    "code_refs": ["ep_value.py"],
+    "adaptation_refs": ["phase2-candidates.md"],
     "source_refs": [
       "https://rodneywhitecenter.wharton.upenn.edu/wp-content/uploads/2019/04/01-18-Stambaugh.Published.BlumePrize.pdf"
     ],
@@ -48,6 +50,7 @@
     "hypothesis": "股息与波动",
     "frequency": "annual",
     "rules_ref": "dividend-low-volatility.md",
+    "adaptation_refs": ["phase2-candidates.md"],
     "source_refs": [
       "https://oss-ch.csindex.com.cn/static/html/csindex/public/uploads/indices/detail/files/zh_CN/H30269_Index_Methodology_cn.pdf"
     ],

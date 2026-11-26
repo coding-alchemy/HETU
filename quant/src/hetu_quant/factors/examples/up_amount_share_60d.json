@@ -1,0 +1,936 @@
+{
+  "subjects": [
+    "SYN_A"
+  ],
+  "trade_date": "2024-04-01",
+  "tables": {
+    "daily_bars": [
+      {
+        "code": "SYN_A",
+        "date": "2024-01-08",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-01-08T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-09",
+        "close_raw": 101,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-09T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-10",
+        "close_raw": 102,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-10T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-11",
+        "close_raw": 103,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-11T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-12",
+        "close_raw": 104,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-12T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-15",
+        "close_raw": 105,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-15T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-16",
+        "close_raw": 106,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-16T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-17",
+        "close_raw": 107,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-17T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-18",
+        "close_raw": 108,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-18T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-19",
+        "close_raw": 109,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-19T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-22",
+        "close_raw": 110,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-22T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-23",
+        "close_raw": 111,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-23T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-24",
+        "close_raw": 112,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-24T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-25",
+        "close_raw": 113,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-25T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-26",
+        "close_raw": 114,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-26T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-29",
+        "close_raw": 115,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-30",
+        "close_raw": 116,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-01-31",
+        "close_raw": 117,
+        "amount_cny": 20000000,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-01",
+        "close_raw": 118,
+        "amount_cny": 20000000,
+        "available_at": "2024-02-01T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-02",
+        "close_raw": 119,
+        "amount_cny": 20000000,
+        "available_at": "2024-02-02T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-05",
+        "close_raw": 120,
+        "amount_cny": 20000000,
+        "available_at": "2024-02-05T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-06",
+        "close_raw": 119,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-06T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-07",
+        "close_raw": 118,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-07T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-08",
+        "close_raw": 117,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-08T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-09",
+        "close_raw": 116,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-09T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-12",
+        "close_raw": 115,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-12T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-13",
+        "close_raw": 114,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-13T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-14",
+        "close_raw": 113,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-14T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-15",
+        "close_raw": 112,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-15T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-16",
+        "close_raw": 111,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-16T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-19",
+        "close_raw": 110,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-19T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-20",
+        "close_raw": 109,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-20T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-21",
+        "close_raw": 108,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-21T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-22",
+        "close_raw": 107,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-22T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-23",
+        "close_raw": 106,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-23T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-26",
+        "close_raw": 105,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-26T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-27",
+        "close_raw": 104,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-27T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-28",
+        "close_raw": 103,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-28T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-02-29",
+        "close_raw": 102,
+        "amount_cny": 15000000,
+        "available_at": "2024-02-29T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-01",
+        "close_raw": 101,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-01T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-04",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-04T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-05",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-05T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-06",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-06T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-07",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-07T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-08",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-08T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-11",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-11T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-12",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-12T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-13",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-13T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-14",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-14T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-15",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-15T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-18",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-18T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-19",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-19T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-20",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-20T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-21",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-21T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-22",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-22T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-25",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-25T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-26",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-26T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-27",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-27T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-28",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-28T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-03-29",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-03-29T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      },
+      {
+        "code": "SYN_A",
+        "date": "2024-04-01",
+        "close_raw": 100,
+        "amount_cny": 15000000,
+        "available_at": "2024-04-01T15:00:00+08:00",
+        "source_ref": "合成量价记录",
+        "unit": "CNY"
+      }
+    ],
+    "calendar": [
+      {
+        "date": "2024-01-08",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-09",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-10",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-11",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-12",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-15",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-16",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-17",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-18",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-19",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-22",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-23",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-24",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-25",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-26",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-29",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-30",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-01-31",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-01",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-02",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-05",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-06",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-07",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-08",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-09",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-12",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-13",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-14",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-15",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-16",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-19",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-20",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-21",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-22",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-23",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-26",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-27",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-28",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-02-29",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-01",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-04",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-05",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-06",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-07",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-08",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-11",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-12",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-13",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-14",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-15",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-18",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-19",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-20",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-21",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-22",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-25",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-26",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-27",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-28",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-03-29",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      },
+      {
+        "date": "2024-04-01",
+        "is_trading_day": true,
+        "available_at": "2023-10-01T09:00:00+08:00",
+        "source_ref": "合成交易日历"
+      }
+    ],
+    "action_coverage": [
+      {
+        "code": "SYN_A",
+        "start": "2024-01-08",
+        "end": "2024-04-01",
+        "available_at": "2024-04-01T15:00:00+08:00",
+        "source_ref": "合成送转查询底稿（窗口内无行动）"
+      }
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "shares": [
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成股本",
+        "float_shares": 1000
+      }
+    ],
+    "events": [
+      {
+        "code": "A",
+        "event_id": "EV1",
+        "kind": "sale_plan",
+        "available_at": "2024-01-01T08:00:00+08:00",
+        "source_ref": "合成公开事项原件",
+        "effective_date": "2024-01-30",
+        "plan_shares": 100,
+        "used_shares": 40,
+        "state": "实施中"
+      }
+    ]
+  }
+}

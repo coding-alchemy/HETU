@@ -1,0 +1,188 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "M"
+  ],
+  "tables": {
+    "daily_bars": [
+      {
+        "code": "A",
+        "date": "2024-01-29",
+        "close": 8,
+        "close_raw": 8,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "A",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "close": 12,
+        "close_raw": 12,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-29",
+        "close": 8,
+        "close_raw": 8,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "B",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "C",
+        "date": "2024-01-29",
+        "close": 13,
+        "close_raw": 13,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "C",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "C",
+        "date": "2024-01-31",
+        "close": 11,
+        "close_raw": 11,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "D",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "D",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "D",
+        "date": "2024-01-31",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "E",
+        "date": "2024-01-29",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-29T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "E",
+        "date": "2024-01-30",
+        "close": 10,
+        "close_raw": 10,
+        "available_at": "2024-01-30T15:00:00+08:00",
+        "source_ref": "合成日线"
+      },
+      {
+        "code": "E",
+        "date": "2024-01-31",
+        "close": 9,
+        "close_raw": 9,
+        "available_at": "2024-01-31T15:00:00+08:00",
+        "source_ref": "合成日线"
+      }
+    ],
+    "calendar": [
+      {
+        "date": "2024-01-29",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "date": "2024-01-30",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "date": "2024-01-31",
+        "is_trading_day": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "memberships": [
+      {
+        "code": "M",
+        "member": "A",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "M",
+        "member": "B",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "M",
+        "member": "C",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "M",
+        "member": "D",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "M",
+        "member": "E",
+        "valid_from": "2024-01-01",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "membership_coverage": [
+      {
+        "code": "M",
+        "start": "2024-01-01",
+        "end": "2024-01-31",
+        "complete": true,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ]
+  }
+}

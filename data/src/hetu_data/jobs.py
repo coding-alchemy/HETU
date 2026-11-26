@@ -2,7 +2,7 @@
 
 同一 submission_id 只防一次点击重发：同定义返回原任务，异定义拒绝。
 重试仅接受 failed/cancelled/interrupted，生成新任务号、新提交标识，
-尝试数加一，原记录保留。列表按建立顺序倒排。
+尝试数加一，保留父任务关联与原记录。列表按建立顺序倒排。
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ CN = ZoneInfo("Asia/Shanghai")
 
 _ACTIVE_STATES = ("queued", "running", "cancel_requested")
 _RETRYABLE_STATES = ("failed", "cancelled", "interrupted")
+_JOB_RECORDS = "SELECT jobs.*, job_lineage.retry_of_job_id FROM jobs LEFT JOIN job_lineage USING (job_id)"
 
 
 def _new_job_id() -> str:
@@ -47,23 +48,42 @@ class JobService:
             progress=float(row["progress"]),
             reason=row["reason"],
             output=Path(row["output"]) if row["output"] else None,
+            retry_of_job_id=row["retry_of_job_id"],
         )
 
     def get(self, job_id: str) -> JobRecord:
         with self._connect() as conn:
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-        if row is None:
-            raise KeyError(f"unknown job: {job_id}")
-        return self._record(row)
+            return self._row(conn, job_id)
 
     def list(self) -> list[JobRecord]:
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM jobs ORDER BY created_at DESC, rowid DESC"
+                f"{_JOB_RECORDS} ORDER BY jobs.created_at DESC, jobs.rowid DESC"
             ).fetchall()
         return [self._record(row) for row in rows]
+
+    def original_submission_id(self, job_id: str) -> str | None:
+        """沿已知父链查找由 submissions 佐证的首次提交。"""
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                WITH RECURSIVE ancestors(job_id, retry_of_job_id) AS (
+                    SELECT jobs.job_id, job_lineage.retry_of_job_id
+                    FROM jobs LEFT JOIN job_lineage USING (job_id)
+                    WHERE jobs.job_id = ?
+                    UNION
+                    SELECT parent.job_id, job_lineage.retry_of_job_id
+                    FROM ancestors JOIN jobs AS parent ON parent.job_id = ancestors.retry_of_job_id
+                    LEFT JOIN job_lineage ON job_lineage.job_id = parent.job_id
+                )
+                SELECT jobs.submission_id FROM ancestors JOIN jobs USING (job_id)
+                JOIN submissions ON submissions.submission_id = jobs.submission_id
+                    AND submissions.definition_id = jobs.definition_id
+                WHERE ancestors.retry_of_job_id IS NULL AND jobs.attempt = 1
+                """,
+                (job_id,),
+            ).fetchone()
+        return str(row["submission_id"]) if row is not None else None
 
     def _insert_submission(
         self, conn: sqlite3.Connection, submission_id: str, definition_id: str
@@ -86,7 +106,7 @@ class JobService:
                         f"{existing['definition_id']!r}"
                     )
                 row = conn.execute(
-                    "SELECT * FROM jobs WHERE submission_id = ?", (submission_id,)
+                    f"{_JOB_RECORDS} WHERE jobs.submission_id = ?", (submission_id,)
                 ).fetchone()
                 return self._record(row)
             now = datetime.now(CN).isoformat()
@@ -112,18 +132,15 @@ class JobService:
                     now,
                 ),
             )
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
-            ).fetchone()
-            return self._record(row)
+            conn.execute("INSERT INTO job_lineage (job_id) VALUES (?)", (job_id,))
+            return self._row(conn, job_id)
 
     def retry(self, job_id: str, submission_id: str) -> JobRecord:
-        original = self.get(job_id)
-        if original.state not in _RETRYABLE_STATES:
-            raise ValueError(
-                f"job {job_id} in state {original.state!r} is not retryable"
-            )
         with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            parent = self._row(conn, job_id)
+            if parent.state not in _RETRYABLE_STATES:
+                raise ValueError(f"job {job_id} in state {parent.state!r} is not retryable")
             clash = conn.execute(
                 "SELECT definition_id FROM submissions WHERE submission_id = ?",
                 (submission_id,),
@@ -136,7 +153,7 @@ class JobService:
             now = datetime.now(CN).isoformat()
             new_job_id = _new_job_id()
             try:
-                self._insert_submission(conn, submission_id, original.definition_id)
+                self._insert_submission(conn, submission_id, parent.definition_id)
             except sqlite3.IntegrityError:
                 raise ValueError(
                     f"submission {submission_id!r} already used"
@@ -145,9 +162,9 @@ class JobService:
                 "INSERT INTO jobs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     new_job_id,
-                    original.definition_id,
+                    parent.definition_id,
                     submission_id,
-                    original.attempt + 1,
+                    parent.attempt + 1,
                     "queued",
                     0.0,
                     None,
@@ -156,10 +173,8 @@ class JobService:
                     now,
                 ),
             )
-            row = conn.execute(
-                "SELECT * FROM jobs WHERE job_id = ?", (new_job_id,)
-            ).fetchone()
-            return self._record(row)
+            conn.execute("INSERT INTO job_lineage VALUES (?, ?)", (new_job_id, parent.job_id))
+            return self._row(conn, new_job_id)
 
     def cancel(self, job_id: str) -> JobRecord:
         """queued 直接 cancelled；running 记 cancel_requested；终态返回原记录。"""
@@ -189,7 +204,7 @@ class JobService:
 
     def _row(self, conn: sqlite3.Connection, job_id: str) -> JobRecord:
         row = conn.execute(
-            "SELECT * FROM jobs WHERE job_id = ?", (job_id,)
+            f"{_JOB_RECORDS} WHERE jobs.job_id = ?", (job_id,)
         ).fetchone()
         if row is None:
             raise KeyError(f"unknown job: {job_id}")

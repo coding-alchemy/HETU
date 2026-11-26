@@ -42,7 +42,7 @@ from hetu_quant.ui.data_page import (
 
 CN = ZoneInfo("Asia/Shanghai")
 
-_PAGES = ("任务列表", "数据", "研究提交", "策略目录", "回测", "结果与导出")
+_PAGES = ("任务列表", "数据", "研究提交", "策略目录", "回测", "结果与导出", "因子库")
 
 _DEFINITION_ENCODERS = {
     "data": data_request_to_dict,
@@ -255,8 +255,14 @@ def _page_research(root: Path, store: DataStore) -> None:
     st.header("研究提交")
     experiments = ExperimentStore(root)
     kind = st.radio(
-        "类型", ("排名研究", "数据请求"), horizontal=True, key="research_kind"
+        "类型", ("排名研究", "数据请求", "盘后研究"), horizontal=True, key="research_kind"
     )
+    if kind == "盘后研究":
+        from hetu_quant.ui.after_close_page import render_after_close_form
+
+        data_root = Path(os.environ.get("HETU_DATA_ROOT") or root).expanduser()
+        render_after_close_form(_make_store(data_root), root)
+        return
     if kind == "排名研究":
         snapshots = [sid for sid, _ in store._published_manifests()]
         if not snapshots:
@@ -523,6 +529,12 @@ def _page_results(root: Path) -> None:
     ref = experiments.get_result(result_id)
     result_dir = root / "results" / result_id
     manifest = json.loads((result_dir / "result.json").read_text(encoding="utf-8"))
+    if manifest.get("kind") == "after_close":
+        from hetu_quant.ui.after_close_page import render_after_close_result
+
+        render_after_close_result(ref)
+        _render_export(ref)
+        return
     if ref.status == "limited":
         st.warning("研究受限（limited）：席位或口径不足，缺口如实列出，不冒充正常完成")
     else:
@@ -619,7 +631,11 @@ def _page_results(root: Path) -> None:
         "图表只读 03 保存序列，不重新计算、不混用复权总回报。"
     )
     with st.expander("与其他结果逐项对比（不同定义只显示差异，不合并排名）"):
-        others = [item for item in result_ids if item != result_id]
+        others = [
+            item for item in result_ids if item != result_id and json.loads(
+                (root / "results" / item / "result.json").read_text(encoding="utf-8")
+            ).get("kind") != "after_close"
+        ]
         other_id = st.selectbox(
             "对比结果", ["（不对比）"] + others, key="diff_select"
         )
@@ -656,6 +672,11 @@ def _page_results(root: Path) -> None:
                 ]
                 if len(diff):
                     st.dataframe(diff.round(4), hide_index=True, key=f"diff::{kind}")
+    _render_export(ref)
+
+
+def _render_export(ref) -> None:
+    result_id = ref.result_id
     if st.button("导出 ZIP（只读已发布产物）", key="export_result"):
         try:
             zip_path = export_result(ref, Path(tempfile.mkdtemp(prefix="hetu-export-")))
@@ -707,6 +728,11 @@ def main() -> None:
         from hetu_quant.ui.backtest_page import render_backtest_page
 
         render_backtest_page(root, _make_store(root))
+    elif page == "因子库":
+        from hetu_quant.ui.factor_page import render_factor_page
+
+        data_root = Path(os.environ.get("HETU_DATA_ROOT") or root).expanduser()
+        render_factor_page(_make_store(data_root), root)
     else:
         _page_results(root)
 

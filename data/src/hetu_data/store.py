@@ -96,18 +96,26 @@ class _ProductPlan(TypedDict):
 
 
 TABLE_SCHEMAS: dict[str, dict[str, list[str]]] = {
+    "share_exchanges": {
+        "columns": ["from_code", "to_code", "effective_date", "event_id", "evidence_ref", "sha256",
+                    "product_id", "source_ref"],
+        "keys": ["event_id", "evidence_ref"],
+    },
     "terminal_disposals": {
         "columns": [
             "code",
             "date",
             "cash_per_share",
+            "event_id",
+            "currency",
+            "unit",
             "available_at",
             "evidence_ref",
             "sha256",
             "product_id",
             "source_ref",
         ],
-        "keys": ["code", "date"],
+        "keys": ["code", "date", "evidence_ref"],
     },
     "securities": {
         "columns": [
@@ -563,7 +571,15 @@ class DataStore:
                 raise AccessDenied("stored/imported rows exceed current object grant")
             if not codes.astype(str).str.rsplit(".", n=1).str[-1].isin(grant.get("markets", [])).all():
                 raise AccessDenied("stored/imported rows exceed current market grant")
+        if table == "share_exchanges":
+            for column in ("from_code", "to_code"):
+                codes = frame[column].astype(str)
+                if (not codes.isin(grant.get("codes", [])).all()
+                        or not codes.str.rsplit(".", n=1).str[-1].isin(grant.get("markets", [])).all()):
+                    raise AccessDenied("stored/imported rows exceed current exchange object grant")
         date_column = "date" if "date" in frame else "ex_date" if table == "corporate_actions" else None
+        if table == "share_exchanges":
+            date_column = "effective_date"
         if date_column:
             dates = frame[date_column]
             if dates.isna().any() or not dates.astype(str).between(grant.get("start", "~"), grant.get("end", "")).all():

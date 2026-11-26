@@ -8,16 +8,23 @@ E/P 在规则与数据合格后以独立定义接入，此处不擅自补权重�
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
 from hetu_quant.backtest_data import (
+    SIGNAL_LOOKBACK_MONTHS,
+    SignalInputs,
     _proven_month_ends,
     _rebuild_universe,
-    _signal_cutoff,
+    _segment_rows,
+    _signal_action_inputs,
     _signal_days,
     _truthy,
+    select_signal_market_cap,
 )
 from hetu_quant.backtest_models import BacktestDefinition
 from hetu_quant.data import DataStore, UnsupportedActionError, build_total_return_series
@@ -42,6 +49,16 @@ SIGNAL_COLUMNS = [
 _FORMAL_COST_FIELDS = ("commission_rate", "min_commission_cny", "slippage_rate")
 
 
+
+def _low_volatility_ranks(monthly_returns, lookback_months):
+    vols: dict[str, float] = {}
+    if len(monthly_returns):
+        for code, group in monthly_returns.groupby("code"):
+            if len(group) != lookback_months:
+                continue
+            vols[str(code)] = float(group["month_return"].std(ddof=1))
+    return sorted(vols.items(), key=lambda item: (item[1], item[0]))
+
 def low_volatility_weights(
     monthly_returns: pd.DataFrame, market_cap: pd.DataFrame, *, lookback_months: int = 36
 ) -> pd.DataFrame:
@@ -53,15 +70,9 @@ def low_volatility_weights(
     时不产信号。同波动按代码稳定截取。
     """
     columns = ["code", "signal_value", "target_weight"]
-    vols: dict[str, float] = {}
-    if len(monthly_returns):
-        for code, group in monthly_returns.groupby("code"):
-            if len(group) != lookback_months:
-                continue
-            vols[str(code)] = float(group["month_return"].std(ddof=1))
-    if len(vols) < MIN_POOL:
+    ordered = _low_volatility_ranks(monthly_returns, lookback_months)
+    if len(ordered) < MIN_POOL:
         return pd.DataFrame(columns=columns)
-    ordered = sorted(vols.items(), key=lambda item: (item[1], item[0]))
     count = max(1, len(ordered) // 10)
     caps = (
         {str(row.code): float(row.market_cap_cny) for row in market_cap.itertuples()}
@@ -98,30 +109,53 @@ def _universe_vw_weights(codes: list[str], caps: dict[str, float]) -> pd.DataFra
 
 
 def _known_market_cap(
-    market_cap: pd.DataFrame, code: str, signal_day: str
+    market_cap: pd.DataFrame, code: str, signal_day: str,
+    knowledge: pd.DataFrame | None = None, evidence_root: Path = Path("."),
 ) -> float | None:
-    """信号日原价形成、且信号时点（当日 21:00 CN）前已公开的市值。
-
-    不得按研究 as_of 筛选：信号时点后披露的版本（即使研究时点已可得）
-    属于未来数据，使用即泄露。
-    """
-    if not len(market_cap):
-        return None
-    cutoff = _signal_cutoff(signal_day)
-    own = market_cap[
-        (market_cap["code"].astype(str) == code)
-        & (market_cap["date"].astype(str) == signal_day)
-        & (market_cap["available_at"].astype(str) <= cutoff)
-    ]
-    if not len(own):
-        return None
-    latest = own.sort_values("date").iloc[-1]
-    value = pd.to_numeric(pd.Series([latest["market_cap_cny"]]), errors="coerce").iloc[0]
-    return None if pd.isna(value) else float(value)
+    """使用共同资格判定选中的收盘市值。"""
+    fact = select_signal_market_cap(
+        market_cap, knowledge if knowledge is not None else pd.DataFrame(), code, signal_day, evidence_root
+    )
+    return None if fact is None else fact["market_cap_cny"]
 
 
-def build_signals(definition: BacktestDefinition, store: DataStore) -> pd.DataFrame:
-    """按定义逐信号日计算共同信号：宇宙来自 01 历史资格，不读未来数据。
+def _return_window(bars: pd.DataFrame, actions: pd.DataFrame, start: str, end: str) -> pd.DataFrame:
+    window = bars[bars["date"].astype(str).between(start, end)]
+    ex_dates = actions["ex_date"].astype(str)
+    events = actions[ex_dates.between(start, end) | ex_dates.eq("") | actions["ex_date"].isna()]
+    return build_total_return_series(window, events)
+
+
+def _factor_labels_for_signal(
+    code: str, signal_day: str, factor: float, bars: pd.DataFrame, actions: pd.DataFrame,
+    month_ends: dict[str, str], boundary: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    labels, exclusions = [], []
+    for horizon in (1, 3, 6):
+        coordinate = dict(code=code, signal_at=signal_day, horizon_months=horizon)
+        month = str(pd.Period(signal_day, freq="M") + horizon)
+        mature = month_ends.get(month)
+        if mature is None or mature > boundary:
+            exclusions.append({**coordinate, "reason": "immature_or_cross_split"})
+            continue
+        try:
+            forward = _return_window(bars, actions, signal_day, mature)
+        except UnsupportedActionError:
+            exclusions.append({**coordinate, "reason": "unsupported_label_action"})
+            continue
+        if forward.empty or str(forward.iloc[-1]["date"]) != mature:
+            exclusions.append({**coordinate, "reason": "missing_label_price"})
+            continue
+        values = forward["close_total_return"]
+        labels.append(dict(**coordinate, factor_value=factor, label_return=float(values.iloc[-1] / values.iloc[0] - 1),
+                           mature_at=mature, split_end=boundary))
+    return labels, exclusions
+
+
+def build_signals(
+    definition: BacktestDefinition, store: DataStore, *, qualification_delivery: Path | None = None,
+) -> pd.DataFrame:
+    """共同信号只消费截至信号日的输入，未来标签用于单独的研究评价。
 
     输出列为 code, signal_at, executable_from, signal_value, rank,
     target_weight, source_ref；executable_from 是信号日后首个交易日
@@ -146,16 +180,23 @@ def build_signals(definition: BacktestDefinition, store: DataStore) -> pd.DataFr
     if strategy_id == 'low_volatility' and frequency != 'monthly':
         raise ValueError('registered low_volatility requires monthly rebalance; weekly method is not registered')
     signal_days = _signal_days(calendar, definition.start, definition.end, frequency)
-    universe_rows, _excluded, _exclusion_rows = _rebuild_universe(
-        definition, store, ref, manifest, calendar, signal_days, warmup_months
+    universe_rows, _excluded, exclusion_rows = _rebuild_universe(
+        definition, store, ref, manifest, calendar, signal_days, warmup_months,
+        qualification_delivery=qualification_delivery,
     )
-    by_signal: dict[str, list[str]] = {}
+    signal_exclusions = [row for row in exclusion_rows if row["field"] in ("corporate_action_terms", "code_continuity")]
+    blocked = {row["date"] for row in signal_exclusions}
+    by_signal: dict[str, dict] = {}
     for row in universe_rows:
-        by_signal.setdefault(row["signal_date"], []).append(row["code"])
+        by_signal.setdefault(row["signal_date"], {})[row["code"]] = row["segments"]
 
     bars = store.read_table(ref, "daily_bars")
     actions = store.read_table(ref, "corporate_actions")
     market_cap = store.read_table(ref, "market_cap")
+    knowledge = store.read_table(ref, "knowledge_evidence")
+    bars_by_code = {str(code): frame for code, frame in bars.groupby("code")}
+    actions_by_code = {str(code): frame for code, frame in actions.groupby("code")}
+    no_actions = actions.iloc[:0]
 
     month_ends = {day[:7]: day for day in _proven_month_ends(calendar)}
 
@@ -163,9 +204,9 @@ def build_signals(definition: BacktestDefinition, store: DataStore) -> pd.DataFr
     labels: list[dict[str, Any]] = []
     exclusions: list[dict[str, Any]] = []
     for signal_day in signal_days:
-        codes = by_signal.get(signal_day, [])
+        segments_by_code = by_signal.get(signal_day, {})
         executable = next((day for day in trading_days if day > signal_day), None)
-        if not codes or executable is None:
+        if signal_day in blocked or not segments_by_code or executable is None:
             continue
         points = ([signal_day] if warmup_months == 0 else
                   [day for month, day in sorted(month_ends.items()) if day <= signal_day])
@@ -174,51 +215,27 @@ def build_signals(definition: BacktestDefinition, store: DataStore) -> pd.DataFr
             continue
         return_rows: list[dict[str, object]] = []
         caps: dict[str, float] = {}
-        for code in codes:
-            cap = _known_market_cap(market_cap, code, signal_day)
+        label_inputs = []
+        for code, segments in segments_by_code.items():
+            cap = _known_market_cap(market_cap, code, signal_day, knowledge, store.root)
             if cap is not None:
                 caps[code] = cap
-            own = bars[(bars["code"].astype(str) == code) & (bars["date"].astype(str) <= str(definition.end))]
-            try:
-                series = build_total_return_series(own, actions)
-            except UnsupportedActionError:
-                continue  # 未核验行动类型的对象不产信号（资格侧已记录）
-            values: list[float] = []
-            for day in points:
-                row = series[series["date"].astype(str) == day]
-                if not len(row):
-                    values = []
-                    break
-                value = pd.to_numeric(row["close_total_return"], errors="coerce").iloc[-1]
-                if pd.isna(value):
-                    values = []
-                    break
-                values.append(float(value))
-            if len(values) != len(points):
+            own = bars_by_code[code]
+            own_actions = actions_by_code.get(code, no_actions)
+            history = own
+            history_actions = own_actions
+            if len(segments) > 1:
+                history = _segment_rows(bars_by_code, segments, "date", bars.iloc[:0]).assign(
+                    source_code=lambda frame: frame.code, code=code
+                )
+                history_actions = _segment_rows(actions_by_code, segments, "ex_date", no_actions)
+            signal_actions, _ = _signal_action_inputs(history_actions, points[0], signal_day)
+            series = _return_window(history, signal_actions.assign(code=code), points[0], signal_day)
+            returns = _monthly_returns(series, points)
+            if len(returns) != len(points) - 1:
                 continue
-            returns = pd.Series(values).pct_change().dropna()
             if strategy_id == "low_volatility":
-                factor = -float(returns.std(ddof=1))
-                split_day = max(str(definition.start), str((pd.Timestamp(signal_day) + pd.Timedelta(days=1)).date()))
-                segment = next((bounds for bounds in definition.protocol["time_split"].values()
-                                if str(bounds[0]) <= split_day <= str(bounds[1])), None)
-                boundary = min(str(definition.end), str(segment[1])) if segment else str(definition.end)
-                for horizon in (1, 3, 6):
-                    month = str(pd.Period(signal_day, freq="M") + horizon)
-                    mature = month_ends.get(month)
-                    if mature is None or mature > boundary:
-                        exclusions.append(dict(code=code, signal_at=signal_day, horizon_months=horizon,
-                                               reason="immature_or_cross_split"))
-                        continue
-                    endpoint = series[series["date"].astype(str) == mature]
-                    if endpoint.empty:
-                        exclusions.append(dict(code=code, signal_at=signal_day, horizon_months=horizon,
-                                               reason="missing_label_price"))
-                        continue
-                    end_value = float(endpoint.iloc[-1]["close_total_return"])
-                    labels.append(dict(code=code, signal_at=signal_day, horizon_months=horizon,
-                        factor_value=factor, label_return=end_value / values[-1] - 1,
-                        mature_at=mature, split_end=boundary))
+                label_inputs.append((code, -float(returns.std(ddof=1)), own, own_actions))
             for month_end, month_return in zip(points[1:], returns, strict=False):
                 return_rows.append(
                     {"code": code, "month_end": month_end, "month_return": month_return}
@@ -232,7 +249,18 @@ def build_signals(definition: BacktestDefinition, store: DataStore) -> pd.DataFr
                 return_frame, cap_frame, lookback_months=warmup_months
             )
         else:
-            weights = _universe_vw_weights(codes, caps)
+            weights = _universe_vw_weights(list(segments_by_code), caps)
+        if label_inputs:
+            split_day = max(str(definition.start), str((pd.Timestamp(signal_day) + pd.Timedelta(days=1)).date()))
+            segment = next((bounds for bounds in definition.protocol["time_split"].values()
+                            if str(bounds[0]) <= split_day <= str(bounds[1])), None)
+            boundary = min(str(definition.end), str(segment[1])) if segment else str(definition.end)
+            for code, factor, own, own_actions in label_inputs:
+                known_labels, missing_labels = _factor_labels_for_signal(
+                    code, signal_day, factor, own, own_actions, month_ends, boundary,
+                )
+                labels.extend(known_labels)
+                exclusions.extend(missing_labels)
         for rank, row in enumerate(weights.itertuples(), start=1):
             rows.append(
                 {
@@ -249,6 +277,7 @@ def build_signals(definition: BacktestDefinition, store: DataStore) -> pd.DataFr
     result.attrs["factor_labels"] = pd.DataFrame(labels, columns=[
         "code", "signal_at", "horizon_months", "factor_value", "label_return", "mature_at", "split_end"])
     result.attrs["factor_exclusions"] = exclusions
+    result.attrs["signal_exclusions"] = signal_exclusions
     return result
 
 
@@ -324,3 +353,87 @@ def strategy_method_label(definition: BacktestDefinition) -> str:
     ):
         return "original_method"
     return "adapted_method"
+
+
+def _monthly_returns(series, points):
+    dated = series.assign(date=series["date"].astype(str))
+    closes = dated.drop_duplicates("date", keep="last").set_index("date")["close_total_return"]
+    values = pd.to_numeric(closes.reindex(points), errors="coerce")
+    if values.isna().any():
+        return pd.Series(dtype="float64")
+    return values.pct_change(fill_method=None).dropna()
+
+
+@dataclass
+class SignalTarget:
+    signal_date: date
+    status: str
+    executable_from: date | None
+    pool_size: int | None
+    candidates: pd.DataFrame
+    targets: pd.DataFrame
+    gaps: list[dict]
+
+
+def build_signal_targets(inputs: SignalInputs, signal_date: date) -> SignalTarget:
+    """Build an independent close target without depending on execution or maturity."""
+    if inputs.signal_date != signal_date:
+        raise ValueError("signal input date does not match target date")
+    columns = ["identity_id", "code", "signal_value", "rank", "reason", "source_ref"]
+    candidates = pd.DataFrame(columns=columns)
+    targets = pd.DataFrame(columns=[*columns, "target_weight"])
+    gaps = list(inputs.gaps)
+    result = SignalTarget(signal_date, "blocked", inputs.executable_from, inputs.pool_size, candidates, targets, gaps)
+    if inputs.day_kind != "month_end":
+        result.status = "ordinary" if inputs.day_kind == "ordinary" else "calendar_unknown"
+        return result
+    if inputs.executable_from is None:
+        gaps.append(dict(code=None, date=str(signal_date), field="executable_from",
+                         reason="最早适用日待定，后继交易日日历未证", required=[str(signal_date)], source_refs=[],
+                         blocking=False))
+    if len(inputs.month_ends) != SIGNAL_LOOKBACK_MONTHS + 1 or inputs.closes.empty:
+        return result
+    excluded = {fact.get("target_code", fact.get("code")) for fact in gaps if fact.get("code")
+                and fact.get("field") != "executable_from"}
+    active = {r.code: r for r in inputs.identities.itertuples() if r.active}
+    return_rows = []
+    for code, own in inputs.closes.groupby("target_code"):
+        if code not in active or code in excluded:
+            continue
+        events = inputs.actions[inputs.actions.target_code.eq(code)].assign(code=code)
+        series = _return_window(own.assign(code=code), events, inputs.month_ends[0], str(signal_date))
+        returns = _monthly_returns(series, inputs.month_ends)
+        return_rows.extend(dict(code=code, month_end=day, month_return=value) for day, value in returns.items())
+    ranked = _low_volatility_ranks(pd.DataFrame(return_rows), SIGNAL_LOOKBACK_MONTHS)
+    number_selected = max(1, len(ranked) // 10)
+    rows = [
+        dict(identity_id=active[code].identity_id, code=code, signal_value=vol, rank=index,
+             reason="36月总收益样本波动最低十分位" if index <= number_selected else "波动排名未进入最低十分位",
+             source_ref=active[code].source_ref)
+        for index, (code, vol) in enumerate(ranked, start=1)
+    ]
+    rows.extend(dict(identity_id=active[code].identity_id if code in active else "", code=code,
+                     signal_value=None, rank=None, reason=fact["reason"],
+                     source_ref=", ".join(fact.get("source_refs", [])))
+                for code in sorted(excluded) for fact in gaps if fact.get("target_code", fact.get("code")) == code)
+    result.candidates = pd.DataFrame(rows, columns=columns)
+    window = [inputs.month_ends[0], str(signal_date)]
+    if len(ranked) < MIN_POOL:
+        gaps.append(dict(code=None, date=str(signal_date), field="eligible_pool", reason="合格池不足 10 只",
+                         required=window, source_refs=[], blocking=True))
+    if inputs.pool_size is None or any(row.get("blocking", True) for row in gaps):
+        return result
+    selected = result.candidates.iloc[:number_selected].copy()
+    caps = {r.code: r.market_cap_cny for r in inputs.market_cap.itertuples()}
+    for code in selected.code:
+        if code not in caps:
+            gaps.append(dict(code=code, date=str(signal_date), field="market_cap_cny",
+                             reason="入选证券在收盘时点的市值未证，无法计算完整权重", required=window,
+                             source_refs=[active[code].source_ref], blocking=True))
+    if any(fact.get("blocking", True) for fact in gaps):
+        return result
+    weights = selected.code.map(caps)
+    selected["target_weight"] = weights / weights.sum()
+    result.targets = selected
+    result.status = "ready"
+    return result

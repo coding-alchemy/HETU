@@ -1,0 +1,18 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "S"
+  ],
+  "tables": {
+    "sector_flows": [
+      {
+        "code": "S",
+        "date": "2024-01-31",
+        "net_flow": -3,
+        "amount_cny": 60,
+        "provider_definition": "合成口径",
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "etf_nav": [
+      {
+        "code": "A",
+        "date": "2024-01-31",
+        "nav": 2,
+        "currency": "CNY",
+        "net_assets": 5000000.0,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ],
+    "etf_shares": []
+  }
+}

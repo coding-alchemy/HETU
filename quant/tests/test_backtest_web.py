@@ -658,6 +658,100 @@ def test_formal_comparison_requires_same_published_benchmark(tmp_path):
     assert not compare_backtests(a, b)["mixed_ranking_allowed"]
 
 
+def test_formal_comparison_rejects_missing_account_nav_with_complete_benchmark(tmp_path):
+    a, b = (_publish_fake_backtest(tmp_path, f"synthetic-{suffix}") for suffix in ("a", "b"))
+    for ref in (a, b):
+        published = tmp_path / "backtests" / ref.run_id
+        manifest_path = published / "backtest.json"
+        manifest = json.loads(manifest_path.read_text())
+        manifest["definition"]["protocol"] = {"stage": "formal", "benchmark_id": "universe_vw"}
+        manifest_path.write_text(json.dumps(manifest))
+        bundle = published / "bundle"
+        bundle.mkdir()
+        pd.DataFrame({"signal_date": ["2024-01-03"], "code": ["SYN_A"]}).to_parquet(bundle / "universe.parquet")
+        pd.DataFrame({"date": ["2024-01-03", "2024-01-04"], "net_nav": [500.0, 505.0],
+                      "benchmark_nav": [500.0, 502.0]}).to_parquet(published / "nav.parquet")
+    assert compare_backtests(a, b)["mixed_ranking_allowed"]
+
+    broken_nav = tmp_path / "backtests" / b.run_id / "nav.parquet"
+    rows = pd.read_parquet(broken_nav)
+    rows.loc[1, "net_nav"] = None
+    rows.to_parquet(broken_nav)
+    for left, right, side in ((a, b, "right"), (b, a, "left")):
+        result = compare_backtests(left, right)
+        assert not result["mixed_ranking_allowed"]
+        assert len(result["differences"]) == 1
+        assert "actual_account_nav" in result["differences"][0]
+        assert side in result["differences"][0]
+        assert b.run_id in result["differences"][0]
+
+
+def test_comparison_page_shows_published_sample_cost_nav_and_trial_evidence(tmp_path, monkeypatch):
+    a, b = (_publish_fake_backtest(tmp_path, f"synthetic-{suffix}") for suffix in ("a", "b"))
+    ledger = tmp_path / "research" / "offline-comparison" / "trials.jsonl"
+    ledger.parent.mkdir(parents=True)
+    rows = [
+        dict(trial_id="original", run_id=a.run_id, status="complete"),
+        dict(trial_id="copy", run_id=b.run_id, status="complete"),
+        dict(trial_id="third", run_id=None, status="failed"),
+        dict(status="refused_budget"),
+    ]
+    ledger.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    statistics = {"months": 11, "net_excess_ci95": [-0.01, 0.02]}
+
+    def publish_values(ref, rate, charge, net_nav, codes):
+        run = tmp_path / "backtests" / ref.run_id
+        manifest = json.loads((run / "backtest.json").read_text())
+        manifest["definition"].update(start="2024-01-02", end="2024-01-03", protocol={
+            "stage": "formal", "benchmark_id": "universe_vw", "trial_budget": {"max_runs": 8},
+            "costs": {"commission_rate": rate},
+        })
+        manifest["resolved_inputs"] = {"benchmark": {"run_id": "bt-benchmark", "kind": "account"}}
+        (run / "backtest.json").write_text(json.dumps(manifest))
+        (run / "evaluation.json").write_text(json.dumps({"statistics": statistics}))
+        bundle = run / "bundle"
+        bundle.mkdir(exist_ok=True)
+        pd.DataFrame({"signal_date": ["2023-12-29"] * len(codes), "code": codes}).to_parquet(
+            bundle / "universe.parquet",
+        )
+        pd.DataFrame({"date": ["2024-01-02", "2024-01-03"], "gross_nav": [50000.0, 51000.0],
+                      "net_nav": [50000.0, net_nav], "benchmark_nav": [50000.0, 50500.0]}).to_parquet(
+            run / "nav.parquet",
+        )
+        pd.DataFrame({"date": ["2024-01-03"], "order_id": ["order"], "code": ["SYN_A"],
+                      "cost_type": ["commission"], "amount": [charge]}).to_parquet(run / "costs.parquet")
+
+    publish_values(a, 0.0003, 15.0, 50985.0, ["SYN_A", "SYN_B"])
+    publish_values(b, 0.0003, 15.0, 50985.0, ["SYN_B", "SYN_A"])
+    same = compare_backtests(a, b)
+    assert same["mixed_ranking_allowed"]
+    assert same["differences"] == []
+    assert same["common_interval"] == {"start": "2024-01-02", "end": "2024-01-03", "nav_dates": 2}
+    assert same["common_sample"]["security_signal_dates"] == 2
+    assert same["left"]["benchmark"]["run_id"] == "bt-benchmark"
+    assert same["left"]["trials"]["actual_run_count"] == 3
+    assert same["left"]["trials"]["approved_run_count"] == 8
+    assert same["left"]["uncertainty"]["statistics"] == statistics
+
+    publish_values(b, 0.0006, 30.0, 50970.0, ["SYN_B", "SYN_A"])
+    monkeypatch.setenv("HETU_QUANT_ROOT", str(tmp_path))
+    app = AppTest.from_file(str(APP_PATH)).run()
+    app.sidebar.radio[0].set_value("回测").run()
+    app.selectbox(key="bt_result_select").set_value(a.run_id).run()
+    app.selectbox(key="bt_compare").set_value(b.run_id).run()
+    assert not app.exception
+    comparison = next(payload for item in app.json if "mixed_ranking_allowed" in (payload := json.loads(item.value)))
+    assert comparison == compare_backtests(a, b)
+    assert comparison["left"]["costs"]["actual_by_type"] == {"commission": 15.0}
+    assert comparison["right"]["costs"]["actual_by_type"] == {"commission": 30.0}
+    assert comparison["left"]["ending_net_nav"] == 50985.0
+    assert comparison["right"]["ending_net_nav"] == 50970.0
+    assert comparison["left"]["common_end_gross_nav"] == comparison["right"]["common_end_gross_nav"] == 51000.0
+    assert comparison["common_end_net_nav_difference"] == -15.0
+    assert any("commission_rate" in item for item in comparison["differences"])
+    assert _jobs(tmp_path) == []
+
+
 def test_strategy_configuration_without_json(tmp_path, monkeypatch):
     root, ref, _ = _seed_root(tmp_path)
     monkeypatch.setenv("HETU_QUANT_ROOT", str(root))

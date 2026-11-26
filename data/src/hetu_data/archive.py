@@ -36,6 +36,7 @@ _TABLES = (
     "trading_rules",
     "knowledge_evidence",
     "terminal_disposals",
+    "share_exchanges",
     "financial_reports",
 )
 
@@ -504,7 +505,7 @@ def _snapshot_backup_assets(
         rel, table = entry["path"], entry["table"]
         path = _locked_backup_file(base, rel, entry["sha256"])
         pid = entry["product_id"]
-        needs_evidence = table in {"knowledge_evidence", "terminal_disposals"}
+        needs_evidence = table in {"knowledge_evidence", "terminal_disposals", "share_exchanges"}
         if store.product(pid).get("fee_class") == "paid" or needs_evidence:
             frame = pd.read_parquet(path)
             try:

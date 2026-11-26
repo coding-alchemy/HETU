@@ -1,0 +1,82 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "forecasts": [
+      {
+        "code": "A",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 10,
+        "institution": "X",
+        "fact_key": "A|X|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "A",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 12,
+        "institution": "X",
+        "fact_key": "A|X|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "A",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 20,
+        "institution": "Y",
+        "fact_key": "A|Y|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "A",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 19,
+        "institution": "Y",
+        "fact_key": "A|Y|2024|2024-01-30T14:00:00+08:00"
+      },
+      {
+        "code": "A",
+        "period": "2024",
+        "available_at": "2024-01-10T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 30,
+        "institution": "Z",
+        "fact_key": "A|Z|2024|2024-01-10T14:00:00+08:00"
+      },
+      {
+        "code": "A",
+        "period": "2024",
+        "available_at": "2024-01-30T14:00:00+08:00",
+        "currency": "CNY",
+        "unit": "亿元",
+        "flow_basis": "single",
+        "source_ref": "合成公告原件",
+        "forecast_net_profit": 30,
+        "institution": "Z",
+        "fact_key": "A|Z|2024|2024-01-30T14:00:00+08:00"
+      }
+    ]
+  }
+}

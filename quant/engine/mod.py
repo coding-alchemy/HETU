@@ -20,9 +20,10 @@ DataProxy 之前替换数据源。
 
 from __future__ import annotations
 
+from fractions import Fraction
 from pathlib import Path
 
-from rqalpha.const import INSTRUMENT_TYPE, SIDE
+from rqalpha.const import INSTRUMENT_TYPE, POSITION_DIRECTION, SIDE
 from rqalpha.interface import (
     AbstractMod,
     TransactionCost,
@@ -157,6 +158,77 @@ class LocalBundleMod(AbstractMod):
     def __init__(self) -> None:
         self._env = None
         self.cost_decider: HetuStockCostDecider | None = None
+        self.identity_transition_events = []
+        self._applied_exchanges = set()
+
+    def apply_identity_transitions(self, account):
+        day = self._env.trading_dt.date().isoformat()
+        for key, event in self._env.data_source.share_exchanges.items():
+            old, effective = key
+            if day < effective or key in self._applied_exchanges:
+                continue
+            positions = account._positions.get(old, {})
+            held = positions.get(POSITION_DIRECTION.LONG)
+            if held is None or not held.quantity:
+                continue
+            credit = event.get("credit_date")
+            if not credit or not event.get("ratio") or event.get("share_rule") != "whole_shares" or day < credit:
+                held.freeze_exchange()
+                continue
+            code = event["code"]
+            instrument = self._env.data_proxy.get_active_instrument(code, self._env.trading_dt)
+            if instrument is None:
+                held.freeze_exchange()
+                HetuStockPosition.restrictions.append((day, old, "share_exchange_successor_unavailable"))
+                continue
+            old_qty, qty, fraction, amount = held.exchange(instrument, event, self._env.trading_dt.date())
+            converted_lots = [(buy_date.isoformat(), n) for buy_date, n in held.position_queue]
+            successor = account._positions.get(code, {}).get(POSITION_DIRECTION.LONG)
+            prior = None
+            if successor:
+                prior = dict(quantity=successor.quantity, average_cost=successor.avg_price,
+                             acquisition_lots=[(day.isoformat(), n) for day, n in successor.position_queue])
+                successor.absorb_exchange(held)
+                del account._positions[old]
+            else:
+                successor = held
+                account._positions[code] = account._positions.pop(old)
+                for position in positions.values():
+                    position.rename(instrument)
+            self._applied_exchanges.add(key)
+            self.identity_transition_events.append(dict(
+                kind="special_exchange", event_id=event["event_id"], from_code=old, code=code, date=day,
+                effective_date=effective, old_quantity=old_qty, quantity=qty, ratio=str(event["ratio"]),
+                fractional_shares=fraction, fractional_receivable_cny=amount,
+                fraction_pay_date=event["fraction_pay_date"], sellable_date=event["sellable_date"],
+                acquisition_lots=converted_lots, prior_successor=prior,
+                successor_average_cost=successor.avg_price,
+                successor_acquisition_lots=[(buy_date.isoformat(), n) for buy_date, n in successor.position_queue],
+                fraction_cash_candidates=[
+                    dict(item, amount_cny=float(Fraction(fraction) * Fraction(str(item["cash_per_new_share_cny"]))))
+                    for item in event.get("fraction_cash_candidates", ())
+                ],
+                source_refs=event["source_refs"], original_versions=event["original_versions"],
+                missing_fields=event["missing_fields"],
+            ))
+        for code, event in self._env.data_source.identity_transitions.items():
+            if event["effective_date"] != day:
+                continue
+            old = event["from_code"]
+            positions = account._positions.get(old)
+            if not positions or not any(positions.values()):
+                continue
+            if any(account._positions.get(code, {}).values()):
+                raise ValueError(f"identity_transition_separate_position: {old} → {code}")
+            instrument = self._env.data_proxy.get_active_instrument(code, self._env.trading_dt)
+            for position in positions.values():
+                position.rename(instrument)
+            account._positions[code] = account._positions.pop(old)
+            held = positions[POSITION_DIRECTION.LONG]
+            self.identity_transition_events.append(dict(
+                event, date=day, quantity=held.quantity, average_cost=held.avg_price,
+                acquisition_lots=[(buy_date.isoformat(), qty) for buy_date, qty in held.position_queue],
+            ))
 
     def start_up(self, env, mod_config):
         self._env = env
@@ -166,9 +238,14 @@ class LocalBundleMod(AbstractMod):
         rules = load_bundle_rules(bundle_dir)
         HetuStockPosition.rules = rules
         HetuStockPosition.action_events = data_source.action_events
-        HetuStockPosition.restrictions = []
+        HetuStockPosition.restrictions = [
+            (gap["date"], gap["code"], gap["reason"]) for gap in data_source.disposition_gaps
+        ]
         HetuStockPosition.terminal_disposals = data_source.terminal_disposals
         HetuStockPosition.disposition_events = []
+        HetuStockPosition.cash_dividend_events = []
+        HetuStockPosition.exchange_cash_events = []
+        HetuStockPosition.cash_exit_tax_events = []
         simulation_config = env.config.mod.sys_simulation
         # 协议口径：申报量受 participation 上限约束，全天量只做事后成交限制
         # （零成交撤销、涨跌停拒绝）；关闭引擎默认的 25% 每 bar 量限，

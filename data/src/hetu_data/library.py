@@ -388,7 +388,33 @@ def _relevant(entry, codes, start, end):
     )
 
 
-def _read_library_range(store, manifest, name, *, codes, start, end, columns, product_id=None):
+def _product_read_scope(owner, product_id, *, codes, start, end):
+    """Intersect an authorized product's requested objects and dates with its current grant."""
+    if owner.product(product_id).get("fee_class") == "paid":
+        grant = owner._grant(product_id) or {}
+        left, right = grant.get("start"), grant.get("end")
+        if not left or not right:
+            return None
+        start, end = max(start, date.fromisoformat(left)), min(end, date.fromisoformat(right))
+        if codes is not None:
+            markets = set(grant.get("markets", ()))
+            codes = tuple(code for code in grant.get("codes", ())
+                          if code.rsplit(".", 1)[-1] in markets and (not codes or code in codes))
+            if not codes:
+                return None
+    return (codes, start, end) if start <= end else None
+
+
+def read_scoped_product(owner, ref, name, *, codes, start, end, columns, product_id):
+    has_code = "code" in TABLE_SCHEMAS[name]["columns"]
+    scope = _product_read_scope(owner, product_id, codes=codes if has_code else None, start=start, end=end)
+    if scope is None or (has_code and not codes):
+        return pd.DataFrame(columns=columns)
+    codes, start, end = scope
+    return owner.read_range(ref, name, codes=codes or (), start=start, end=end, columns=columns, product_id=product_id)
+
+
+def _read_library_range(store, manifest, name, *, codes, start, end, columns, product_id=None, products_by_asset=None):
     schema = TABLE_SCHEMAS.get(name)
     if not schema or not columns or not set(columns).issubset((*schema["columns"], *_PROVENANCE)):
         raise ValueError("unknown table or column")
@@ -401,13 +427,23 @@ def _read_library_range(store, manifest, name, *, codes, start, end, columns, pr
         and _relevant(row, codes, start, end)
     }
     for asset in manifest["asset_snapshots"]:
-        if (asset["root"], asset["snapshot_id"]) not in eligible:
+        key = asset["root"], asset["snapshot_id"]
+        if key not in eligible:
+            continue
+        products = ((product_id,) if products_by_asset is None else
+                    tuple(pid for pid in products_by_asset.get(key, ()) if product_id is None or pid == product_id))
+        if not products:
             continue
         owner, ref, _ = _locked_asset(store, asset)
-        frame = owner.read_range(ref, name, codes=codes, start=start, end=end, columns=tuple(schema["columns"]),
-                                 product_id=product_id)
-        if not frame.empty:
-            frames.append(frame.assign(source_root=str(owner.root.resolve()), snapshot_id=ref.snapshot_id))
+        for pid in products:
+            if products_by_asset is None:
+                frame = owner.read_range(ref, name, codes=codes, start=start, end=end,
+                                         columns=tuple(schema["columns"]), product_id=pid)
+            else:
+                frame = read_scoped_product(owner, ref, name, codes=codes, start=start, end=end,
+                                            columns=tuple(schema["columns"]), product_id=pid)
+            if not frame.empty:
+                frames.append(frame.assign(source_root=str(owner.root.resolve()), snapshot_id=ref.snapshot_id))
     if not frames:
         return pd.DataFrame({
             column: pd.Series(dtype="float64" if query_column(name, column).startswith("TRY_CAST") else "object")
@@ -543,7 +579,9 @@ def _select_archive_observations(bars, policy):
     return bars.drop(index=dropped).reset_index(drop=True), pd.DataFrame(quality), explanations
 
 
-def query_library(store, ref, *, codes, start, end, markets=(), columns=ARCHIVE_COLUMNS, predicates=()):
+def query_library(store, ref, *, codes, start, end, markets=(), columns=ARCHIVE_COLUMNS, predicates=(),
+                  daily_products=None, auxiliary_products=None):
+    """Query registered rows, optionally limiting tables to selected products per (root, snapshot ID)."""
     if start > end:
         raise ValueError("start must not exceed end")
     if not codes or set(markets) - {"SH", "SZ", "BJ"}:
@@ -551,14 +589,23 @@ def query_library(store, ref, *, codes, start, end, markets=(), columns=ARCHIVE_
     selection = json.loads(json.dumps(dict(library_id=ref.library_id, root=str(ref.root.resolve()), codes=codes,
                                            markets=markets, start=start.isoformat(), end=end.isoformat(),
                                            columns=columns, predicates=predicates)))
+    if daily_products is not None:
+        selection["daily_products"] = [[root, snapshot, sorted(products)]
+                                       for (root, snapshot), products in sorted(daily_products.items())]
+    if auxiliary_products is not None:
+        selection["auxiliary_products"] = {
+            table: [[root, snapshot, sorted(products)] for (root, snapshot), products in sorted(assets.items())]
+            for table, assets in sorted(auxiliary_products.items())
+        }
     manifest = load_library(store, ref)
     selected = tuple(code for code in codes if not markets or code.rsplit(".", 1)[-1] in markets)
 
     def read(table, fields, product_id=None):
         if not selected:
             return pd.DataFrame(columns=fields)
+        products = daily_products if table == "daily_bars" else (auxiliary_products or {}).get(table)
         return _read_library_range(store, manifest, table, codes=selected, start=start, end=end,
-                                   columns=fields, product_id=product_id)
+                                   columns=fields, product_id=product_id, products_by_asset=products)
 
     bars = read("daily_bars", (*ARCHIVE_COLUMNS, *_PROVENANCE))
     policy = archive_source_policy(manifest)
@@ -656,9 +703,17 @@ def _sql_nodes(value):
 
 def query_library_sql(store, selection, sql, parameters=()):
     ref = LibraryRef(selection["library_id"], Path(selection["root"]))
+    daily_products = None
+    if "daily_products" in selection:
+        daily_products = {(root, snapshot): products for root, snapshot, products in selection["daily_products"]}
+    auxiliary_products = None
+    if "auxiliary_products" in selection:
+        auxiliary_products = {table: {(root, snapshot): products for root, snapshot, products in assets}
+                              for table, assets in selection["auxiliary_products"].items()}
     selected = query_library(store, ref, codes=tuple(selection["codes"]), markets=tuple(selection["markets"]),
                              start=date.fromisoformat(selection["start"]), end=date.fromisoformat(selection["end"]),
-                             columns=tuple(selection["columns"]), predicates=tuple(selection["predicates"]))
+                             columns=tuple(selection["columns"]), predicates=tuple(selection["predicates"]),
+                             daily_products=daily_products, auxiliary_products=auxiliary_products)
     config = dict(enable_external_access=False, autoload_known_extensions=False, autoinstall_known_extensions=False)
     with duckdb.connect(config=config) as conn:
         try:
@@ -677,3 +732,190 @@ def query_library_sql(store, selection, sql, parameters=()):
             raise ValueError("library SQL may only read the selected daily_bars")
         conn.register("daily_bars", selected["bars"])
         return conn.execute(sql, parameters).df()
+
+
+def selected_snapshot_assets(store, source, table):
+    """Yield locked owners, snapshots and manifests for a registered table."""
+    if isinstance(source, SnapshotRef):
+        if (source.root.resolve() != store.root.resolve() or Path(source.snapshot_id).name != source.snapshot_id
+                or source.snapshot_id.startswith(".")):
+            raise ValueError("invalid snapshot selection")
+        yield store, source, store.load_manifest(source)
+        return
+    for asset in load_library(store, source)["asset_snapshots"]:
+        if table in asset["tables"]:
+            yield _locked_asset(store, asset)
+
+
+def _close_evidence(owner, ref, document, *, products, start, end):
+    table = "knowledge_evidence"
+    if not any(row["table"] == table for row in document["table_files"]) or products == ():
+        return {}
+    if products is None:
+        frame = owner.read_table(ref, table)
+    else:
+        columns = tuple(TABLE_SCHEMAS[table]["columns"])
+        frame = pd.concat([
+            read_scoped_product(owner, ref, table, codes=(), start=start, end=end, columns=columns, product_id=product)
+            for product in products
+        ], ignore_index=True)
+    grouped, originals = {}, {}
+    for row in frame[frame.table_name.eq("daily_bars")].itertuples(index=False):
+        if str(row.verified).lower() not in ("1", "true"):
+            continue
+        key = str(row.evidence_ref), str(row.sha256)
+        if key not in originals:
+            originals[key] = _read_close_attestations(owner, *key)
+        for fact in originals[key].get((str(row.record_key), str(row.revision_id)), ()):
+            if fact.get("published_at") == row.published_at:
+                grouped.setdefault(str(row.record_key), []).append((row, fact))
+    return grouped
+
+
+def _read_close_attestations(owner, name, digest):
+    if Path(name).name != name or name.startswith("."):
+        return {}
+    path = _safe_evidence(owner, f"evidence/{name}")
+    if path is None or not path.is_relative_to((owner.root / "evidence").resolve()):
+        return {}
+    try:
+        raw = path.read_bytes()
+        if sha256(raw).hexdigest() != digest:
+            return {}
+        data = json.loads(raw)
+        rows = data.get("records", [data])
+        result = {}
+        for row in rows:
+            result.setdefault((row["record_key"], row["revision_id"]), []).append(row)
+        return result
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return {}
+
+
+def read_known_closes(
+    store: DataStore, source: SnapshotRef | LibraryRef, *, codes: tuple[str, ...],
+    start: date, end: date, at: datetime, daily_products=None, knowledge_products=None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Read proven closes, with separate optional product grants for prices and their attestations."""
+    if at.tzinfo is None or start > end:
+        raise ValueError("invalid close evidence window or timezone")
+    columns = ["code", "date", "close_raw", "product_id", "source_ref", "snapshot_id",
+               "published_at", "evidence_ref", "source_root"]
+    documents = load_library(store, source) if isinstance(source, LibraryRef) else {}
+    knowledge_assets = {(item["root"], item["snapshot_id"]) for item in documents.get("asset_snapshots", [])
+                        if "knowledge_evidence" in item["tables"]}
+    observed, versioned = {}, []
+    for owner, ref, manifest in selected_snapshot_assets(store, source, "daily_bars"):
+        key = str(owner.root.resolve()), ref.snapshot_id
+        products = (None,) if daily_products is None else daily_products.get(key, ())
+        frames = [
+            owner.read_range(ref, "daily_bars", codes=codes, start=start, end=end,
+                             columns=tuple(columns[:5]), product_id=product)
+            if daily_products is None else read_scoped_product(owner, ref, "daily_bars", codes=codes, start=start,
+                                                               end=end, columns=tuple(columns[:5]), product_id=product)
+            for product in products
+        ]
+        frames = [frame for frame in frames if not frame.empty]
+        if not frames:
+            continue
+        frame = pd.concat(frames, ignore_index=True)
+        registered = not documents or key in knowledge_assets
+        products = None if knowledge_products is None else tuple(knowledge_products.get(key, ()))
+        evidence = _close_evidence(owner, ref, manifest, products=products, start=start, end=end) if registered else {}
+        for bar in frame.itertuples(index=False):
+            coordinate = str(bar.code), str(bar.date)
+            observed.setdefault(coordinate, set()).add(str(bar.source_ref))
+            for proof, fact in evidence.get("|".join((*coordinate, "close_raw")), ()):
+                if fact.get("product_id") != bar.product_id or fact.get("value") != bar.close_raw:
+                    continue
+                if "source_ref" in fact and fact["source_ref"] != bar.source_ref:
+                    continue
+                try:
+                    stamp = datetime.fromisoformat(str(proof.published_at))
+                except ValueError:
+                    continue
+                if stamp.tzinfo is None or not math.isfinite(bar.close_raw) or bar.close_raw <= 0:
+                    continue
+                versioned.append(dict(**bar._asdict(), published_at=stamp.isoformat(),
+                                      evidence_ref=proof.evidence_ref, snapshot_id=ref.snapshot_id,
+                                      source_root=str(owner.root.resolve()), revision_id=str(proof.revision_id),
+                                      supersedes=str(proof.supersedes)))
+    known, future = {}, {}
+    for row in versioned:
+        stamp = datetime.fromisoformat(row["published_at"])
+        target = known if stamp <= at else future
+        target.setdefault((str(row["code"]), str(row["date"])), []).append(row)
+    policy = archive_source_policy(documents) if documents else None
+    facts, gaps = [], []
+    for (code, day), sources in sorted(observed.items()):
+        eligible = known.get((code, day), [])
+        superseded = {(r["source_root"], r["product_id"], r["supersedes"]) for r in eligible if r["supersedes"]}
+        eligible = [r for r in eligible
+                    if (r["source_root"], r["product_id"], r["revision_id"]) not in superseded]
+        if len(eligible) > 1 and documents.get("revision_selections"):
+            eligible = _select_revisions(pd.DataFrame(eligible), "daily_bars",
+                                         documents["revision_selections"]).to_dict("records")
+        if len({r["close_raw"] for r in eligible}) > 1 and policy and (
+            code in policy["codes"] and policy["start"] <= day <= policy["end"]
+            and "close_raw" in policy["fields"]
+            and {r["product_id"] for r in eligible} <= {policy["primary_product_id"], *policy["compared_product_ids"]}
+        ):
+            primary = [r for r in eligible if r["product_id"] == policy["primary_product_id"]]
+            if primary:
+                eligible = primary
+        if eligible and len({r["close_raw"] for r in eligible}) == 1:
+            facts.append(max(eligible, key=lambda row: (datetime.fromisoformat(row["published_at"]),
+                                                         row["snapshot_id"], row["evidence_ref"])))
+            continue
+        gap = dict(code=code, date=day, field="close_raw", source_refs=sorted(sources),
+                   reason="conflicting_original_close" if eligible else "original_close_unproved")
+        if later := future.get((code, day)):
+            revision = max(later, key=lambda row: datetime.fromisoformat(row["published_at"]))
+            gap.update(revised_value=revision["close_raw"], revised_published_at=revision["published_at"])
+        gaps.append(gap)
+    gap_columns = ["code", "date", "field", "reason", "source_refs", "revised_value", "revised_published_at"]
+    return pd.DataFrame(facts, columns=columns), pd.DataFrame(gaps, columns=gap_columns)
+
+
+def daily_codes(store, source, *, start: date, end: date, daily_products=None) -> tuple[str, ...]:
+    """Discover available codes only within the selected, readable daily partitions."""
+    codes = set()
+    for owner, ref, manifest in selected_snapshot_assets(store, source, "daily_bars"):
+        key = str(owner.root.resolve()), ref.snapshot_id
+        if daily_products is not None:
+            for product_id in daily_products.get(key, ()):
+                scope = _product_read_scope(owner, product_id, codes=(), start=start, end=end)
+                if scope is None:
+                    continue
+                allowed, left, right = scope
+                paths = owner._range_files(ref, "daily_bars", codes=allowed or None, start=left, end=right,
+                                           product_id=product_id)
+                if not paths:
+                    continue
+                sql = ("SELECT DISTINCT code FROM read_parquet(?, union_by_name=true)"
+                       " WHERE product_id = ? AND date BETWEEN ? AND ?")
+                params = [paths, product_id, left.isoformat(), right.isoformat()]
+                if allowed:
+                    sql += " AND code IN (SELECT unnest(?))"
+                    params.append(list(allowed))
+                with duckdb.connect() as connection:
+                    codes.update(code for code, in connection.execute(sql, params).fetchall() if code is not None)
+            continue
+        paths = owner._range_files(ref, "daily_bars", start=start, end=end)
+        if not paths:
+            continue
+        with duckdb.connect() as connection:
+            frame = connection.execute(
+                "SELECT DISTINCT code, product_id FROM read_parquet(?, union_by_name=true) WHERE date BETWEEN ? AND ?",
+                [paths, start.isoformat(), end.isoformat()],
+            ).df()
+        for product_id, group in frame.groupby("product_id"):
+            product = owner.product(product_id)
+            owner.check_access(manifest.get("mode", "free"), product, operation="read")
+            if product.get("fee_class") == "paid":
+                grant = owner._grant(product_id) or {}
+                if not {str(code) for code in group.code} <= set(grant.get("codes", ())):
+                    # The actual bounded read enforces row and time grants.
+                    group = group[group.code.isin(grant.get("codes", ()))]
+            codes.update(group.code.dropna().astype(str))
+    return tuple(sorted(codes))

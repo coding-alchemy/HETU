@@ -201,6 +201,7 @@ class JobRecord:
     progress: float
     reason: str | None
     output: Path | None
+    retry_of_job_id: str | None = None
 
     def __post_init__(self) -> None:
         for name in ("job_id", "definition_id", "submission_id"):

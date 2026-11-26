@@ -26,19 +26,23 @@ import shutil
 import subprocess
 import uuid
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
+from hetu_data.locking import worker_lock
+from hetu_data.models import SnapshotRef
 
-from hetu_quant.backtest_data import prepare_backtest
-from hetu_quant.backtest_evaluation import evaluate_backtest
+from hetu_quant.account_evidence import account_dispositions
+from hetu_quant.backtest_data import STRATEGY_PURPOSES, prepare_backtest
+from hetu_quant.backtest_evaluation import evaluate_backtest, research_exposure_inputs
 from hetu_quant.backtest_models import (
     BacktestDefinition,
     BacktestRef,
+    backtest_definition_from_dict,
     backtest_definition_to_dict,
 )
 
@@ -246,6 +250,7 @@ def run_engine_subprocess(
     bundle_dir: Path,
     out_dir: Path,
     cancelled: Callable[[], bool] | None = None,
+    on_engine_start: Callable[[], None] | None = None,
 ) -> None:
     """受控引擎子进程入口（模块级 seam，测试以替身隔离长计算）。
 
@@ -268,6 +273,8 @@ def run_engine_subprocess(
         text=True,
     )
     try:
+        if on_engine_start is not None:
+            on_engine_start()
         while process.poll() is None:
             if cancelled is not None and cancelled():
                 process.terminate()
@@ -313,6 +320,8 @@ def _load_trace_tables(engine_out: Path) -> dict[str, pd.DataFrame]:
             tables[name] = pd.read_parquet(path)
         else:
             tables[name] = pd.DataFrame(columns=list(columns))
+            if name == "positions":
+                tables["positions_record_missing"] = pd.DataFrame()
     return tables
 
 
@@ -335,6 +344,47 @@ def _write_report(staging: Path, manifest: Mapping[str, Any], evaluation: Mappin
         lines.append("- 无")
     lines.extend(["", "## 评价", f"economic_status: {evaluation['economic_status']}"])
     lines.extend(f"- {reason}" for reason in evaluation.get("reasons", []))
+    if "attribution" in evaluation:
+        attribution = evaluation["attribution"]
+        lines.extend([
+            "", "## 同批账户归因",
+            "逐证券的原信号、公司行动、费用及目标与成交日收盘持仓的偏差见 `evaluation.json`。",
+        ])
+        lines.extend(f"- {reason}" for reason in attribution["limitations"])
+        lines.append(json.dumps(attribution["by_period"], ensure_ascii=False, indent=2))
+    metrics = evaluation.get("metrics", {})
+    if "daily_nav_gaps" in metrics:
+        lines.extend(["", "## 逐日净值缺口",
+                      json.dumps(metrics["daily_nav_gaps"], ensure_ascii=False, indent=2)])
+        if "daily_nav_evidence" in metrics:
+            lines.extend(["", "缺口日期的已知净值（人民币元）",
+                          json.dumps(metrics["daily_nav_evidence"], ensure_ascii=False, indent=2)])
+    if "exposures" in metrics:
+        exposure = metrics["exposures"]
+        lines.extend(["", "## 规模和行业暴露", exposure["basis"],
+                      f"状态：{exposure['status']}。快照数：{len(exposure['snapshots'])}。",
+                      "完整逐股依据见 evaluation.json。"])
+        for snapshot in exposure["snapshots"]:
+            for label, kind in (("目标", "target"), ("实际", "actual")):
+                item = snapshot[kind]
+                evidence = (item or {}).get("evidence", {})
+                if evidence.get("status") == "all_cash":
+                    lines.append(f"- {snapshot['date']} {label}：全现金，股票暴露 0%。")
+                elif evidence.get("status") == "unknown":
+                    lines.append(f"- {snapshot['date']} {label}：{evidence['reason']}。")
+                elif item is not None:
+                    lines.append(
+                        f"- {snapshot['date']} {label}：加权市值（人民币元）"
+                        f" {item['size']['weighted_mean_market_cap_cny']}，"
+                        f"行业权重 {json.dumps(item['industry']['weights'], ensure_ascii=False)}，"
+                        f"未知行业权重 {item['industry']['unknown_weight']:.4%}"
+                    )
+    if "comparison" in metrics:
+        lines.extend(["", "## 压力试验与主策略",
+                      json.dumps(metrics["comparison"], ensure_ascii=False, indent=2)])
+    if "market_states" in metrics:
+        lines.extend(["", "## 市场状态",
+                      json.dumps(metrics["market_states"], ensure_ascii=False, indent=2)])
     if evaluation.get("factor_diagnostics"):
         lines.extend(["", "## 因子诊断（不调整正式权重）",
                       json.dumps(evaluation["factor_diagnostics"], ensure_ascii=False, indent=2)])
@@ -395,6 +445,224 @@ def run_formal_job(
     return BacktestRef(run_id=result['candidate']['run_id'], root=store.root, status='complete')
 
 
+def _read_account_approval(root: Path, study_id: str, submission_id: str, payload: dict, role: str) -> dict:
+    if not all(isinstance(key, str) and re.fullmatch(r"[A-Za-z0-9_-]+", key) for key in (study_id, submission_id)):
+        raise ValueError("invalid representative approval reference")
+    path = root / "research" / "representative-runs" / submission_id / "scope.json"
+    if not path.is_file() or not path.resolve().is_relative_to(root.resolve()):
+        raise ValueError("representative approval is missing")
+    approval = json.loads(path.read_text(encoding="utf-8"))
+    if approval.get("definition") != payload:
+        raise ValueError(f"saved definition differs from {role} approval")
+    if (approval.get("study_id") != study_id or approval.get("submission_id") != submission_id
+            or approval.get("role", "representative") != role
+            or not approval.get("approval_ref") or approval.get("run_count") != 1):
+        raise ValueError(f"{role} approval requires a matching role, study, approval reference and one scoped run")
+    approved_fee = approval.get("approved_data_fee_cny", 0)
+    if type(approved_fee) not in (int, float) or approved_fee != 0:
+        raise ValueError(f"{role} approval requires zero data fee in free mode")
+    return approval
+
+
+def _representative_benchmark_approval(root: Path, approval: dict) -> dict:
+    payload = json.loads(json.dumps(approval["definition"]))
+    protocol = payload["protocol"]
+    payload["strategy_id"] = protocol["benchmark_id"]
+    protocol.pop("representative_execution")
+    protocol.pop("comparison", None)
+    return _read_account_approval(
+        root, approval["study_id"], approval["benchmark_submission_id"], payload, "benchmark"
+    )
+
+
+def read_representative_approval(definition: BacktestDefinition, root: Path) -> dict:
+    """Read the operator's approval for the exact frozen free definition."""
+    payload = backtest_definition_to_dict(definition)
+    protocol = payload["protocol"]
+    selection = protocol.get("representative_execution")
+    if (protocol["stage"] != "formal" or definition.mode != "free"
+            or not isinstance(selection, dict) or protocol.get("research_execution")
+            or definition.strategy_id == protocol["benchmark_id"]):
+        raise ValueError("representative execution requires a free formal candidate")
+    approval = _read_account_approval(root, selection.get("study_id"), selection.get("submission_id"),
+                                     payload, "representative")
+    references = [approval[key] for key in ("benchmark_run_id", "benchmark_submission_id") if key in approval]
+    if (len(references) != 1 or not isinstance(references[0], str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", references[0])):
+        raise ValueError("representative approval requires one published or independently approved benchmark")
+    if "benchmark_submission_id" in approval:
+        if protocol.get("comparison", {}).get("purpose") == "sensitivity_vs_main":
+            raise ValueError("sensitivity comparison requires its published main account")
+        _representative_benchmark_approval(root, approval)
+    return approval
+
+
+def run_representative_job(
+    definition: BacktestDefinition, store: DataStore, *, submission_id: str, progress=None, cancelled=None
+) -> BacktestRef:
+    """Execute an approved platform task outside the frozen research trial ledger."""
+    from hetu_quant.data_research import require_representative_inputs
+
+    approval = read_representative_approval(definition, store.root)
+    if submission_id != approval["submission_id"]:
+        raise ValueError("submission differs from representative approval")
+    attempt = _account_attempt_path(store.root, submission_id)
+    _account_attempt_result(attempt)
+    expected_universe = require_representative_inputs(approval, store.root)
+    if "benchmark_run_id" in approval:
+        benchmark = BacktestRef(run_id=approval["benchmark_run_id"], root=store.root, status="complete")
+    else:
+        benchmark_approval = _representative_benchmark_approval(store.root, approval)
+        benchmark = _run_independently_approved_account(
+            backtest_definition_from_dict(benchmark_approval["definition"]), store, benchmark_approval,
+            expected_universe=require_representative_inputs(benchmark_approval, store.root),
+            cancelled=cancelled,
+        )
+        if benchmark.status != "complete":
+            raise ValueError("the approved benchmark did not publish a complete account")
+    return _run_independently_approved_account(
+        definition, store, approval, expected_universe=expected_universe, benchmark=benchmark,
+        progress=progress, cancelled=cancelled,
+    )
+
+
+def _account_attempt_path(root: Path, submission_id: str) -> Path:
+    return root / "research" / "representative-runs" / submission_id / "attempt.jsonl"
+
+
+def _account_attempt_result(attempt: Path, *, reuse_benchmark: bool = False) -> str | None:
+    if not attempt.exists():
+        return None
+    rows = [json.loads(line) for line in attempt.read_text(encoding="utf-8").splitlines() if line.strip()]
+    if rows:
+        last = rows[-1]
+        if last.get("status") in ("failed", "cancelled") and last.get("actual_run_count") == 0:
+            return None
+        if (reuse_benchmark and rows[0].get("role") == "benchmark" and last.get("status") == "complete"
+                and last.get("actual_run_count") == 1 and isinstance(last.get("run_id"), str)
+                and re.fullmatch(r"[A-Za-z0-9_-]+", last["run_id"])):
+            return last["run_id"]
+    raise FileExistsError(f"account authorization is in flight or already consumed: {attempt}")
+
+
+def _run_independently_approved_account(
+    definition, store, approval, *, expected_universe, benchmark=None, progress=None, cancelled=None
+) -> BacktestRef:
+    """Serialize access to the approval and retain every launch attempt."""
+    attempt = _account_attempt_path(store.root, approval["submission_id"])
+    with worker_lock(attempt.parent):
+        published = _account_attempt_result(attempt, reuse_benchmark=approval.get("role") == "benchmark")
+        if published is not None:
+            return BacktestRef(run_id=published, root=store.root, status="complete")
+        return _run_account_attempt(definition, store, approval, attempt, expected_universe=expected_universe,
+                                    benchmark=benchmark, progress=progress, cancelled=cancelled)
+
+
+def _run_account_attempt(
+    definition, store, approval, attempt, *, expected_universe, benchmark, progress, cancelled
+) -> BacktestRef:
+    reserved = False
+    started = False
+
+    def record_attempt(record: dict) -> None:
+        with attempt.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def reserve() -> None:
+        nonlocal reserved
+        record = {
+            "submission_id": approval["submission_id"], "study_id": approval["study_id"],
+            "role": approval.get("role", "representative"), "status": "reserved",
+            "approval_ref": approval["approval_ref"], "approved_run_count": approval["run_count"],
+            "approved_data_fee_cny": approval.get("approved_data_fee_cny", 0),
+            "approved_account_costs": approval["definition"]["protocol"]["costs"],
+            "benchmark_run_id": benchmark.run_id if benchmark is not None else None,
+        }
+        record_attempt(record)
+        reserved = True
+
+    def mark_started() -> None:
+        nonlocal started
+        started = True
+        record_attempt({"status": "started", "actual_run_count": 1})
+
+    result = None
+    try:
+        delivery = approval.get("qualification_delivery")
+        input_options = {"qualification_delivery": Path(delivery)} if delivery is not None else {}
+        ref = run_backtest(
+            definition, store, store.root, benchmark=benchmark, progress=progress, cancelled=cancelled,
+            before_engine=reserve, on_engine_start=mark_started, expected_universe=expected_universe,
+            **input_options,
+        )
+    except Exception as error:
+        result = {"status": "cancelled" if isinstance(error, BacktestCancelled) else "failed", "detail": str(error)}
+        raise
+    else:
+        result = {"status": ref.status, "run_id": ref.run_id}
+        costs_path = ref.root / "backtests" / ref.run_id / "costs.parquet"
+        if costs_path.is_file():
+            costs = pd.read_parquet(costs_path)
+            result["actual_account_costs_cny"] = costs.groupby("cost_type")["amount"].sum().to_dict()
+        return ref
+    finally:
+        if reserved and result is not None:
+            result.update(actual_run_count=int(started), actual_data_fee_cny=0)
+            record_attempt(result)
+
+
+def _compare_position_events(bundles, codes, warmup, start, end, as_of):
+    """Read the account inputs that can change positions or cash in the common window."""
+    names = ("identity_transitions", "terminal_disposals", "share_exchanges")
+    frames = [{name: pd.read_parquet(path) if path.is_file() else pd.DataFrame()
+               for name in names for path in (bundle / "tables" / f"{name}.parquet",)}
+              for bundle in bundles]
+    decisions = [
+        account_dispositions(side["terminal_disposals"].to_dict("records"), side["share_exchanges"].to_dict("records"),
+                             bundle / "evidence", start, end,
+                             as_of=datetime.fromisoformat(cutoff) if cutoff else None)
+        for bundle, side, cutoff in zip(bundles, frames, as_of, strict=True)
+    ]
+    renames = [{
+        (str(row.from_code), str(row.effective_date)):
+        (row.code, row.from_valid_to, row.identity_id, row.ratio, row.kind)
+        for row in side["identity_transitions"].itertuples() if warmup <= row.effective_date <= end
+    } for side in frames]
+    edges = [(code, facts[0]) for side in renames for (code, _), facts in side.items()]
+    edges.extend((code, event["code"]) for _, swaps, *_ in decisions for (code, _), event in swaps.items()
+                 if event.get("ratio") and event.get("code"))
+    # The reference can hold a predecessor even if no later signal named it.
+    while True:
+        expanded = codes | {code for edge in edges if codes.intersection(edge) for code in edge}
+        if expanded == codes:
+            break
+        codes = expanded
+    left, right = renames
+    differences = [f"data_values:identity_transitions:{code}@{day}" for code, day in sorted(left.keys() | right.keys())
+                   if code in codes and left.get((code, day)) != right.get((code, day))]
+    facts = []
+    for cash, swaps, cash_gaps, swap_gaps, conflicts in decisions:
+        events = {key: ("cash_exit", event["cash_per_share"], event["currency"], event["unit"])
+                  for key, event in cash.items()}
+        events.update({key: ("share_exchange", *(event.get(field) for field in (
+            "code", "ratio", "credit_date", "sellable_date", "share_rule", "fraction_rule", "fraction_cash_cny",
+            "fraction_pay_date",
+        ))) for key, event in swaps.items()})
+        for gap in [*cash_gaps, *swap_gaps, *conflicts]:
+            key = gap["code"], gap["date"]
+            events[key] = (*events.get(key, ()), gap["reason"], *gap.get("fields", ()), gap.get("terms"))
+        facts.append(events)
+    left, right = facts
+    for code, day in sorted(left.keys() | right.keys()):
+        candidate, reference = left.get((code, day)), right.get((code, day))
+        if code in codes and candidate != reference:
+            events = (candidate or ()) + (reference or ())
+            field = "terminal_disposals" if any(str(value).startswith(("cash_exit", "exit_disposal"))
+                                                for value in events) else "share_exchanges"
+            differences.append(f"data_values:{field}:{code}@{day}: candidate={candidate}; reference={reference}")
+    return codes, differences
+
+
 def validate_benchmark_reference(
     definition: BacktestDefinition, reference: BacktestRef, candidate_bundle: Path | None = None
 ) -> dict:
@@ -446,11 +714,20 @@ def validate_benchmark_reference(
                     map(tuple, right[["signal_date", "code"]].to_numpy())):
                 differences.append("actual_historical_universe")
             codes = set(left["code"].astype(str))
+            positions = content["tables"]["positions"]
+            if not positions.empty:
+                positions = positions[positions.date.astype(str).between(current["start"], current["end"])]
+                codes.update(positions.loc[positions.qty.gt(0), "code"].astype(str))
             warmup = (pd.Timestamp(current["start"]) - pd.DateOffset(months=int(protocol["warmup_months"]))).date()
+            codes, event_differences = _compare_position_events(
+                (Path(candidate_bundle), root), codes, str(warmup), current["start"], current["end"],
+                (current.get("as_of"), previous.get("as_of")),
+            )
+            differences.extend(event_differences)
             for name in ("calendar", "daily_bars", "security_status", "corporate_actions",
-                         "market_cap", "trading_rules", "terminal_disposals"):
+                         "market_cap", "trading_rules", "historical_securities"):
                 a, b = Path(candidate_bundle) / "tables" / f"{name}.parquet", root / "tables" / f"{name}.parquet"
-                if name == "terminal_disposals" and not a.exists() and not b.exists():
+                if name == "historical_securities" and not a.exists() and not b.exists():
                     continue
                 if not a.exists() or not b.exists():
                     differences.append(f"data_missing:{name}")
@@ -463,9 +740,19 @@ def validate_benchmark_reference(
                     day = "date" if "date" in frame else "ex_date" if "ex_date" in frame else None
                     if day:
                         frame = frame[frame[day].astype(str).between(str(warmup), current["end"])]
+                    if name == "historical_securities":
+                        last = frame["valid_to"].astype("string").fillna("")
+                        first = frame["valid_from"].astype("string").fillna("")
+                        frame = frame.loc[first.le(current["end"]) & (last.ge(str(warmup)) | last.eq(""))].copy()
+                        frame["valid_to"] = last.where(last.ne("") & last.le(current["end"]), current["end"])
+                        frame["valid_from"] = first.where(first.ge(str(warmup)), str(warmup))
+                        frame = frame[[col for col in (
+                            "code", "valid_from", "valid_to", "listed", "market", "board", "security_type",
+                            "identity_id",
+                        ) if col in frame]]
                     frame = frame.drop(
                         columns=["source_ref", "product_id", "evidence_ref", "rule_id", "sha256"], errors="ignore")
-                    frames.append(frame.astype("string").fillna("").sort_index(axis=1))
+                    frames.append(frame.astype("string").fillna("").drop_duplicates().sort_index(axis=1))
                 if all(frame.empty for frame in frames):
                     continue
                 columns = list(frames[0].columns)
@@ -478,6 +765,85 @@ def validate_benchmark_reference(
     return manifest
 
 
+def validate_prepared_universe(bundle: Path, expected_universe: Mapping[str, list[str]] | None) -> None:
+    """Apply the same per-date universe check in preview and execution."""
+    if expected_universe is None:
+        return
+    universe = pd.read_parquet(bundle / "universe.parquet")
+    used = set(zip(universe["signal_date"].astype(str), universe["code"].astype(str), strict=True))
+    expected = {(day, code) for day, codes in expected_universe.items() for code in codes}
+    if used != expected:
+        differences = sorted(used.symmetric_difference(expected))
+        raise ValueError(f"prepared account universe differs from qualification: {differences[:5]}")
+
+
+
+def _link_published_after_close_simulation(output_root: Path, run_id: str, origin: Mapping) -> None:
+    from logging import getLogger
+
+    from hetu_quant.after_close import link_after_close_evidence
+
+    try:
+        link_after_close_evidence(output_root, str(origin["publication_id"]),
+                                  signal_date=date.fromisoformat(str(origin["signal_date"])),
+                                  strategy_id=str(origin["strategy_id"]), kind="simulation", source_id=run_id)
+    except (OSError, ValueError, KeyError):
+        # The completed account is already immutable. The same source ID can be registered again.
+        getLogger(__name__).exception("after-close link pending for published run %s", run_id)
+
+
+def _reference_nav(tables):
+    return tables["nav"][["date", "net_nav"]].astype({"date": str}).rename(columns={"net_nav": "benchmark_nav"})
+
+
+def _attach_formal_references(definition, tables, bundle, run_id, benchmark, market_benchmark=None) -> dict:
+    benchmark_id = definition.protocol["benchmark_id"]
+    sensitivity = definition.protocol.get("comparison", {}).get("purpose") == "sensitivity_vs_main"
+    if benchmark is None:
+        if definition.strategy_id != benchmark_id:
+            return {"benchmark": None}
+        tables["nav"]["benchmark_nav"] = tables["nav"]["net_nav"]
+        provenance = {"benchmark_id": benchmark_id, "strategy_id": benchmark_id, "kind": "account", "run_id": run_id}
+    else:
+        main = validate_benchmark_reference(definition, benchmark, bundle)
+        nav = _reference_nav(read_backtest(benchmark)["tables"])
+        tables["comparison_nav"] = nav
+        tables["nav"] = tables["nav"].drop(columns="benchmark_nav").astype({"date": str}).merge(
+            nav, on="date", how="left", validate="one_to_one",
+        )
+        provenance = {
+            "benchmark_id": benchmark_id, "strategy_id": main["definition"]["strategy_id"],
+            "kind": "account", "run_id": benchmark.run_id,
+            "resolved_from": str(benchmark.root / "backtests" / benchmark.run_id),
+        }
+    tables["benchmark"] = pd.DataFrame([provenance])
+    resolved = {"benchmark": provenance}
+    if sensitivity and benchmark is not None:
+        evidence = {"benchmark_id": benchmark_id, "kind": "account"}
+        prior = (main.get("resolved_inputs", {}).get("benchmark") or {}).get("run_id")
+        if market_benchmark is None and isinstance(prior, str) and re.fullmatch(r"[A-Za-z0-9_-]+", prior):
+            market_benchmark = BacktestRef(run_id=prior, root=benchmark.root, status="complete")
+        try:
+            if market_benchmark is None:
+                raise ValueError("缺同池 universe_vw 账户净值")
+            if prior and market_benchmark.run_id != prior:
+                raise ValueError("同池账户与 final_main 发布记录所引用的账户不一致")
+            main_definition = backtest_definition_from_dict(main["definition"])
+            market = validate_benchmark_reference(main_definition, market_benchmark, bundle)
+            if (market["definition"]["start"], market["definition"]["end"]) != (
+                definition.start.isoformat(), definition.end.isoformat(),
+            ):
+                raise ValueError("同池账户起止日与冻结压力试验区间不同")
+            evidence.update(run_id=market_benchmark.run_id, strategy_id=market["definition"]["strategy_id"],
+                            resolved_from=str(market_benchmark.root / "backtests" / market_benchmark.run_id))
+            tables["market_nav"] = _reference_nav(read_backtest(market_benchmark)["tables"])
+        except (OSError, ValueError) as error:
+            evidence["gap"] = str(error)
+        tables["market_benchmark"] = pd.DataFrame([evidence])
+        resolved["market_benchmark"] = evidence
+    return resolved
+
+
 def run_backtest(
     definition: BacktestDefinition,
     store: DataStore,
@@ -488,7 +854,12 @@ def run_backtest(
     admission_path: Path | None = None,
     engine_python: Path | None = None,
     benchmark: BacktestRef | None = None,
+    market_benchmark: BacktestRef | None = None,
     research_context: Mapping[str, object] | None = None,
+    before_engine: Callable[[], None] | None = None,
+    on_engine_start: Callable[[], None] | None = None,
+    expected_universe: Mapping[str, list[str]] | None = None,
+    qualification_delivery: Path | None = None,
 ) -> BacktestRef:
     """资格→输入包→准入→引擎→完整性校验→评价基座→原子发布。
 
@@ -504,11 +875,25 @@ def run_backtest(
     （strategy_id == 协议 benchmark_id）以本账户净值为参照并标记 kind=benchmark。
     """
     output_root = Path(output_root)
+    origin = (research_context or {}).get("after_close_origin")
+    publication = None
+    if origin is not None:
+        from hetu_quant.after_close import after_close_origin
+
+        if not isinstance(origin, Mapping):
+            raise ValueError("invalid after_close_origin")
+        publication = after_close_origin(output_root, str(origin["publication_id"]),
+                                         date.fromisoformat(str(origin["signal_date"])), str(origin["strategy_id"]))
+        if origin["strategy_id"] != definition.strategy_id:
+            raise ValueError("simulation strategy differs from after-close origin")
     is_formal = str(definition.protocol["stage"]) == "formal"
     if is_formal:
         from hetu_quant.strategies import require_formal_protocol
 
         require_formal_protocol(definition)
+        if (definition.protocol["universe"]["rule"] == "historical_sh_sz_common_stock"
+                and expected_universe is None):
+            raise ValueError("formal account requires per-signal historical universe qualification")
 
     backtests_dir = output_root / "backtests"
     backtests_dir.mkdir(parents=True, exist_ok=True)
@@ -517,7 +902,8 @@ def run_backtest(
     staging.mkdir()
 
     try:
-        report = prepare_backtest(definition, store, staging / "bundle")
+        input_options = {"qualification_delivery": qualification_delivery} if qualification_delivery is not None else {}
+        report = prepare_backtest(definition, store, staging / "bundle", **input_options)
         if progress is not None:
             progress(0.2)
         _raise_if_cancelled(cancelled)
@@ -563,6 +949,8 @@ def run_backtest(
                 progress(1.0)
             return BacktestRef(run_id=run_id, root=output_root, status="limited")
 
+        validate_prepared_universe(staging / "bundle", expected_universe)
+
         admission_file = (
             Path(admission_path)
             if admission_path is not None
@@ -584,23 +972,51 @@ def run_backtest(
                          and not definition.parameters.get('synthetic_signals')):
             from hetu_quant.strategies import build_signals
 
-            signals = build_signals(definition, store)
+            signals = build_signals(definition, store, **input_options)
             factor_labels = signals.attrs.pop("factor_labels", pd.DataFrame())
             factor_exclusions = signals.attrs.pop("factor_exclusions", [])
             factor_labels.to_parquet(staging / "factor-labels.parquet", index=False)
             signals.to_parquet(staging / "bundle" / "signals.parquet", index=False)
-        else:
+        elif publication is None:
             _inject_mechanism_signals(staging, definition)
+        else:
+            # The explicit signal version is an input of a mechanism run. Its executable
+            # day still needs to be independently confirmed from the account calendar.
+            from hetu_quant.backtest_data import split_signal_calendar
 
+            signal_day = publication["signal_date"]
+            calendar = store.read_table(SnapshotRef(definition.snapshot_id, store.root), "calendar")
+            _, executable = split_signal_calendar(calendar, signal_day)
+            if not executable or not str(definition.start) <= executable <= str(definition.end):
+                raise ValueError("simulation lacks a proven executable day for the selected close signal")
+            pd.DataFrame([
+                {**row, "signal_at": signal_day, "executable_from": executable}
+                for row in publication["target"]["targets"]
+            ]).to_parquet(staging / "bundle" / "signals.parquet", index=False)
+        if publication is not None and is_formal:
+            from hetu_quant.after_close import _same_signal
+
+            own = signals[signals.signal_at.astype(str).str[:10].eq(publication["signal_date"])]
+            if not _same_signal(own, own, publication["target"]["targets"]):
+                raise ValueError("formal simulation input differs from the selected close signal")
         engine_out = staging / "engine-out"
         resolved_engine_python = (
             Path(engine_python)
             if engine_python is not None
             else output_root / "runtime" / "rqalpha" / ".venv" / "bin" / "python"
         )
+        if before_engine is not None:
+            if not resolved_engine_python.exists():
+                raise FileNotFoundError(f"engine python missing: {resolved_engine_python}")
+            if benchmark is None and definition.strategy_id != definition.protocol["benchmark_id"]:
+                raise ValueError("representative candidate requires an account benchmark")
+            if benchmark is not None:
+                validate_benchmark_reference(definition, benchmark, staging / "bundle")
+            _raise_if_cancelled(cancelled)
+            before_engine()
         run_engine_subprocess(
             resolved_engine_python, RUNNER_PATH, staging / "bundle", engine_out,
-            cancelled=cancelled,
+            cancelled=cancelled, **({"on_engine_start": on_engine_start} if on_engine_start is not None else {}),
         )
         if progress is not None:
             progress(0.7)
@@ -620,43 +1036,15 @@ def run_backtest(
         # 可比性按实际定义/用途判断，不因 run_id/日期不同拒绝可读旧结果。
         benchmark_id = str(definition.protocol.get("benchmark_id") or "")
         is_benchmark_run = bool(benchmark_id) and definition.strategy_id == benchmark_id
-        benchmark_provenance: dict[str, Any] | None = None
+        resolved_inputs: dict[str, Any] = {"benchmark": None}
         blocked_reason: str | None = None
         if is_formal:
             try:
-                if benchmark is not None:
-                    bench = read_backtest(benchmark)
-                    validate_benchmark_reference(definition, benchmark, staging / "bundle")
-                    bench_nav = bench["tables"]["nav"][["date", "net_nav"]].copy()
-                    bench_nav["date"] = bench_nav["date"].astype(str)
-                    nav = tables["nav"].copy()
-                    nav["date"] = nav["date"].astype(str)
-                    # 引擎输出的 benchmark_nav 占位列（NaN）先丢弃再按日期填入基准净值
-                    nav = nav.drop(columns=["benchmark_nav"]).merge(
-                        bench_nav.rename(columns={"net_nav": "benchmark_nav"}),
-                        on="date",
-                        how="left",
-                    )[["date", "gross_nav", "net_nav", "benchmark_nav"]]
-                    tables["nav"] = nav
-                    benchmark_provenance = {
-                        "benchmark_id": benchmark_id,
-                        "kind": "account",
-                        "run_id": benchmark.run_id,
-                        "resolved_from": str(Path(benchmark.root) / "backtests" / benchmark.run_id),
-                    }
-                elif is_benchmark_run:
-                    nav = tables["nav"]
-                    nav["benchmark_nav"] = nav["net_nav"]
-                    benchmark_provenance = {
-                        "benchmark_id": benchmark_id,
-                        "kind": "account",
-                        "run_id": run_id,
-                        "note": "基准自身以本账户净值为参照（超额恒为零，不作经济通过）",
-                    }
+                resolved_inputs = _attach_formal_references(
+                    definition, tables, staging / "bundle", run_id, benchmark, market_benchmark,
+                )
             except ValueError as exc:
                 blocked_reason = str(exc)
-            if benchmark_provenance is not None:
-                tables["benchmark"] = pd.DataFrame([benchmark_provenance])
 
         try:
             if blocked_reason:
@@ -667,6 +1055,12 @@ def run_backtest(
                 "status": "complete", "detail": "", "account_start": definition.start,
                 "account_end": definition.end,
             }])
+            if is_formal:
+                tables["calendar"] = pd.read_parquet(staging / "bundle" / "tables" / "calendar.parquet")
+                tables["exposure_facts"] = research_exposure_inputs(
+                    store, SnapshotRef(definition.snapshot_id, store.root),
+                    STRATEGY_PURPOSES[definition.strategy_id], tables, staging / "bundle" / "tables",
+                )
             evaluation = evaluate_backtest(tables, definition.protocol)
         except ValueError as exc:
             # 错口径/未成熟标签等输入违例：评价 blocked，不静默放行也不吞错
@@ -683,6 +1077,14 @@ def run_backtest(
                 "limitations": [],
                 "metrics": {},
             }
+        if is_formal:
+            from hetu_quant.backtest_evaluation import account_attribution
+
+            evaluation["attribution"] = account_attribution(
+                tables, signals, definition.protocol,
+                cash_action_flows=engine_manifest.get("cash_action_flows", ()),
+                identity_events=engine_manifest.get("identity_transition_events", ()),
+            )
         if is_formal and definition.strategy_id == "low_volatility":
             from hetu_quant.backtest_evaluation import factor_diagnostics
 
@@ -691,12 +1093,13 @@ def run_backtest(
                 diagnostic["horizons"].setdefault(horizon, dict(coverage=0, ic=None, rank_ic=None, deciles=[]))
             diagnostic["excluded"] = factor_exclusions
             evaluation["factor_diagnostics"] = diagnostic
+        limited = bool(account_limitations or (before_engine is not None and blocked_reason))
         manifest = {
             "run_id": run_id,
-            "status": "limited" if account_limitations else "complete",
+            "status": "limited" if limited else "complete",
             "research": research_context,
             "kind": "benchmark" if is_benchmark_run else "candidate",
-            "resolved_inputs": {"benchmark": benchmark_provenance},
+            "resolved_inputs": resolved_inputs,
             "definition": backtest_definition_to_dict(definition),
             "sources": json.loads(
                 (staging / "bundle" / "sources.json").read_text(encoding="utf-8")
@@ -708,17 +1111,20 @@ def run_backtest(
                 "decision": ADMISSION_READY,
             },
             "mode": definition.mode,
-            "limitations": account_limitations,
+            "limitations": account_limitations or ([blocked_reason] if limited else []),
+            "disposition_gaps": engine_manifest.get("disposition_gaps", []),
+            "dividend_tax_withholdings": engine_manifest.get("dividend_tax_withholdings", []),
             "tables": {name: f"{name}.parquet" for name in TABLE_COLUMNS},
             "created_at": datetime.now(CN).isoformat(),
         }
         _write_publish(staging, manifest, tables, evaluation)
         _raise_if_cancelled(cancelled)
         _atomic_publish(staging, backtests_dir / run_id)
+        if origin is not None:
+            _link_published_after_close_simulation(output_root, run_id, origin)
         if progress is not None:
             progress(1.0)
-        return BacktestRef(run_id=run_id, root=output_root,
-                           status="limited" if account_limitations else "complete")
+        return BacktestRef(run_id=run_id, root=output_root, status=manifest["status"])
     except BacktestCancelled:
         partial = backtests_dir / "_partial" / run_id
         partial.parent.mkdir(parents=True, exist_ok=True)

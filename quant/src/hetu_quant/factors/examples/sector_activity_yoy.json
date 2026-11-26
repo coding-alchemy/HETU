@@ -1,0 +1,26 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "S"
+  ],
+  "tables": {
+    "industry_activity": [
+      {
+        "code": "S",
+        "period": "2022-12",
+        "unit": "吨",
+        "series": "产量",
+        "quantity": 80,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      },
+      {
+        "code": "S",
+        "period": "2023-12",
+        "unit": "吨",
+        "series": "产量",
+        "quantity": 100,
+        "available_at": "2024-01-01T08:00:00+08:00"
+      }
+    ]
+  }
+}

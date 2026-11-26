@@ -1,0 +1,58 @@
+{
+  "trade_date": "2024-01-31",
+  "subjects": [
+    "A"
+  ],
+  "tables": {
+    "financial_reports": [
+      {
+        "code": "A",
+        "period": "2023Q1",
+        "unit": "亿元",
+        "currency": "CNY",
+        "flow_basis": "cumulative",
+        "available_at": "2024-01-01T14:00:00+08:00",
+        "source_ref": "合成财报原件",
+        "rd_basis": "total",
+        "rd_investment": 1.5,
+        "revenue": 12.5
+      },
+      {
+        "code": "A",
+        "period": "2023Q2",
+        "unit": "亿元",
+        "currency": "CNY",
+        "flow_basis": "cumulative",
+        "available_at": "2024-01-01T14:00:00+08:00",
+        "source_ref": "合成财报原件",
+        "rd_basis": "total",
+        "rd_investment": 3.0,
+        "revenue": 25.0
+      },
+      {
+        "code": "A",
+        "period": "2023Q3",
+        "unit": "亿元",
+        "currency": "CNY",
+        "flow_basis": "cumulative",
+        "available_at": "2024-01-01T14:00:00+08:00",
+        "source_ref": "合成财报原件",
+        "rd_basis": "total",
+        "rd_investment": 4.5,
+        "revenue": 37.5
+      },
+      {
+        "code": "A",
+        "period": "2023Q4",
+        "unit": "亿元",
+        "currency": "CNY",
+        "flow_basis": "cumulative",
+        "available_at": "2024-01-01T14:00:00+08:00",
+        "source_ref": "合成财报原件",
+        "rd_basis": "total",
+        "rd_investment": 6.0,
+        "revenue": 50.0
+      }
+    ]
+  }
+}

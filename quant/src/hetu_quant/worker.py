@@ -132,7 +132,18 @@ def run_job(job_id: str, store: ExperimentStore, data: DataStore):
                 return service.get(job_id).state == "cancel_requested"
 
             try:
-                result = _execute_backtest(definition, data, progress=progress, cancelled=cancelled)
+                representative = definition.protocol.get("representative_execution")
+                if representative:
+                    from hetu_quant.backtest import run_representative_job
+
+                    submission_id = service.original_submission_id(job_id)
+                    if submission_id is None:
+                        raise PermissionError("representative job has no verified original submission")
+                    result = run_representative_job(
+                        definition, data, submission_id=submission_id, progress=progress, cancelled=cancelled
+                    )
+                else:
+                    result = _execute_backtest(definition, data, progress=progress, cancelled=cancelled)
             except BacktestCancelled:
                 raise _JobCancelled from None
             _raise_if_cancelled(service, job_id)

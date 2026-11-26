@@ -15,8 +15,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
-from datetime import date, datetime
+import sys
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -26,6 +28,12 @@ from rqalpha.const import MARKET, TRADING_CALENDAR_TYPE
 from rqalpha.data.base_data_source.data_source import BaseDataSource
 from rqalpha.model.instrument import Instrument
 from rqalpha.utils.datetime_func import convert_date_to_int
+
+# The isolated engine does not install the workbench package.
+_QUANT_SRC = str(Path(__file__).resolve().parents[1] / "src" / "hetu_quant")
+if _QUANT_SRC not in sys.path:
+    sys.path.insert(0, _QUANT_SRC)
+from account_evidence import account_dispositions, execution_cutoff  # noqa: E402
 
 _BAR_DTYPE = np.dtype(
     [
@@ -90,6 +98,8 @@ class LocalBundleDataSource(BaseDataSource):
         self._day_rank = {day: index for index, day in enumerate(trading_days)}
 
         securities = pd.read_parquet(tables_dir / "historical_securities.parquet")
+        self.identity_transitions = self._read_identity_transitions(bundle_dir, securities)
+        self.renames_from = {event["from_code"]: event for event in self.identity_transitions.values()}
         self._id_instrument_map: dict[str, dict[datetime, Instrument]] = {}
         self._sym_instrument_map: dict[str, dict[datetime, Instrument]] = {}
         self._grouped_instruments: dict[object, list[Instrument]] = {}
@@ -107,6 +117,9 @@ class LocalBundleDataSource(BaseDataSource):
             valid_to = str(item.valid_to)
             if valid_to in ("", "None", "nan", "NaN", "NaT", "<NA>"):
                 valid_to = "2999-12-31"
+            else:
+                # The source gives the last included date, while RQAlpha uses an exclusive boundary.
+                valid_to = (date.fromisoformat(valid_to) + timedelta(days=1)).isoformat()
             instruments.append(
                 Instrument(
                     {
@@ -154,26 +167,106 @@ class LocalBundleDataSource(BaseDataSource):
         actions = pd.read_parquet(actions_path) if actions_path.exists() else pd.DataFrame(
             columns=["code", "ex_date", "action_type", "m", "d"]
         )
+        definition = json.loads((bundle_dir / "definition.json").read_text(encoding="utf-8"))
+        account_start = pd.Timestamp(definition.get("start") or trading_days[0])
+        account_end = pd.Timestamp(definition.get("end") or trading_days[-1])
+        # 预热行动保留在原表供研究收益使用。账户从定义的起点持有现金，
+        # 只对执行区间内的事件建账；不能确认实施日的行继续交给日期校验。
+        ex_dates = pd.to_datetime(actions["ex_date"], errors="coerce")
+        account_actions = actions[~(ex_dates.lt(account_start) | ex_dates.gt(account_end))]
         self._dividends_by_code: dict[str, np.ndarray] = {}
         self._splits_by_code: dict[str, np.ndarray] = {}
         self.action_events: dict[str, list[dict]] = {}
-        self._build_actions(actions)
-        self.terminal_disposals = {}
+        self._build_actions(account_actions)
+        as_of = pd.Timestamp(definition["as_of"]) if definition.get("as_of") else None
         disposal_path = tables_dir / "terminal_disposals.parquet"
-        if disposal_path.exists():
-            for row in pd.read_parquet(disposal_path).to_dict("records"):
-                evidence = (bundle_dir / "evidence" / str(row["evidence_ref"])).resolve()
-                if (not evidence.is_relative_to((bundle_dir / "evidence").resolve())
-                        or not evidence.is_file()
-                        or hashlib.sha256(evidence.read_bytes()).hexdigest() != row["sha256"]):
-                    raise ValueError("terminal_disposal_evidence_unproven")
-                if pd.Timestamp(row["available_at"]) > pd.Timestamp(str(row["date"]) + "T00:00:00+08:00"):
-                    raise ValueError("terminal_disposal_not_known_at_event")
-                if float(row["cash_per_share"]) < 0:
-                    raise ValueError("terminal_disposal_negative_compensation")
-                self.terminal_disposals[(str(row["code"]), str(row["date"]))] = row
+        exchange_path = tables_dir / "share_exchanges.parquet"
+        self.terminal_disposals, self.share_exchanges, cash_gaps, exchange_gaps, conflicts = account_dispositions(
+            pd.read_parquet(disposal_path).to_dict("records") if disposal_path.exists() else [],
+            pd.read_parquet(exchange_path).to_dict("records") if exchange_path.exists() else [],
+            bundle_dir / "evidence", account_start.date().isoformat(), account_end.date().isoformat(), as_of=as_of,
+        )
+        self.disposition_gaps = [*cash_gaps, *exchange_gaps, *conflicts]
+        if self.terminal_disposals:
+            for (code, day), row in list(self.terminal_disposals.items()):
+                outgoing = self.renames_from.get(code)
+                if outgoing and outgoing["from_valid_to"] <= day <= outgoing["effective_date"]:
+                    del self.terminal_disposals[code, day]
+                    del self.identity_transitions[outgoing["code"]]
+                    del self.renames_from[code]
+                    self.disposition_gaps.append({
+                        "code": code, "date": day, "reason": "identity_transition_conflicts_with_cash_disposal",
+                        "source_refs": row["source_refs"] + [outgoing["evidence_ref"]],
+                    })
+        if self.share_exchanges:
+            for (code, day), event in list(self.share_exchanges.items()):
+                known_code = event.get("code")
+                invalid_lifecycle = known_code and (
+                    not (securities.code.eq(code) & securities.valid_to.astype(str).le(day)).any()
+                    or not (securities.code.eq(known_code) & securities.valid_from.astype(str).le(day)
+                            & (securities.valid_to.astype("string").fillna("").eq("") |
+                               securities.valid_to.astype(str).ge(day))).any()
+                )
+                rename = self.renames_from.get(code)
+                cash = [key for key in self.terminal_disposals if key[0] == code and key[1] >= day]
+                if invalid_lifecycle or rename or cash:
+                    if rename:
+                        del self.identity_transitions[rename["code"]]
+                        del self.renames_from[code]
+                    for key in cash:
+                        del self.terminal_disposals[key]
+                    event["ratio"] = None
+                    self.disposition_gaps.append({
+                        "code": code, "date": day, "reason": "share_exchange_lifecycle_or_disposition_conflict",
+                        "source_refs": event["source_refs"],
+                    })
 
     # ---- 构建 ----
+
+    def _read_identity_transitions(self, bundle_dir, securities):
+        path = bundle_dir / "tables" / "identity_transitions.parquet"
+        if not path.is_file():
+            return {}
+        events = {}
+        outgoing = set()
+        for row in pd.read_parquet(path).to_dict("records"):
+            code, old, day = (str(row[key]) for key in ("code", "from_code", "effective_date"))
+            cutoff = execution_cutoff(day)
+            original = (bundle_dir / "evidence" / row["evidence_ref"]).resolve()
+            if not original.is_relative_to((bundle_dir / "evidence").resolve()) or not original.is_file():
+                raise ValueError("identity_transition_evidence_unproven")
+            raw = original.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != row["sha256"]:
+                raise ValueError("identity_transition_evidence_unproven")
+            records = json.loads(raw)
+            if isinstance(records, dict):
+                records = records["objects"]
+            old_rows = [item for item in records if str(item.get("code")) == old]
+            new_rows = [item for item in records if str(item.get("code")) == code]
+            previous = str(row["from_valid_to"])
+            attrs = ("kind", "from_code", "effective_date", "published_at", "ratio")
+            publication = pd.Timestamp(row["published_at"])
+            if (
+                len(old_rows) != 1 or len(new_rows) != 1 or old == code or not row["identity_id"]
+                or old_rows[0].get("identity_id") != row["identity_id"]
+                or new_rows[0].get("identity_id") != row["identity_id"]
+                or old_rows[0].get("valid_to", old_rows[0].get("out_date")) != previous
+                or new_rows[0].get("valid_from", new_rows[0].get("ipo_date")) != day
+                or any((new_rows[0].get("continuation") or {}).get(name) != row[name] for name in attrs)
+                or row["kind"] != "administrative_rename" or row["ratio"] != 1 or isinstance(row["ratio"], bool)
+                or pd.isna(publication) or publication.tzinfo is None
+                or not self._day_rank.get(day) or previous >= day
+                or self._calendar[self._day_rank[day] - 1].date().isoformat() > previous
+                or not (securities.code.eq(old) & securities.valid_to.astype(str).eq(previous)).any()
+                or not (securities.code.eq(code) & securities.valid_from.astype(str).eq(day)).any()
+                or old in outgoing or code in events
+            ):
+                raise ValueError("identity_transition_terms_unproven")
+            if publication > cutoff:
+                continue
+            events[code] = row
+            outgoing.add(old)
+        return events
 
     def _build_bars(self, bars: pd.DataFrame) -> dict[str, np.ndarray]:
         result: dict[str, np.ndarray] = {}
@@ -249,7 +342,9 @@ class LocalBundleDataSource(BaseDataSource):
         if index == 0:
             raise LimitReferenceError(f"{reason}: 缺前一交易日")
         previous_day = self._calendar[index - 1].strftime("%Y%m%d")
-        previous = self._prev_close.get(code, {}).get(previous_day, float("nan"))
+        event = self.identity_transitions.get(code)
+        previous_code = event["from_code"] if event and event["effective_date"] == day.isoformat() else code
+        previous = self._prev_close.get(previous_code, {}).get(previous_day, float("nan"))
         if not math.isfinite(previous) or previous <= 0:
             raise LimitReferenceError(f"{reason}: 缺前一交易日原收盘")
         cash, ratio = Decimal("0"), Decimal("1")
