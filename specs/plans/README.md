@@ -102,6 +102,7 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 
 | 范围 | 结果与现行入口 |
 |---|---|
+| 因子试验工作台 | 本期获批工程范围已完成。现行规则见[因子试验工作台实现](../2026-11-26-quant-factor-workbench-implementation.md)。01–10 已退出执行目录，真实试算仍待适用许可。[验收与归档](#factor-workbench-closeout) |
 | 全球宏观市场定价与融资 | 01、02规则及GM13三项行为有效；按用户批准的可得数据范围完成，S1／S3／S5具体缺口仍未完整验证。[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)、[当前验收](../../.hetu/validation/global-macro-pricing-and-financing/acceptance.md#approved-closeout-20261107)及[清理回源](#global-macro-pricing-and-financing-closeout)分别维护完成状态与来源限制 |
 | 全球宏观逐期比较、历史来源与折线图 | R1逐期比较及B1转向解释、R2两组历史来源、R3实际图形与受限完整内联按批准范围完成；[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)、[当前验收](../../.hetu/validation/global-macro-sign-transition-closeout-20261028/acceptance.md)及[清理回源](#global-macro-history-and-charts-closeout)。旧失败、监测偏差及原能力限制保持，不认证全部历史/来源/宿主 |
 | 全球宏观取证采用与历史比较 | 01/02、GM10三项行为及S1–S5代表路径按批准范围通过；S2适用官方缺月有限例外、数据仍各11/12实值。[统一实现](../2026-11-07-global-macro-fundamentals-implementation.md)、[总验收§10](../../.hetu/validation/global-macro-evidence-and-history/acceptance.md#10-用户批准的官方缺月例外与当前验收结论)及[清理回源](#global-macro-evidence-and-history-closeout)保留数据与历史监测边界，不认证全部历史、来源、接口或宿主 |
@@ -122,6 +123,14 @@ LIVE04整体验收未通过；计划原文退出工作区，未完成命题继�
 | Standard Token 机械优化与核账 | [实现范围与规则](../2026-10-15-standard-token-efficiency-design.md)、[局部验证](../../.hetu/validation/standard-token-efficiency-appendix-20261015/report.md)及[实际差额归因](../../.hetu/validation/standard-token-comparison-20261015/input-delta-attribution-20261017.md)；默认策略未切换，金额与分项纯因果贡献未证 |
 
 ## 历史与未启动范围
+
+<a id="factor-workbench-closeout"></a>
+
+### 因子试验工作台工程收尾
+
+2026-11-28 用户确认本期批准的工程需求完成。工作台需求 v0.3 和设计 v0.1 合并为[因子试验工作台实现](../2026-11-26-quant-factor-workbench-implementation.md)。两份原规格、路线图和 01–10 阶段计划及三份一次性浏览与复验脚本按原路径保存在本地归档清单同级的 `originals/`。[归档清单](../../.hetu/quant/acceptance/factor-workbench-engineering-closeout-20261128/manifest.json)
+
+合成数据工作台验收及最近一次档案裁决回归按原范围有效。真实发布的 `cn_a_daily` 仍待 `factor_calculation` 用途许可。并排对比、跨会话保存重开和试算结果导出继续列为建议项。[增量验收](../../.hetu/quant/acceptance/factor-workbench-increment-review-20261128/review.md) · [最终裁决复验](../../.hetu/quant/acceptance/factor-workbench-increment-review-20261128/adjudicated-quote-after.log) · [真实许可记录](../../.hetu/quant/acceptance/factor-workbench-closeout-20261128/real-permission.log)
 
 <a id="quant-branch-closeout"></a>
 

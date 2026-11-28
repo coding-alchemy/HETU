@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
+
 from hetu_data import DataRequest, DataStore
 from hetu_data.access import AccessDenied
 from hetu_data.library import load_library, publish_library, query_library, query_library_sql
@@ -301,3 +302,74 @@ def test_daily_bar_versions_at_original_close(tmp_path, source_facts):
     (root / "evidence" / "original.json").unlink()
     known, gaps = read_known_closes(store, library, at=at, **scope)
     assert known.empty and gaps.field.tolist() == ["close_raw"]
+
+
+def test_browse_pins_version_order_and_scope(tmp_path, source_facts):
+    from hetu_data.browse import BrowseSelection, browse_page
+
+    first = _shard(tmp_path / "first", source_facts, START)
+    second = _shard(tmp_path / "second", source_facts, END)
+    store = DataStore(tmp_path / "library")
+    ref = publish_library(store, asset_snapshots=(second, first))
+    selection = BrowseSelection(ref, "daily_archive", "daily_bars", ("date", "close_raw"), CODES,
+                                START, END, sort="close_raw")
+    scopes = tuple(dict(root=item["root"], snapshot_id=item["snapshot_id"], table="daily_bars",
+                        product_id="ts_a_daily", subjects=CODES, start=START, end=END,
+                        fields=("date", "close_raw"), allowed=True) for item in (first, second))
+    one = browse_page(store, selection, scopes=scopes, page=1, page_size=1)
+    third = _shard(tmp_path / "third", source_facts, date(2026, 1, 7))
+    publish_library(store, asset_snapshots=(third,), previous=ref)
+    two = browse_page(store, selection, scopes=scopes, page=2, page_size=1)
+    assert one.rows["date"].tolist() == [START.isoformat()]
+    assert two.rows["date"].tolist() == [END.isoformat()]
+    assert one.total == two.total == 2
+    narrowed = browse_page(store, selection, scopes=(scopes[0],), page=1, page_size=1)
+    assert narrowed.total == 1
+    assert narrowed.rows["date"].tolist() == [START.isoformat()]
+
+
+def test_browse_business_dates_and_name_scope(tmp_path):
+    from dataclasses import replace
+
+    from hetu_data.browse import BrowseSelection, browse_page, lookup_objects
+
+    store = DataStore(tmp_path / "data")
+    reports = tmp_path / "reports.csv"
+    reports.write_text(
+        "code,report_period,ann_date,available_at\n"
+        "SYNTH.SH,2025-12-31,2026-01-06,2026-01-06T14:00:00+08:00\n"
+    )
+    securities = tmp_path / "securities.csv"
+    securities.write_text(
+        "code,name,ipo_date,out_date,status\nSYNTH.SH,同名测试,2020-01-01,,1\nSYNTH.SZ,同名测试,2020-01-01,,1\n"
+    )
+    products = {"financial_reports": "synthetic_reports", "securities": "synthetic_names"}
+    for table, product in products.items():
+        store.config["products"][product] = {
+            "provider": "local_file", "fee_class": "free", "kind": "catalog", "tables": [table],
+            "permission": {"status": "declared_free", "allowed_uses": ["factor_calculation"]},
+        }
+    doc = tmp_path / "import.json"
+    doc.write_text(json.dumps(dict(mode="free", items=[
+        dict(product_id=products[table], table=table, files=[file.name], source=dict(
+            name="synthetic", fee_class="free", obtained_at="2026-01-07T00:00:00+08:00",
+            permission_basis="synthetic")) for table, file in (
+                ("financial_reports", reports), ("securities", securities)
+            )
+    ])))
+    ref = store.import_files(doc, (reports, securities))
+    fields = ("report_period", "ann_date")
+    scopes = tuple(dict(root=str(store.root), snapshot_id=ref.snapshot_id, table=table, product_id=product,
+                        subjects=("SYNTH.SH", "SYNTH.SZ"), start=date(2025, 1, 1), end=END,
+                        fields=fields if table == "financial_reports" else ("code", "name", "ipo_date", "out_date"),
+                        allowed=True) for table, product in products.items())
+    selection = BrowseSelection(ref, "factor_calculation", "financial_reports", fields, ("SYNTH.SH",),
+                                date(2025, 12, 31), date(2025, 12, 31), market="SH", axis="report_period")
+    assert browse_page(store, selection, scopes=scopes, page=1, page_size=25).total == 1
+    assert browse_page(store, replace(selection, market="SZ"), scopes=scopes, page=1, page_size=25).total == 0
+    by_release = replace(selection, start=END, end=END, axis="ann_date")
+    assert browse_page(store, by_release, scopes=scopes, page=1, page_size=25).total == 1
+    directory = BrowseSelection(ref, "factor_calculation", "object_lookup", (), (), END, END)
+    assert lookup_objects(store, directory, scopes=scopes, needle="同名") == [
+        ("SYNTH.SH", "同名测试", "synthetic_names"), ("SYNTH.SZ", "同名测试", "synthetic_names")
+    ]

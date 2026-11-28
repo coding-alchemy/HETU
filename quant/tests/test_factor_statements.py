@@ -56,9 +56,10 @@ def test_earnings_yield_local_available_version(tmp_path):
 
 @pytest.mark.parametrize(("field_unit", "older_report", "mismatch"),
                          [(False, False, None), (True, False, None), (False, True, None),
-                          (False, True, "amount"), (False, True, "amount-and-clock"), (False, True, "missing")],
+                          (False, True, "amount"), (False, True, "amount-and-clock"), (False, True, "missing"),
+                          (False, False, "revoked-field")],
                          ids=["report-unit", "field-unit", "two-quarters", "latest-mismatch", "mismatched-clock",
-                              "missing-latest-row"])
+                              "missing-latest-row", "revoked-field"])
 def test_earnings_yield_from_native_financial_and_market_cap_tables(
     monkeypatch, tmp_path, field_unit, older_report, mismatch,
 ):
@@ -121,7 +122,7 @@ def test_earnings_yield_from_native_financial_and_market_cap_tables(
     payload = json.dumps(dict(records=originals), ensure_ascii=False).encode()
     for proof in receipts:
         proof["sha256"] = hashlib.sha256(payload).hexdigest()
-    latest = dict(finance, net_profit_ex=8) if mismatch else finance
+    latest = dict(finance, net_profit_ex=8) if mismatch in ("amount", "amount-and-clock") else finance
     if mismatch == "amount-and-clock":
         latest["available_at"] = "2024-01-31T14:56:00+08:00"
     reports = [past] if older_report else []
@@ -139,6 +140,33 @@ def test_earnings_yield_from_native_financial_and_market_cap_tables(
     store, ref = build_case_store(tmp_path, case)
     (store.root / "evidence" / "native-factor-facts.json").write_bytes(payload)
     result = compute_factor(store, ref, query)
+    if mismatch == "revoked-field":
+        assert result.rows[0]["value"] == pytest.approx(.06)
+        policy = store.config["products"]["factor_financial_reports"]["permission"]
+        policy["allowed_fields"] = ["code", "report_period", "ann_date", "available_at", "unit", "currency"]
+        columns_read, proof_reads = [], []
+        original_range = store.read_range
+        original_register = store.read_evidence_registrations
+
+        def reader(*args, **kwargs):
+            if args[1] == "financial_reports":
+                columns_read.extend((*kwargs["columns"], *kwargs.get("evidence_columns", ())))
+            return original_range(*args, **kwargs)
+
+        def registrations(*args, **kwargs):
+            frame = original_register(*args, **kwargs)
+            if kwargs["table"] == "financial_reports":
+                proof_reads.extend(frame.record_key.tolist())
+            return frame
+
+        monkeypatch.setattr(store, "read_range", reader)
+        monkeypatch.setattr(store, "read_evidence_registrations", registrations)
+        denied = compute_factor(store, ref, query)
+        assert "net_profit_ex" not in columns_read
+        assert not any(key.endswith("|net_profit_ex") for key in proof_reads)
+        assert not denied.rows and any(gap["field"] == "net_profit_ex" for gap in denied.gaps)
+        print("native E/P 6% before; after denial:", columns_read, proof_reads, denied.gaps)
+        return
     if mismatch:
         assert not result.rows
         gap, = result.gaps
@@ -148,7 +176,7 @@ def test_earnings_yield_from_native_financial_and_market_cap_tables(
         assert evidence["evidence_ref"] == "native-factor-facts.json"
         assert evidence["available_at"] == time
         if mismatch == "missing":
-            from test_factor_workbench import open_factors
+            from test_factor_workbench import open_factors, run_trial
 
             assert "缺少" in gap["reason"]
             assert evidence["observation_status"] == "unavailable_at_cutoff"
@@ -158,11 +186,17 @@ def test_earnings_yield_from_native_financial_and_market_cap_tables(
             monkeypatch.setenv("HETU_DATA_ROOT", str(store.root))
             page.selectbox(key="factor_id").set_value("earnings_yield").run()
             page.selectbox(key="factor_source_earnings_yield").set_value(ref.snapshot_id).run()
-            page.button(key="factor_compute").click().run()
+            run_trial(page)
             assert not page.exception
             expander = next(item for item in page.expander if item.label == "缺口与冲突原件")
             assert json.loads(expander.json[0].value) == [gap]
             print("native Q4 unavailable in compute_factor and workbench", expander.json[0].value)
+            page.button(key="factor_evidence_gap_0").click().run()
+            assert page.sidebar.radio(key="page_nav").value == "数据"
+            assert any("2024-01-31 15:00:00+08:00" in caption.value for caption in page.caption)
+            assert any("issuer-A-Q4.pdf" in payload.value and "2023Q4" in payload.value for payload in page.json)
+            page.button(key="factor_return_to_draft").click().run()
+            assert page.selectbox(key="factor_source_earnings_yield").value == ref.snapshot_id
 
             from test_factor_recheck import library
 

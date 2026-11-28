@@ -1,16 +1,26 @@
 """Cutoff and use checks before factor formulas receive input."""
 
 import json
+import re
 from collections import defaultdict
+from dataclasses import replace
 from datetime import date, datetime, timedelta
-from functools import cache
+from functools import cache, partial
 from importlib.resources import files
 from itertools import product
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import pandas as pd
-from hetu_data.library import _read_close_attestations, load_library, selected_snapshot_assets
+from hetu_data.archive import _archive_calendar_market, _query_boolean, _uses_sz_calendar
+from hetu_data.library import (
+    _product_read_scope,
+    _read_close_attestations,
+    _select_revisions,
+    load_library,
+    revision_replacements,
+    selected_snapshot_assets,
+)
 
 from hetu_quant.backtest_data import _permission_sources, _purpose_allowed
 from hetu_quant.data import TABLE_SCHEMAS, AccessDenied
@@ -132,11 +142,15 @@ _PROVENANCE_KEYS = {
     "field_evidence",
     "fact_key",
     "coordinate",
+    "registration_product_id",
     "corroborating_sources",
     "_conflicts",
     "_revision_cycles",
     "_distribution_branch",
     "_distribution_copy",
+    "_workbench_fields",
+    "_workbench_allowed_fields",
+    "_workbench_buyback_input",
     "_event_copy_key",
     "_event_forks",
     "_teaching_revision_scope",
@@ -621,12 +635,12 @@ def _resolve_unlabelled_actions(groups, unlabelled):
     return ambiguities
 
 
-def select_versions(rows, cutoff, *, table=None):
+def select_versions(rows, cutoff, *, table=None, buyback_progress=False):
     actions = table == "corporate_actions"
     current = _current_records(rows, cutoff, disclosure_branches=actions or table == "events")
     if actions:
         current = _resolve_distribution_aliases(_match_distribution_copies(current))
-    return _group_current(current, table, cutoff)
+    return _group_current(current, table, cutoff, buyback_progress=buyback_progress)
 
 
 def _current_records(rows, cutoff, *, disclosure_branches=False, collect_forks=False):
@@ -925,7 +939,7 @@ def _registered_amount(proof):
         return normalized.get("value")
 
 
-def _group_current(current, table, cutoff):
+def _group_current(current, table, cutoff, *, buyback_progress=False):
     groups, unlabelled = {}, []
     for row in current:
         event_copy = row.get("_event_copy_key")
@@ -970,6 +984,12 @@ def _group_current(current, table, cutoff):
             selected = _resolve_quoted_fields(versions, ("d",))
         elif table == "events" and all(row.get("kind") == "unlock" for row in versions):
             selected = _merge_unlock_versions(versions)
+        elif buyback_progress and table == "events" and len(versions) > 1 and all(
+            row.get("kind") == "buyback" for row in versions
+        ):
+            from .shareholder_events import merge_buyback_versions
+
+            selected = merge_buyback_versions(versions)
         else:
             selected = _merge_live(versions)
         if selected is not None:
@@ -977,7 +997,37 @@ def _group_current(current, table, cutoff):
     return result
 
 
-def _join_daily(rows, cutoff):
+_UNMATCHED_DAILY_OBSERVATIONS = {"missing_daily_value", "unmatched_daily_value"}
+
+
+def _selected_daily_proofs(fields, revisions):
+    candidates = [
+        (code, day, field, proof)
+        for (code, day), group in fields.items() for field, proofs in group.items() for proof in proofs
+    ]
+    origins = ("source_root", "product_id", "snapshot_id")
+    frame = pd.DataFrame(
+        [
+            (
+                code, day, field, *(proof.get(key) for key in origins),
+                proof.get("matched") or proof.get("_restricted_value")
+                or proof.get("observation_status") in _UNMATCHED_DAILY_OBSERVATIONS,
+            )
+            for code, day, field, proof in candidates
+        ],
+        columns=("code", "date", "field", *origins, "replacement_proven"),
+    )
+    live = _select_revisions(
+        frame, "daily_bars", revisions, match_fields=("field",), replacement_witness="replacement_proven",
+    )
+    selected = {}
+    for index in live.index:
+        code, day, field, proof = candidates[index]
+        selected.setdefault((code, day), {}).setdefault(field, []).append(proof)
+    return selected
+
+
+def _join_daily(rows, cutoff, revisions=()):
     fields = {}
     plain = {}
     for row in rows:
@@ -992,6 +1042,9 @@ def _join_daily(rows, cutoff):
             for proof in proofs if isinstance(proofs, list) else [proofs]:
                 if _known(proof["available_at"], cutoff):
                     group.setdefault(field, []).append(proof)
+    # A verified replacement may be known even when its quote value cannot be read.
+    if revisions:
+        fields = _selected_daily_proofs(fields, revisions)
     # Supplemental rows and native attestations use different storage formats but attest to the same field.
     residual = []
     for key, versions in plain.items():
@@ -1007,19 +1060,35 @@ def _join_daily(rows, cutoff):
     joined = []
     for (code, day), group in fields.items():
         row = dict(code=code, date=day, available_at=cutoff.isoformat())
+        restricted = []
         for field, records in group.items():
+            if any(proof.get("_restricted_value") for proof in records):
+                records = [proof for proof in records if not proof.get("_restricted_value")]
+                if not records:
+                    restricted.append(field)
             records = sorted(records, key=lambda proof: not proof.get("matched", True))
             if (proof := _resolve_group(records, quote_field=field)) is not None:
                 _apply_quote(row, field, proof)
-        if row.get("field_evidence") or row.get("_conflicts"):
+                if (
+                    field not in row and not (row.get("_conflicts") or {}).get(field)
+                    and proof.get("observation_status") in _UNMATCHED_DAILY_OBSERVATIONS
+                ):
+                    origins = proof.get("corroborating_sources") or [_quote_origin(proof)]
+                    row.setdefault("_conflicts", {})[field] = origins
+        if restricted:
+            row["_workbench_denied_native"] = tuple(sorted(restricted))
+        if row.get("field_evidence") or row.get("_conflicts") or restricted:
             joined.append(row)
     return joined + residual
 
 
-def _shape(rows, kind, request):
+def _shape(rows, kind, request, daily_revisions, calendar_revisions):
     result = []
     if kind == "daily_bars":
-        rows = _join_daily(rows, request.cutoff)
+        rows = _join_daily(rows, request.cutoff, daily_revisions)
+    if kind == "calendar":
+        current = calendar_records(rows, request.cutoff, calendar_revisions)
+        return pd.DataFrame(_group_current(current, kind, request.cutoff))
     for row in select_versions(rows, request.cutoff, table=kind):
         day = row.get("date")
         if day and day > str(request.trade_date) and kind not in ("memberships", "events", "calendar"):
@@ -1028,31 +1097,109 @@ def _shape(rows, kind, request):
     return pd.DataFrame(result)
 
 
-def _proof_fields(owner, ref, manifest, table, fields):
-    if not any(entry["table"] == "knowledge_evidence" for entry in manifest["table_files"]):
-        return {}
-    proof = owner.read_table(ref, "knowledge_evidence")
-    proof = proof[proof.table_name.eq(table)]
-    originals, result = {}, {}
-    for row in proof.itertuples(index=False):
-        if str(row.verified).lower() not in ("true", "1") or (
-            fields and str(row.record_key).split("|")[-1] not in fields
-        ):
+_BUSINESS_DATES = (
+    "date", "ex_date", "effective_date", "period", "report_period", "period_end",
+    "start", "end", "valid_from", "valid_to", "origin_date",
+)
+
+
+def _business_day(value, *, quarter=False):
+    if quarter and re.fullmatch(r"[0-9]{4}Q[1-4]", str(value)):
+        return pd.Period(value, freq="Q").end_time.date().isoformat()
+    return iso_day(value)
+
+
+def _business_days(row):
+    return [
+        _business_day(row[field], quarter=field in ("period", "report_period"))
+        for field in _BUSINESS_DATES if row.get(field)
+    ]
+
+
+def _registration_in_scope(owner, product, table, key):
+    if owner.product(product).get("fee_class") != "paid":
+        return True
+    parts = str(key).split("|", 2) if table.startswith("factor_input.") else str(key).split("|")
+    if len(parts) != 3:
+        return False
+    if table.startswith("factor_input."):
+        registered_table, code, _ = parts
+        grant = owner._grant(product) or {}
+        # The last component identifies the registration, not its business date.
+        # _supplementary verifies all business dates on the matched original.
+        return (
+            table == f"factor_input.{registered_table}"
+            and code in grant.get("codes", ())
+            and code.rsplit(".", 1)[-1] in grant.get("markets", ())
+        )
+    code, day, _ = parts
+    day = _business_day(day, quarter=table == "financial_reports")
+    return bool(day) and _supplementary_in_scope(owner, product, {"code": code, "date": day})
+
+
+def _project_supplementary(value, allowed):
+    metadata = {*_BUSINESS_DATES, *_PROVENANCE_KEYS, "code", "member"}
+    fact = {key: item for key, item in value.items() if key in metadata or key in allowed}
+    for name in ("field_evidence", "_conflicts", "_revision_cycles"):
+        if name in fact:
+            fact[name] = {key: item for key, item in fact[name].items() if key in allowed}
+    return fact
+
+
+def _proof_fields(owner, ref, manifest, table, fields, *, purpose, record_keys=None, metadata_at=None):
+    products = _permitted_products(owner, manifest, "knowledge_evidence", purpose)
+    frames, field_scopes = [], {}
+    for product_id in sorted(products):
+        permitted = _permission_fields(owner, manifest, "knowledge_evidence", product_id)
+        field_scopes[product_id] = permitted
+        requested = set(fields) if fields else None
+        if permitted is not None:
+            requested = permitted if requested is None else requested & permitted
+        if requested == set():
             continue
-        ref_key = row.evidence_ref, row.sha256
-        if ref_key not in originals:
-            originals[ref_key] = _read_close_attestations(owner, *ref_key)
-        for original in originals[ref_key].get((row.record_key, row.revision_id), ()):
-            if _same_public_instant(original.get("published_at"), row.published_at):
-                result.setdefault(row.record_key, []).append((row, original))
+        # Native evidence keys end with a field. Legacy supplementary keys end with an opaque row coordinate.
+        record_fields = (
+            tuple(sorted(requested)) if requested is not None and not table.startswith("factor_input.") else None
+        )
+        frames.append(owner.read_evidence_registrations(
+            ref, product_id=product_id, table=table, record_keys=record_keys, record_fields=record_fields,
+        ))
+    if not frames:
+        return {}
+    proof = pd.concat(frames, ignore_index=True)
+    registrations, result = defaultdict(list), {}
+    supplemental = table.startswith("factor_input.")
+    for row in proof.itertuples(index=False):
+        if str(row.verified).lower() not in ("true", "1"):
+            continue
+        if metadata_at is not None and not _known(row.published_at, metadata_at):
+            continue
+        if _registration_in_scope(owner, row.product_id, table, row.record_key):
+            registrations[row.product_id, row.evidence_ref, row.sha256].append(row)
+    for (product_id, name, digest), rows in registrations.items():
+        allowed = field_scopes[product_id]
+        project_value = (
+            partial(_project_supplementary, allowed=allowed) if supplemental and allowed is not None else None
+        )
+        versions = {(row.record_key, row.revision_id) for row in rows}
+        originals = _read_close_attestations(
+            owner, name, digest, record_versions=versions, project_value=project_value,
+            metadata_only=metadata_at is not None,
+        )
+        for row in rows:
+            for original in originals.get((row.record_key, row.revision_id), ()):
+                if _same_public_instant(original.get("published_at"), row.published_at):
+                    result.setdefault(row.record_key, []).append(
+                        (row, dict(original, registration_product_id=product_id))
+                    )
     return result
 
 
-def _attested(rows, columns, proofs, request):
+def _attested(rows, columns, proofs, request, *, replacement=False):
     observed = {}
     for row in rows:
         for field in columns:
-            if not pd.isna(row.get(field)):
+            if replacement or not pd.isna(row.get(field)):
                 observed.setdefault((row["code"], row["date"], field), []).append(row)
     selected = {}
     for coordinate, rows_at_key in observed.items():
@@ -1068,7 +1215,15 @@ def _attested(rows, columns, proofs, request):
             ]
             if not products:
                 continue
-            origin = next((row["source_ref"] for row in products if original.get("value") == row[field]), None)
+            values = [row for row in products if not pd.isna(row.get(field))]
+            origin = next((row["source_ref"] for row in values if original.get("value") == row[field]), None)
+            observation = {}
+            if replacement and origin is None:
+                observation = dict(
+                    observation_status="unmatched_daily_value" if values else "missing_daily_value",
+                    observed_source_ref=products[0]["source_ref"],
+                    observed_value=values[0][field] if values else None,
+                )
             candidates.append(
                 dict(
                     revision_id=proof.revision_id,
@@ -1080,7 +1235,9 @@ def _attested(rows, columns, proofs, request):
                     matched=origin is not None,
                     **{key: original[key] for key in _QUOTE_ATTRIBUTES if key in original},
                     product_id=original.get("product_id"),
+                    registration_product_id=proof.product_id,
                     source_ref=origin,
+                    **observation,
                     **({"coordinate": original["coordinate"]} if original.get("coordinate") else {}),
                 )
             )
@@ -1089,24 +1246,87 @@ def _attested(rows, columns, proofs, request):
     return selected
 
 
-def _authorized(owner, manifest, table, products, purpose):
+def _permission_fields(owner, manifest, table, product_id):
+    sources, permission = _permission_sources(owner, manifest, table, product_id)
+    policy = owner.product(product_id).get("permission") or {}
+    bounds = [
+        set(value) if isinstance(value, (list, tuple)) else set()
+        for entry in (permission, policy, *sources)
+        if "allowed_fields" in entry
+        for value in (entry["allowed_fields"],)
+    ]
+    return set.intersection(*bounds) if bounds else None
+
+
+def product_scope(owner, snapshot, manifest, *, table, product_id, purpose, subjects, start, end, fields):
+    """Intersect a selected product's documented scope with a request before reading."""
     try:
-        return all(_purpose_allowed(owner, manifest, table, product, purpose) for product in products)
+        allowed = _purpose_allowed(owner, manifest, table, product_id, purpose)
     except AccessDenied:
-        return False
+        allowed = False
+    code_scoped = "code" in TABLE_SCHEMAS[table]["columns"]
+    scope = _product_read_scope(
+        owner, product_id, codes=tuple(subjects) if subjects or code_scoped else None, start=start, end=end
+    ) if allowed else None
+    codes, left, right = scope if scope is not None else ((), start, end)
+    if allowed:
+        allowed_fields = _permission_fields(owner, manifest, table, product_id)
+        if allowed_fields is not None:
+            fields = tuple(field for field in fields if field in allowed_fields)
+    del snapshot  # The caller binds the returned scope to the selected asset.
+    return dict(allowed=scope is not None, subjects=codes, start=left, end=right, fields=tuple(fields),
+                reason="" if scope is not None else "产品未获准用于本次用途、对象或期间")
 
 
-def _daily_records(owner, ref, manifest, request, fields, codes, start, product):
+def _permitted_products(owner, manifest, table, purpose):
+    permitted = set()
+    for product_id in _table_products(manifest, table):
+        try:
+            if _purpose_allowed(owner, manifest, table, product_id, purpose):
+                permitted.add(product_id)
+        except AccessDenied:
+            continue
+    return permitted
+
+
+def _restricted_daily_proofs(owner, ref, manifest, raw, fields, request, purpose):
+    keys = {
+        f"{row.code}|{row.date}|{field}": (row.code, row.date, field)
+        for row in raw.itertuples(index=False) for field in fields
+    }
+    proofs = _proof_fields(
+        owner, ref, manifest, "daily_bars", fields, purpose=purpose, record_keys=tuple(keys),
+        metadata_at=request.cutoff,
+    )
+    rows = defaultdict(set)
+    for raw_row in raw.itertuples(index=False):
+        rows[raw_row.code, raw_row.date].add((raw_row.product_id, raw_row.source_ref))
+    for key, candidates in proofs.items():
+        code, day, field = keys[key]
+        for proof, original in candidates:
+            if any(
+                original.get("product_id") == product and original.get("source_ref", origin) == origin
+                for product, origin in rows[code, day]
+            ):
+                yield (code, day, field), dict(
+                    available_at=proof.published_at, product_id=original["product_id"],
+                    _restricted_value=True,
+                )
+
+
+def _daily_records(
+    owner, ref, manifest, request, fields, codes, start, product, purpose, proof_denials, *, replacement=False,
+):
     fields = tuple(field for field in fields if field in TABLE_SCHEMAS["daily_bars"]["columns"])
     if not fields or not codes or start > request.trade_date:
         return []
-    end = request.trade_date
-    if owner.product(product).get("fee_class") == "paid":
-        grant = owner._grant(product) or {}
-        start = max(start, date.fromisoformat(grant["start"]))
-        end = min(end, date.fromisoformat(grant["end"]))
-        if start > end:
-            return []
+    scope = product_scope(owner, ref, manifest, table="daily_bars", product_id=product, purpose=purpose,
+                          subjects=codes, start=start, end=request.trade_date, fields=fields)
+    if not scope["allowed"] or not (scope["fields"] or replacement):
+        return []
+    restricted = tuple(sorted(set(fields) - set(scope["fields"]))) if replacement else ()
+    fields = scope["fields"]
+    codes, start, end = scope["subjects"], scope["start"], scope["end"]
     raw = owner.read_range(
         ref,
         "daily_bars",
@@ -1116,8 +1336,22 @@ def _daily_records(owner, ref, manifest, request, fields, codes, start, product)
         product_id=product,
         columns=("code", "date", "product_id", "source_ref", *fields),
     )
-    proofs = _proof_fields(owner, ref, manifest, "daily_bars", fields)
-    selected = _attested(raw.to_dict("records"), fields, proofs, request)
+    evidence_products = _permitted_products(owner, manifest, "knowledge_evidence", purpose)
+    evidence_fields = [_permission_fields(owner, manifest, "knowledge_evidence", pid) for pid in evidence_products]
+    denied = {field for field in fields if evidence_fields and all(
+        allowed is not None and field not in allowed for allowed in evidence_fields
+    )}
+    if denied:
+        for row in raw.itertuples(index=False):
+            proof_denials[row.code, row.date].update(field for field in denied if pd.notna(getattr(row, field)))
+    keys = tuple(f"{row.code}|{row.date}|{field}" for row in raw.itertuples(index=False) for field in fields)
+    proofs = (
+        _proof_fields(owner, ref, manifest, "daily_bars", fields, purpose=purpose, record_keys=keys) if keys else {}
+    )
+    selected = _attested(raw.to_dict("records"), fields, proofs, request, replacement=replacement)
+    if restricted and not raw.empty:
+        for coordinate, proof in _restricted_daily_proofs(owner, ref, manifest, raw, restricted, request, purpose):
+            selected.setdefault(coordinate, []).append(proof)
     output = {}
     for (code, day, column), candidates in selected.items():
         item = output.setdefault((code, day), dict(code=code, date=day, field_evidence={}))
@@ -1127,16 +1361,10 @@ def _daily_records(owner, ref, manifest, request, fields, codes, start, product)
     return list(output.values())
 
 
-def _daily_start(request, calendar):
+def _daily_window_size(request):
+    if request.factor_id == "traded_amount":
+        return 1 if request.parameters["mode"] == "daily" else request.parameters["window"]
     params = request.parameters
-    if request.factor_id == "traded_amount" and params["mode"] == "daily":
-        return request.trade_date
-    if request.factor_id == "low_volatility_36m":
-        return (pd.Timestamp(request.trade_date) - pd.DateOffset(months=37)).date()
-    if request.factor_id in ("post_announcement_drift", "sector_rotation_score"):
-        return date(1990, 1, 1)
-    if params.get("months"):
-        return (pd.Timestamp(request.trade_date) - pd.DateOffset(months=params["months"])).date() - timedelta(days=15)
     size = max(
         (
             value
@@ -1157,18 +1385,153 @@ def _daily_start(request, calendar):
     ):
         size = max(size, params["window"] + params.get("skip", 0))
     count = size + 1
-    if request.factor_id == "pair_beta_drift":
+    if request.factor_id in ("pair_hedge_beta", "pair_cointegration", "pair_half_life"):
+        count = params["window"]
+    elif request.factor_id == "pair_beta_drift":
         count = 2 * params["window"]
     elif request.factor_id == "pair_extreme_spread":
         count = params["window"] + params["lookback"]
-    days = sorted(
-        {
-            row["date"]
-            for row in calendar
-            if row.get("is_trading_day") is True and row["date"] <= str(request.trade_date)
-        }
+    return count
+
+
+def calendar_market(code):
+    suffix = code.rsplit(".", 1)[-1]
+    return suffix if suffix in ("SH", "SZ", "BJ") else None
+
+
+def read_calendar_product(owner, ref, manifest, product_id, purpose, left, right, cutoff, *, replacement=False):
+    items = [item for item in manifest["items"] if item["product_id"] == product_id
+             and item.get("table", "calendar") == "calendar"]
+    stamps = [item.get("source", {}).get("published_at") for item in items]
+    if not any(_known(stamp, cutoff) for stamp in stamps):
+        return []
+    common = stamps[0] if len({_public_instant(stamp) for stamp in stamps}) == 1 else None
+    by_original = defaultdict(list)
+    if common is None:
+        for item, stamp in zip(items, stamps, strict=True):
+            for original in item.get("raw_files", ()):
+                path = original["path"]
+                by_original[path].append(stamp)
+                parts = path.split("/")
+                if parts[:2] == ["inherited", item.get("inherited_from")]:
+                    # Import copies the registered raw path at each hop. The table keeps its original reference.
+                    while len(parts) > 2 and parts[0] == "inherited" and parts[1] not in ("", ".", ".."):
+                        parts = parts[2:]
+                        by_original["/".join(parts)].append(stamp)
+    fields = ("date", "is_trading_day")
+    scope = product_scope(
+        owner, ref, manifest, table="calendar", product_id=product_id, purpose=purpose,
+        subjects=(), start=left, end=right, fields=fields,
     )
-    return date.fromisoformat(days[-min(len(days), count)]) if days else request.trade_date - timedelta(days=count * 3)
+    readable = set(scope["fields"]) == set(fields)
+    if not scope["allowed"] or not (readable or replacement):
+        return []
+    columns = (*fields, "source_ref") if readable else ("date", "source_ref")
+    frame = owner.read_range(
+        ref, "calendar", codes=(), start=scope["start"], end=scope["end"],
+        columns=columns, product_id=product_id,
+    )
+    records = []
+    for row in frame.itertuples(index=False):
+        candidates = by_original.get(row.source_ref, ())
+        published = common
+        if common is None and len({_public_instant(stamp) for stamp in candidates}) == 1:
+            published = candidates[0]
+        if _known(published, cutoff):
+            record = dict(
+                date=str(row.date), available_at=published,
+                product_id=product_id, source_ref=row.source_ref, snapshot_id=ref.snapshot_id,
+                source_root=str(owner.root.resolve()),
+            )
+            if readable:
+                record["is_trading_day"] = _query_boolean(row.is_trading_day)
+            else:
+                record["_restricted_calendar"] = True
+            records.append(record)
+    return records
+
+
+def calendar_records(rows, cutoff, revisions=()):
+    known = [row for row in rows if _known(row.get("available_at"), cutoff)]
+    if revisions and known:
+        frame = pd.DataFrame(known)
+        native = frame.reindex(columns=["source_root", "snapshot_id", "product_id"]).notna().all(axis=1)
+        live = _select_revisions(frame[native], "calendar", revisions)
+        retired = set(frame[native].index) - set(live.index)
+        known = [row for index, row in enumerate(known) if index not in retired]
+    return _current_records((row for row in known if not row.get("_restricted_calendar")), cutoff)
+
+
+def calendar_witnesses(rows, market=None, *, calendar_id=None):
+    """Pair each day with the original statements applicable to the requested market or calendar."""
+    common, shenzhen = defaultdict(list), defaultdict(list)
+    scope = market or calendar_id
+    for row in rows:
+        product_market = _archive_calendar_market(row.get("product_id"))
+        if product_market:
+            if scope == product_market:
+                shenzhen[row["date"]].append(row)
+            continue
+        if calendar_id and row.get("calendar_id"):
+            if row["calendar_id"] != calendar_id:
+                continue
+        elif scope and row.get("market") not in (None, "", scope):
+            continue
+        common[row["date"]].append(row)
+    return {
+        day: shenzhen[day] if _uses_sz_calendar(scope, {row.get("is_trading_day") for row in shenzhen[day]})
+        else common.get(day, [])
+        for day in common.keys() | shenzhen.keys()
+    }
+
+
+def applicable_sector_proxies(rows, request, code):
+    when = str(request.trade_date)
+    return [row for row in rows if row.get("code") == code and (row.get("date") or "") <= when
+            and (row.get("valid_from") or "9999") <= when <= (row.get("valid_to") or "9999")]
+
+
+def quote_subject(rows, request, code):
+    proxies = applicable_sector_proxies(rows, request, code)
+    if len(proxies) != 1:
+        return code
+    proxy = proxies[0]
+    if proxy.get("kind") in ("etf", "index"):
+        return proxy.get("symbol") or code
+    return code
+
+
+def open_calendar_days(calendar):
+    return {day for day, rows in calendar.items() if {row.get("is_trading_day") for row in rows} == {True}}
+
+
+def _daily_start(request, calendar, *, proxies=()):
+    params = request.parameters
+    if request.factor_id == "traded_amount" and params["mode"] == "daily":
+        return request.trade_date
+    if request.factor_id == "low_volatility_36m":
+        return (pd.Timestamp(request.trade_date) - pd.DateOffset(months=37)).date()
+    if request.factor_id in ("post_announcement_drift", "sector_rotation_score"):
+        return date(1990, 1, 1)
+    if params.get("months"):
+        return (pd.Timestamp(request.trade_date) - pd.DateOffset(months=params["months"])).date() - timedelta(days=15)
+    count = _daily_window_size(request)
+    observation = str(request.trade_date)
+    subjects = request.subjects
+    benchmark = params.get("benchmark")
+    if benchmark and request.factor_id in ("market_beta", "residual_volatility", "relative_strength"):
+        subjects = (*subjects, quote_subject(proxies, request, benchmark))
+    calendars = [open_calendar_days(calendar_witnesses(calendar, market))
+                 for market in {calendar_market(code) for code in subjects}]
+    if request.factor_id.startswith("pair_") and calendars:
+        calendars = [set.intersection(*calendars)]
+    starts = []
+    for days in calendars:
+        dated = sorted(day for day in days if day <= observation
+                       and not (request.factor_id == "pair_hedge_beta" and day == observation))
+        starts.append(date.fromisoformat(dated[-min(len(dated), count)]) if dated
+                      else request.trade_date - timedelta(days=count * 3))
+    return min(starts, default=request.trade_date - timedelta(days=count * 3))
 
 
 def _period_from_raw(value):
@@ -1183,8 +1546,12 @@ def _native_cash_quote(proof, original, raw, observed_at, matched):
     return dict(
         d=original["value"], fact_key=proof.record_key, evidence_ref=proof.evidence_ref,
         field_evidence={"d": {
-            **{key: original[key] for key in ("currency", "unit", "source_ref", "coordinate", "announcement_ref")
-               if key in original},
+            **{
+                key: original[key]
+                for key in ("currency", "unit", "source_ref", "coordinate", "announcement_ref",
+                            "registration_product_id")
+                if key in original
+            },
             "evidence_ref": proof.evidence_ref,
             "fact_key": proof.record_key,
             "available_at": original["published_at"],
@@ -1312,7 +1679,8 @@ def _native_records(table, frame, fields, proofs, *, owner, products):
                         observed_cash.add(id(original))
                         cash_quotes[version].append(_native_cash_quote(proof, original, raw, observed_at, matched))
                     else:
-                        verified.update({field: supplied, "evidence_ref": proof.evidence_ref})
+                        verified.update({field: supplied, "evidence_ref": proof.evidence_ref,
+                                         "registration_product_id": proof.product_id})
                         if financial:
                             observed_financial.add(id(original))
                             observation = {} if matched else dict(
@@ -1372,40 +1740,21 @@ def _supplementary_in_scope(owner, product_id, raw):
         code not in grant.get("codes", ()) or code.rsplit(".", 1)[-1] not in grant.get("markets", ()) for code in codes
     ):
         return False
-    coordinates = [
-        raw[field]
-        for field in (
-            "date",
-            "ex_date",
-            "effective_date",
-            "period",
-            "start",
-            "end",
-            "valid_from",
-            "valid_to",
-            "origin_date",
-        )
-        if raw.get(field)
-    ]
-    if not coordinates:
-        return False
-    try:
-        dates = [date.fromisoformat(str(value)).isoformat() for value in coordinates]
-    except ValueError:
-        return False
-    return all(grant.get("start", "~") <= day <= grant.get("end", "") for day in dates)
+    days = _business_days(raw)
+    return bool(days) and all(day and grant.get("start", "~") <= day <= grant.get("end", "") for day in days)
 
 
-_SECTOR_FACTORS = {
+
+MOMENTUM_PRICE_FACTORS = {
+    "price_momentum", "absolute_momentum", "risk_adjusted_momentum", "relative_strength", "short_reversal",
+}
+
+
+_SECTOR_FACTORS = MOMENTUM_PRICE_FACTORS | {
     "sma",
     "sma_filter",
     "sma_cross",
     "donchian_breakout",
-    "absolute_momentum",
-    "price_momentum",
-    "risk_adjusted_momentum",
-    "relative_strength",
-    "short_reversal",
     "price_deviation_z",
     "sector_rotation_score",
 }
@@ -1449,32 +1798,95 @@ def _fields(definition, request=None):
     return table_fields
 
 
+def _registered_supplementary_value(owner, table, proof, original):
+    raw = original.get("value")
+    if not isinstance(raw, dict) or not raw.get("code") or not raw.get("source_ref"):
+        return None
+    if (
+        original.get("product_id") != proof.product_id
+        or original.get("record_key") != f"{table}|{raw['code']}|{raw.get('coordinate', '')}"
+        or not _same_public_instant(raw.get("available_at", proof.published_at), proof.published_at)
+        or not _supplementary_in_scope(owner, proof.product_id, raw)
+    ):
+        return None
+    return raw
+
+
+def paid_registration_scope(owner, ref, product, candidates):
+    """Authenticate paid registry rows without handing the underlying fact values to the browser."""
+    permission = _permission_fields(owner, owner.load_manifest(ref), "knowledge_evidence", product)
+    allowed, reasons = [], set()
+    verifiable = []
+    for proof in candidates.itertuples():
+        if not _registration_in_scope(owner, product, proof.table_name, proof.record_key):
+            reasons.add("凭据登记对象或业务期间不在授权范围")
+        elif (
+            permission is not None and not proof.table_name.startswith("factor_input.")
+            and proof.record_key.rsplit("|", 1)[-1] not in permission
+        ):
+            reasons.add("凭据业务字段未获准")
+        else:
+            verifiable.append(proof.Index)
+    for (name, digest), rows in candidates.loc[verifiable].groupby(["evidence_ref", "sha256"]):
+        originals = _read_close_attestations(
+            owner, name, digest, record_versions=set(zip(rows.record_key, rows.revision_id, strict=True)),
+            project_value=partial(_project_supplementary, allowed=permission) if permission is not None else None,
+        )
+        for proof in rows.itertuples():
+            table, key = proof.table_name, proof.record_key
+            matched = [
+                original for original in originals.get((key, proof.revision_id), ())
+                if _same_public_instant(original.get("published_at"), proof.published_at)
+            ]
+            if not matched:
+                reasons.add("凭据登记的原件归属待证")
+                continue
+            if table.startswith("factor_input."):
+                for original in matched:
+                    raw = _registered_supplementary_value(owner, table.removeprefix("factor_input."), proof, original)
+                    if raw is None:
+                        reasons.add("凭据原件的对象、业务期间或登记归属未获证")
+                        break
+                    if not (raw.keys() - {*_BUSINESS_DATES, *_PROVENANCE_KEYS, "code", "member"}):
+                        reasons.add("凭据业务字段未获准")
+                        break
+                else:
+                    allowed.append(proof.Index)
+            else:
+                allowed.append(proof.Index)
+    return candidates.loc[allowed], reasons
+
+
 def _supplementary(store, source, definition, fields_by_table):
     """Read additional fields only through verified evidence registered in the selected asset."""
     tables = {}
     for owner, ref, document in selected_snapshot_assets(store, source, "knowledge_evidence"):
-        products = _table_products(document, "knowledge_evidence")
-        if not products or not _authorized(owner, document, "knowledge_evidence", products, definition.purpose):
+        products = _permitted_products(owner, document, "knowledge_evidence", definition.purpose)
+        if not products:
             continue
         for table in dict.fromkeys([*fields_by_table, "action_coverage"]):
             if table == "calendar":
                 continue
-            for group in _proof_fields(owner, ref, document, f"factor_input.{table}", ()).values():
+            registered = _proof_fields(
+                owner, ref, document, f"factor_input.{table}", fields_by_table.get(table, ()),
+                purpose=definition.purpose,
+            )
+            for group in registered.values():
                 for proof, original in group:
-                    raw = original.get("value")
-                    if not isinstance(raw, dict) or not raw.get("code") or not raw.get("source_ref"):
+                    if proof.product_id not in products:
                         continue
-                    if not _same_public_instant(raw.get("available_at", proof.published_at), proof.published_at):
+                    raw = _registered_supplementary_value(owner, table, proof, original)
+                    if raw is None:
                         continue
-                    if original.get("product_id") != proof.product_id:
-                        continue
-                    if not _supplementary_in_scope(owner, proof.product_id, raw):
-                        continue
-                    if original.get("record_key") != f"{table}|{raw['code']}|{raw.get('coordinate', '')}":
-                        continue
+                    data_fields = raw.keys() - {*_BUSINESS_DATES, *_PROVENANCE_KEYS, "code", "member"}
+                    if table == "events" and (allowed := _permission_fields(
+                        owner, document, "knowledge_evidence", proof.product_id,
+                    )) is not None:
+                        raw = dict(raw, _workbench_allowed_fields=tuple(sorted(allowed)))
                     tables.setdefault(table, []).append(
                         dict(
                             raw,
+                            _workbench_fields=tuple(sorted(data_fields)),
                             fact_key=proof.record_key,
                             available_at=raw.get("available_at", proof.published_at),
                             revision_id=proof.revision_id,
@@ -1483,6 +1895,7 @@ def _supplementary(store, source, definition, fields_by_table):
                             snapshot_id=ref.snapshot_id,
                             source_root=str(owner.root.resolve()),
                             product_id=proof.product_id,
+                            registration_product_id=proof.product_id,
                         )
                     )
     return tables
@@ -1494,7 +1907,16 @@ def _table_products(document, table):
 
 def _local(store, source, definition, request, label):
     gaps, daily_authorizations = [], []
+    proof_denials = defaultdict(set)
     manifest = None if isinstance(source, SnapshotRef) else load_library(store, source)
+    daily_revisions = tuple(
+        rule for rule in (manifest or {}).get("revision_selections", ()) if rule["table"] == "daily_bars"
+    )
+    calendar_revisions = tuple(
+        rule for rule in (manifest or {}).get("revision_selections", ()) if rule["table"] == "calendar"
+    )
+    daily_replacements = revision_replacements(daily_revisions, "daily_bars")
+    calendar_replacements = revision_replacements(calendar_revisions, "calendar")
     registered = {
         (entry["root"], entry["snapshot_id"])
         for entry in (manifest or {}).get("asset_snapshots", [])
@@ -1509,11 +1931,16 @@ def _local(store, source, definition, request, label):
     if kinds and all(value and "合成" in value for value in kinds):
         label["nature"] = "本地已发布 · 离线合成资料"
     fields_by_table = _fields(definition, request)
-    versions = _supplementary(store, source, definition, fields_by_table)
     if "daily_bars" in fields_by_table:
         fields_by_table = {**fields_by_table, "corporate_actions": ("m", "d", "same_share_basis")}
         if set(definition.subject_kind) & {"行业", "主题", "ETF"} or request.parameters.get("benchmark"):
             fields_by_table["index_bars"] = ("close", "amount_cny", "return_basis")
+    versions = _supplementary(store, source, definition, fields_by_table)
+    proxies = select_versions(versions.get("sector_proxies", []), request.cutoff, table="sector_proxies")
+    requested_quotes = request.subjects
+    if benchmark := request.parameters.get("benchmark"):
+        requested_quotes = (*requested_quotes, benchmark)
+    quote_codes = tuple(dict.fromkeys(quote_subject(proxies, request, code) for code in requested_quotes))
     # Resolve native members first. A group request uses member codes in its window, never today's universe.
     order = sorted(fields_by_table, key=lambda name: {"calendar": 0, "memberships": 1}.get(name, 2))
     for table in order:
@@ -1523,33 +1950,35 @@ def _local(store, source, definition, request, label):
             products = _table_products(document, table)
             if not products:
                 continue
-            if not _authorized(owner, document, table, products, definition.purpose):
-                if table not in definition.fields:
+            permitted = _permitted_products(owner, document, table, definition.purpose)
+            if permitted != products:
+                if table not in definition.fields and not permitted:
                     continue
+                restricted = ", ".join(sorted(products - permitted))
                 gaps.append(
                     dict(
                         subject=", ".join(request.subjects),
                         field=table,
                         period=str(request.trade_date),
                         source=label,
-                        reason=f"所选资产 {ref.snapshot_id} 缺少该用途许可",
+                        reason=f"所选资产 {ref.snapshot_id} 的产品 {restricted} 缺少该用途许可",
                     )
                 )
-                continue
-            proof_products = _table_products(document, "knowledge_evidence")
+                if not permitted:
+                    continue
+            products = permitted
+            proof_products = _permitted_products(owner, document, "knowledge_evidence", definition.purpose)
             proof_registered = manifest is None or (str(owner.root.resolve()), ref.snapshot_id) in registered
             proof_registered = (
                 proof_registered
                 and bool(proof_products)
-                and _authorized(owner, document, "knowledge_evidence", proof_products, definition.purpose)
             )
             if table == "daily_bars":
                 codes = list(request.subjects)
                 for item in ("benchmark", "market", "group", "exposure_benchmark"):
                     if value := request.parameters.get(item):
                         codes.append(str(value))
-                proxies = select_versions(versions.get("sector_proxies", []), request.cutoff)
-                codes.extend(row["symbol"] for row in proxies if row.get("symbol") and row.get("code") in codes)
+                codes.extend(quote_subject(proxies, request, code) for code in tuple(codes))
                 effective = select_versions(versions.get("memberships", []), request.cutoff)
                 codes.extend(
                     row["member"]
@@ -1565,8 +1994,10 @@ def _local(store, source, definition, request, label):
                     codes.extend(
                         str(child.parameters["benchmark"]) for child in children if child.parameters.get("benchmark")
                     )
-                    calendar = select_versions(versions.get("calendar", []), request.cutoff)
-                    start = min(_daily_start(query, calendar) for query in [request, *children])
+                    calendar = calendar_records(versions.get("calendar", []), request.cutoff, calendar_revisions)
+                    start = min(_daily_start(replace(
+                        query, subjects=tuple(quote_subject(proxies, query, code) for code in query.subjects)
+                    ), calendar, proxies=proxies) for query in [request, *children])
                     for product in sorted(products):
                         requested = tuple(dict.fromkeys(codes))
                         if owner.product(product).get("fee_class") == "paid":
@@ -1586,37 +2017,82 @@ def _local(store, source, definition, request, label):
                                     end=grant.get("end"),
                                 )
                             )
-                        rows.extend(_daily_records(owner, ref, document, request, fields, requested, start, product))
+                        granted = _permission_fields(owner, document, table, product)
+                        if granted is not None:
+                            for field in sorted(set(fields) - granted):
+                                gaps.append(dict(
+                                    subject=", ".join(requested), field=field, period=str(request.trade_date),
+                                    source=label, reason=f"产品 {product} 的字段未获准",
+                                ))
+                        rows.extend(_daily_records(
+                            owner, ref, document, request, fields, requested, start, product, definition.purpose,
+                            proof_denials, replacement=(str(owner.root.resolve()), ref.snapshot_id, product)
+                            in daily_replacements,
+                        ))
                 continue
-            frame = owner.read_table(ref, table)
-            if table == "calendar":
-                public = {}
-                for product in products:
-                    sources, _ = _permission_sources(owner, document, table, product)
-                    public[product] = next(
-                        (item["published_at"] for item in sources if _known(item.get("published_at"), request.cutoff)),
-                        None,
-                    )
-                frame["available_at"] = frame["product_id"].map(public)
-                frame["is_trading_day"] = (
-                    frame["is_trading_day"]
-                    .astype(str)
-                    .str.lower()
-                    .map({"true": True, "1": True, "false": False, "0": False})
-                )
-            proofs = _proof_fields(owner, ref, document, table, ()) if proof_registered and table != "calendar" else {}
+            columns = tuple(TABLE_SCHEMAS[table]["columns"])
+            code_scoped = "code" in columns
             if table in ("memberships", "security_status"):
                 fields = tuple(
-                    field
-                    for field in TABLE_SCHEMAS[table]["columns"]
-                    if field
-                    not in ("code", "date", "product_id", "source_ref", "available_at", "observed_at", "board_id")
+                    field for field in columns
+                    if field not in ("code", "date", "product_id", "source_ref", "available_at",
+                                     "observed_at", "board_id")
                 )
-            rows.extend(
-                dict(row, source_root=str(owner.root.resolve()), snapshot_id=ref.snapshot_id)
-                for row in _native_records(table, frame, fields, proofs, owner=owner, products=products)
-            )
-    tables = _selected_tables(versions, request)
+            for product in sorted(products):
+                granted = _permission_fields(owner, document, table, product)
+                if table == "calendar":
+                    rows.extend(read_calendar_product(
+                        owner, ref, document, product, definition.purpose, date.min, date.max, request.cutoff,
+                        replacement=(str(owner.root.resolve()), ref.snapshot_id, product) in calendar_replacements,
+                    ))
+                    continue
+                scope_codes, scope_start, scope_end = (() if code_scoped else None), date.min, date.max
+                if (
+                    table == "index_bars" and request.factor_id in MOMENTUM_PRICE_FACTORS
+                    and quote_codes != tuple(dict.fromkeys(requested_quotes))
+                ):
+                    scope_codes, scope_end = quote_codes, request.trade_date
+                    calendar = calendar_records(versions["calendar"], request.cutoff, calendar_revisions)
+                    scope_start = _daily_start(replace(request, subjects=quote_codes), calendar, proxies=proxies)
+                scope = _product_read_scope(
+                    owner, product, codes=scope_codes, start=scope_start, end=scope_end,
+                )
+                if scope is None:
+                    continue
+                codes, left, right = scope
+                selected_fields = fields if granted is None else tuple(field for field in fields if field in granted)
+                identity = {"code", "date", "product_id", "source_ref", "available_at", "report_period", "ex_date"}
+                selected_columns = columns if granted is None else tuple(
+                    column for column in columns if column in granted or column in identity
+                )
+                frame = owner.read_range(
+                    ref, table, codes=codes, start=left, end=right, columns=selected_columns, product_id=product,
+                    all_codes=code_scoped and not codes,
+                    evidence_columns=tuple(field for field in selected_fields if field not in columns),
+                )
+                if granted is not None:
+                    metadata = {*identity, "period", "revision_id", "supersedes"}
+                    for field in sorted(set(fields) - granted - metadata):
+                        gaps.append(dict(
+                            subject=", ".join(request.subjects), field=field, period=str(request.trade_date),
+                            source=label, reason=f"产品 {product} 的字段未获准",
+                        ))
+                proofs = (
+                    _proof_fields(owner, ref, document, table, selected_fields, purpose=definition.purpose)
+                    if proof_registered and selected_fields else {}
+                )
+                rows.extend(
+                    dict(row, source_root=str(owner.root.resolve()), snapshot_id=ref.snapshot_id)
+                    for row in _native_records(table, frame, selected_fields, proofs, owner=owner, products={product})
+                )
+    access = {}
+    for table in dict.fromkeys([*fields_by_table, "knowledge_evidence"]):
+        for owner, ref, document in selected_snapshot_assets(store, source, table):
+            for product_id in sorted(_permitted_products(owner, document, table, definition.purpose)):
+                key = (str(owner.root.resolve()), ref.snapshot_id, table, product_id)
+                access[key] = dict(root=key[0], id=ref.snapshot_id, table=table, product=product_id,
+                                   grant=owner._grant(product_id))
+    tables = _selected_tables(versions, request, daily_revisions, calendar_revisions)
     if "daily_bars" in tables and "index_bars" in tables and not tables["index_bars"].empty:
         indexes = tables["index_bars"]
         indexes = (
@@ -1624,11 +2100,18 @@ def _local(store, source, definition, request, label):
         )
         if indexes is not None:
             tables["daily_bars"] = pd.concat([tables["daily_bars"], indexes], ignore_index=True)
-    return FactorFacts(tables, label, gaps, versions, daily_authorizations)
+    return FactorFacts(
+        tables, label, gaps, versions, daily_authorizations, tuple(access.values()),
+        daily_proof_denials=dict(proof_denials), daily_revision_selections=daily_revisions,
+        calendar_revision_selections=calendar_revisions,
+    )
 
 
-def _selected_tables(versions, request):
-    return {table: _shape(rows, table, request) for table, rows in versions.items()}
+def _selected_tables(versions, request, daily_revisions=(), calendar_revisions=()):
+    return {
+        table: _shape(rows, table, request, daily_revisions, calendar_revisions)
+        for table, rows in versions.items()
+    }
 
 
 _DISCLOSURE_FIELDS = ("parent_net_profit", "forecast_lower", "forecast_upper")
@@ -1838,7 +2321,7 @@ def known_records(facts, table, request, code):
         return facts.records(table, code)
     versions = facts.versions[table]
     if table == "daily_bars":
-        versions = _join_daily(versions, request.cutoff)
+        versions = _join_daily(versions, request.cutoff, facts.daily_revision_selections)
     return [
         row
         for row in select_versions(versions, request.cutoff, table=table)

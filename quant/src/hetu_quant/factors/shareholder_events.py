@@ -1,5 +1,6 @@
 """Observable shareholder events and distribution terms."""
 
+from collections import defaultdict
 from datetime import datetime
 
 import pandas as pd
@@ -9,6 +10,7 @@ from .core import (
     MissingFact,
     by_subject,
     check_conflict,
+    check_revision_cycle,
     event_in_window,
     iso_day,
     number,
@@ -19,7 +21,7 @@ from .core import (
 )
 from .market_activity import _current, _scale_shares
 from .series import daily
-from .sources import select_distributions
+from .sources import _BUSINESS_DATES, _event_publication_identities, _merge_live, select_distributions, select_versions
 
 
 def event_records(facts, code, kind, *, validate=True, effective_window=None, selected=None, conflict_fields=None):
@@ -56,10 +58,11 @@ def event_records(facts, code, kind, *, validate=True, effective_window=None, se
     return rows
 
 
-def _event_outputs(facts, request, kind, rate, unit):
+def _event_outputs(facts, request, kind, rate, unit, *, conflict_fields=None, selected=None, project=None):
     rows, gaps = [], []
     for code in request.subjects:
-        events = event_records(facts, code, kind)
+        originals = None if selected is None else [row for row in selected if row.get("code") == code]
+        events = event_records(facts, code, kind, conflict_fields=conflict_fields, selected=originals)
         if event_id := request.parameters.get("event_id"):
             events = [row for row in events if row.get("event_id") == event_id]
         if not events:
@@ -67,20 +70,13 @@ def _event_outputs(facts, request, kind, rate, unit):
         for event in events:
             try:
                 value, detail = rate(event)
-                rows.append(
-                    output(
-                        code,
-                        value,
-                        unit,
-                        dict(
-                            detail,
-                            event_id=event.get("event_id"),
-                            published_at=event["available_at"],
-                            effective_date=event.get("effective_date"),
-                        ),
-                        [event],
-                    )
+                row = output(
+                    code, value, unit,
+                    dict(detail, event_id=event.get("event_id"),
+                         published_at=event["available_at"], effective_date=event.get("effective_date")),
+                    [event],
                 )
+                rows.append(project(row) if project else row)
             except MissingFact as error:
                 error.subject = error.subject or code
                 error.period = error.period or event.get("effective_date") or event["available_at"]
@@ -101,16 +97,182 @@ def buyback_plan(facts, request):
     )
 
 
+_PROGRESS_DENOMINATORS = {"plan_amount_upper", "plan_amount"}
+_PROGRESS_ORIGIN = {
+    *_BUSINESS_DATES, "code", "available_at", "published_at",
+    "announcement_ref", "source_ref", "evidence_ref", "coordinate", "fact_key", "record_key",
+    "registered_table", "revision_id", "supersedes", "snapshot_id", "source_root",
+    "product_id", "registration_product_id",
+}
+
+
+def _progress_event_evidence(row, fields, *, requires_plan_type=False):
+    proof = {key: row[key] for key in _PROGRESS_ORIGIN | fields if key in row}
+    if "field_evidence" in row:
+        proof["field_evidence"] = {
+            field: item for field, item in (row["field_evidence"] or {}).items() if field in fields
+        }
+    if "corroborating_sources" in row:
+        proof["corroborating_sources"] = [
+            _progress_event_evidence(origin, fields) for origin in row["corroborating_sources"] or ()
+        ]
+    if "_workbench_fields" in row:
+        used = fields & set(row["_workbench_fields"] or ())
+        if requires_plan_type:
+            used.add("plan_amount_basis")
+        proof["_workbench_fields"] = tuple(sorted(used))
+    return proof
+
+
+def _progress_fields(basis):
+    return {"event_id", "kind", "paid", "currency", "plan_amount_basis", basis}
+
+
+def buyback_progress_evidence(result_row):
+    """Project a completed row using its recorded calculation rather than a new read."""
+    basis = result_row["components"].get("basis")
+    if basis not in _PROGRESS_DENOMINATORS:
+        return result_row
+    evidence = []
+    for row in result_row["inputs"]:
+        original = row.get("_workbench_buyback_input") or row
+        if parts := original.get("_workbench_buyback_parts"):
+            evidence.extend(parts)
+            continue
+        evidence.append(_progress_event_evidence(original, _progress_fields(basis), requires_plan_type=True))
+    return dict(result_row, inputs=evidence)
+
+
+def buyback_progress_inputs(row):
+    """Select the authorized terms needed for this event's particular denominator."""
+    coordinate = dict(event=row.get("event_id"), subject=row.get("code"),
+                      period=row.get("effective_date") or row.get("available_at"))
+    for field in ("kind", "event_identity", "plan_amount_basis"):
+        check_conflict(row, field)
+    original = row.get("_workbench_buyback_input") or row
+
+    def authorized(field, *, suffix=""):
+        allowed = original.get("_workbench_allowed_fields")
+        require(
+            allowed is None or field in allowed,
+            field, f"{field} 补证字段未获准{suffix}",
+            **coordinate, evidence=[_progress_event_evidence(original, {"kind", "event_id"})],
+        )
+
+    authorized("plan_amount_basis", suffix="，分母待证")
+    authorized("paid")
+    check_revision_cycle(row, "paid")
+    check_conflict(row, "paid")
+    paid = number(original, "paid")
+    fixed = original.get("plan_amount_basis") == "fixed"
+    basis = "plan_amount" if fixed else "plan_amount_upper"
+    authorized(basis)
+    check_revision_cycle(row, basis)
+    check_conflict(row, basis)
+    require(
+        original.get(basis) is not None, basis,
+        "固定金额方案缺计划金额原件" if fixed else "分母待证：缺区间上限或可证的固定金额方案",
+        **coordinate, evidence=[_progress_event_evidence(original, {"kind", "event_id", "plan_amount_basis"})],
+    )
+    denominator = positive(number(original, basis), basis)
+    authorized("currency")
+    check_conflict(row, "currency")
+    require(original.get("currency") == "CNY", "currency", "计划及付款需同人民币金额口径", **coordinate)
+    require(paid >= 0, "paid", "实付金额不能为负数", **coordinate)
+    return dict(paid=paid, plan_amount=denominator, basis=basis, currency=original["currency"])
+
+
+def merge_buyback_versions(versions):
+    """An independent, complete original can supply progress without a cropped copy."""
+    def complete_candidates(originals):
+        for original in originals:
+            try:
+                yield original, buyback_progress_inputs(original)["basis"]
+            except MissingFact:
+                continue
+
+    merged = _merge_live(versions)
+    complete = list(complete_candidates(versions))
+    type_restricted = None
+    if not complete:
+        by_announcement = defaultdict(list)
+        for row in versions:
+            for identity in _event_publication_identities(row):
+                by_announcement[identity].append(row)
+        for linked in by_announcement.values():
+            if len(linked) < 2:
+                continue
+            scopes = [row.get("_workbench_allowed_fields") for row in linked]
+            allowed = None if any(scope is None for scope in scopes) else set().union(*scopes)
+            candidate = dict(_merge_live(linked), _workbench_allowed_fields=allowed)
+            implicit_terms = None
+            if candidate.get("plan_amount_basis") is None:
+                # Only a terms record can establish that its plan type is absent.
+                field = "plan_amount_upper" if candidate.get("plan_amount_upper") is not None else "plan_amount"
+                terms = [i for i, row in enumerate(linked) if row.get(field) is not None]
+                if terms:
+                    terms_with_type_access = next(
+                        (i for i in terms if scopes[i] is None or "plan_amount_basis" in scopes[i]), None,
+                    )
+                    if terms_with_type_access is None:
+                        type_restricted = linked[terms[0]]
+                        continue
+                    if field == "plan_amount_upper":
+                        implicit_terms = terms_with_type_access
+            for original, basis in complete_candidates([candidate]):
+                assigned = defaultdict(set)
+                for field in _progress_fields(basis):
+                    if implicit_terms is not None and field in ("plan_amount_basis", "plan_amount_upper"):
+                        assigned[implicit_terms].add(field)
+                    elif (index := next((i for i, source in enumerate(linked) if source.get(field) is not None),
+                                        None)) is not None:
+                        assigned[index].add(field)
+                parts = [
+                    _progress_event_evidence(
+                        linked[i], fields | {"kind", "event_id"}, requires_plan_type="plan_amount_basis" in fields,
+                    )
+                    for i, fields in assigned.items()
+                ]
+                stamp = max((origin["available_at"] for origin in parts), key=datetime.fromisoformat)
+                complete.append((dict(original, available_at=stamp, _workbench_buyback_parts=parts), basis))
+
+    if not complete:
+        if type_restricted is not None:
+            return dict(merged, _workbench_buyback_input=type_restricted)
+        # A bookkeeping ID identifies the group but is not evidence that numbers from
+        # unrelated partial records can be combined. A single original still diagnoses a missing term.
+        try:
+            buyback_progress_inputs(dict(merged, _workbench_allowed_fields=None))
+        except MissingFact:
+            return dict(merged, _workbench_buyback_input=versions[0])
+        conflicts = [_progress_event_evidence(row, {"kind", "event_id"}) for row in versions]
+        return dict(merged, _conflicts={**(merged.get("_conflicts") or {}), "event_identity": conflicts})
+
+    original = complete[0][0]
+    if len({basis for _, basis in complete}) > 1:
+        conflicts = [
+            dict(
+                _progress_event_evidence(row, {"event_id", "kind", "plan_amount_basis", basis}),
+                value="fixed" if basis == "plan_amount" else "range",
+            )
+            for row, basis in complete
+        ]
+        merged["_conflicts"] = {**(merged.get("_conflicts") or {}), "plan_amount_basis": conflicts}
+    return dict(merged, available_at=original["available_at"], _workbench_buyback_input=original)
+
+
 def buyback_progress(facts, request):
     def calculate(row):
-        basis = "plan_amount_upper" if row.get("plan_amount_upper") is not None else "plan_amount"
-        paid = number(row, "paid")
-        denominator = positive(number(row, basis), basis)
-        require(row.get("currency") == "CNY", "currency", "计划及付款需同人民币金额口径")
-        require(paid >= 0, "paid", "实付金额不能为负数")
-        return paid / denominator, dict(paid=paid, plan_amount=denominator, basis=basis)
+        detail = buyback_progress_inputs(row)
+        return detail["paid"] / detail["plan_amount"], detail
 
-    return _event_outputs(facts, request, "buyback", calculate, "比例")
+    originals = facts.versions.get("events")
+    selected = (None if originals is None else
+                select_versions(originals, request.cutoff, table="events", buyback_progress=True))
+    return _event_outputs(
+        facts, request, "buyback", calculate, "比例",
+        conflict_fields=(), selected=selected, project=buyback_progress_evidence,
+    )
 
 
 def buyback_price_cap(facts, request):

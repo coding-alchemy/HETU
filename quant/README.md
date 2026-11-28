@@ -32,6 +32,10 @@ HETU_FACTOR_EVIDENCE_ROOT="$PWD/.hetu/quant/factor-evidence" \
 
 `HETU_FACTOR_EVIDENCE_ROOT` 指向包含 `factor-selftests/` 的目录。复用其他量化虚拟环境时，可将 `hetu_quant_python` 设为该环境的 Python 路径。工作台在「因子库」按因子、版本和参数读取已保存的执行收据，并显示实际读取的目录。
 
+在「因子库」搜索因子，打开「用教学样例试算」可带入观察日、对象及默认参数。调整表单参数后点「计算所选输入」，完成后在读数或缺口下打开相关证据。也可在「数据 → 因子输入」选择固定发布查询，再把一条记录带回试算。需要读取其它数据根时，启动前设定 `HETU_DATA_ROOT`。本地发布须有 `factor_calculation` 用途许可才能用于试算。
+
+因子试算、数据许可和验收边界见[因子试验工作台实现](../specs/2026-11-26-quant-factor-workbench-implementation.md)。
+
 配置、任务预览／执行／恢复及结果使用见[统一使用手册](../docs/quant-research-platform-usage.md)。字段和存储见[数据字典](DATA.md)，验收见[统一实现与验收](../specs/2026-11-07-quant-research-platform-implementation.md)。仅需数据管理时可使用[独立数据模块](../data/README.md)。
 
 ## 开发检查

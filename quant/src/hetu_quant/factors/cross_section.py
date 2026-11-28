@@ -107,10 +107,6 @@ def component_requests(request):
             raise MissingFact(f"{path}.{key}", "未识别的分量配置")
         nested = settings.get("parameters", {})
         require(isinstance(nested, dict), f"{path}.parameters", "子因子参数需要 JSON 对象")
-        accepted = set().union(*(preset.keys() for preset in definition.presets.values()))
-        extras = {"forecast_aggregation"} if name in ("earnings_surprise", "expected_growth") else set()
-        unknown = set(nested) - accepted - extras
-        require(not unknown, f"{path}.parameters.{min(unknown) if unknown else ''}", "未识别的子因子参数")
         # 已批准的排名与合成旧请求以父窗口指定不跳期动量。明确的子参数优先。
         if name == "price_momentum" and not nested and "window" in request.parameters:
             nested = {"window": request.parameters["window"], "skip": 0}
@@ -226,13 +222,14 @@ def _single(facts, request, kind):
         detail.update(exposures)
         members = [*members, *extra]
         unit = rows[0]["unit"]
+    inputs = [*members, *(item for row in rows for item in row["inputs"])]
     result = [
         output(
             r["subject"],
             float(value),
             unit,
             dict(detail, raw=r["value"], component=name, parameters=r["parameters"]),
-            [*r["inputs"], *members],
+            inputs,
         )
         for r, value in zip(rows, transformed, strict=True)
     ]
@@ -262,9 +259,10 @@ def weighted_factor_score(facts, request):
     require(isinstance(components, dict) and components, "components", "需要事前声明合成分量")
     values = np.zeros(len(subjects))
     details = {subject: {} for subject in subjects}
-    origins = {subject: list(members) for subject in subjects}
+    inputs = list(members)
     for name, settings in components.items():
         source = _source_rows(facts, request, subjects, name)
+        inputs.extend(item for row in source for item in row["inputs"])
         raw = [row["value"] for row in source]
         applied = raw
         transformations = {}
@@ -273,8 +271,7 @@ def weighted_factor_score(facts, request):
             applied, transformations["clip"] = _clip(applied, *limits)
         if mode := settings.get("neutralize"):
             applied, transformations["neutralize"], extra = _neutralize(facts, request, source, applied, mode)
-            for subject in subjects:
-                origins[subject].extend(extra)
+            inputs.extend(extra)
         z = robust_z(applied, number(request.parameters, "epsilon"))
         weight, direction = number(settings, "weight"), number(settings, "direction")
         require(weight >= 0 and direction in (-1, 1), name, "权重非负，方向必须为 +1 或 −1")
@@ -290,7 +287,6 @@ def weighted_factor_score(facts, request):
                 unit=source[i]["unit"],
                 **({"weight_source": settings["source"]} if "source" in settings else {}),
             )
-            origins[subject].extend(source[i]["inputs"])
     issues = [MissingFact("memberships", "仅能证明已证子集，原池分母未知")] if not complete else []
     rows = [
         output(
@@ -298,7 +294,7 @@ def weighted_factor_score(facts, request):
             float(value),
             "分数",
             dict(components=details[subject], denominator=len(subjects), complete=complete),
-            origins[subject],
+            inputs,
         )
         for subject, value in zip(subjects, values, strict=True)
     ]
@@ -322,9 +318,13 @@ def _benchmark_exposures(facts, request, rows, benchmark):
     beta_request = replace(
         combined, parameters={**combined.parameters, "window": combined.parameters.get("beta_window", 60)}
     )
-    betas = {row["subject"]: row["value"] for row in market_beta(facts, beta_request).rows}
-    styles = {row["subject"]: row["value"] for row in price_momentum(facts, combined).rows}
-    caps = {row["subject"]: row["value"] for row in total_market_cap(facts, combined).rows}
+    beta_rows = market_beta(facts, beta_request).rows
+    style_rows = price_momentum(facts, combined).rows
+    cap_rows = total_market_cap(facts, combined).rows
+    betas, styles, caps = (
+        {row["subject"]: row["value"] for row in sampled} for sampled in (beta_rows, style_rows, cap_rows)
+    )
+    inputs = [*members, *(item for row in (*beta_rows, *style_rows, *cap_rows) for item in row["inputs"])]
     industries = {}
     for code in codes:
         classes = [
@@ -334,6 +334,7 @@ def _benchmark_exposures(facts, request, rows, benchmark):
         ]
         require(len(classes) == 1 and classes[0].get("industry"), "industry", "缺基准暴露所需行业", subject=code)
         industries[code] = classes[0]["industry"]
+        inputs.extend(classes)
     require(all(set(codes) <= set(item) for item in (betas, styles, caps)), "exposure", "基准暴露所需事实缺失")
     groups = sorted(set(industries.values()))
     exposures = {
@@ -356,6 +357,7 @@ def _benchmark_exposures(facts, request, rows, benchmark):
         for group in groups
     }
     for row in rows:
+        row["inputs"] = [*row["inputs"], *inputs]
         own = exposures[row["subject"]]
         difference = {key: own[key] - average[key] for key in ("size", "beta", "style")}
         difference["industry"] = {group: own["industry"][group] - average["industry"][group] for group in groups}

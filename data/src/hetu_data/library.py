@@ -354,7 +354,14 @@ def publish_library(store, *, asset_snapshots, previous=None):
     return ref
 
 
-def _select_revisions(frame, table, revisions):
+def revision_replacements(revisions, table):
+    return {
+        (rule["root"], rule["selected_snapshot_id"], rule["product_id"])
+        for rule in revisions if rule["table"] == table
+    }
+
+
+def _select_revisions(frame, table, revisions, *, match_fields=(), replacement_witness=None):
     clock = next((key for key in ("date", "ex_date") if key in frame), None)
     if clock is None or frame.empty:
         return frame
@@ -366,8 +373,12 @@ def _select_revisions(frame, table, revisions):
         mask &= frame[clock].between(rule["start"], rule["end"])
         if "code" in frame:
             mask &= frame.code.isin(rule["codes"])
-        selected = frame[mask & frame.snapshot_id.eq(rule["selected_snapshot_id"])]
+        replacement = mask & frame.snapshot_id.eq(rule["selected_snapshot_id"])
+        if replacement_witness is not None:
+            replacement &= frame[replacement_witness].eq(True)
+        selected = frame[replacement]
         keys = ["code", clock] if "code" in frame else [clock]
+        keys.extend(match_fields)
         selected_keys = set(selected[keys].itertuples(index=False, name=None))
         old = frame[mask & frame.snapshot_id.eq(rule["superseded_snapshot_id"])]
         superseded = [index for index, key in zip(old.index, old[keys].itertuples(index=False, name=None), strict=True)
@@ -414,13 +425,20 @@ def read_scoped_product(owner, ref, name, *, codes, start, end, columns, product
     return owner.read_range(ref, name, codes=codes or (), start=start, end=end, columns=columns, product_id=product_id)
 
 
-def _read_library_range(store, manifest, name, *, codes, start, end, columns, product_id=None, products_by_asset=None):
+def _read_library_range(
+    store, manifest, name, *, codes, start, end, columns, product_id=None, products_by_asset=None, browse_limits=None,
+    browse_fields=None, project=False,
+):
     schema = TABLE_SCHEMAS.get(name)
     if not schema or not columns or not set(columns).issubset((*schema["columns"], *_PROVENANCE)):
         raise ValueError("unknown table or column")
     if start > end:
         raise ValueError("start must not exceed end")
     frames = []
+    masked_replacements = (
+        revision_replacements(manifest["revision_selections"], name)
+        if browse_fields is not None and name == "calendar" else set()
+    )
     eligible = {
         (row["root"], row["snapshot_id"]) for row in manifest["table_files"]
         if row["table"] == name and (product_id is None or row["product_id"] == product_id)
@@ -436,28 +454,50 @@ def _read_library_range(store, manifest, name, *, codes, start, end, columns, pr
             continue
         owner, ref, _ = _locked_asset(store, asset)
         for pid in products:
+            read_columns = tuple(schema["columns"])
+            coordinates = {"product_id", "source_ref", *_PROVENANCE}
+            readable = True
+            if browse_fields is not None:
+                allowed = browse_fields.get((*key, name, pid))
+                readable = allowed is not None and set(columns) - coordinates <= allowed
+                if not readable and (allowed is None or (*key, pid) not in masked_replacements):
+                    continue
+            if not readable:
+                read_columns = ("date", "product_id")
+            elif project or browse_fields is not None:
+                revision_keys = {"code", "date", "ex_date"}
+                read_columns = tuple(field for field in read_columns if field in coordinates | revision_keys
+                                     or field in columns)
             if products_by_asset is None:
                 frame = owner.read_range(ref, name, codes=codes, start=start, end=end,
-                                         columns=tuple(schema["columns"]), product_id=pid)
+                                         columns=read_columns, product_id=pid)
             else:
-                frame = read_scoped_product(owner, ref, name, codes=codes, start=start, end=end,
-                                            columns=tuple(schema["columns"]), product_id=pid)
+                requested_codes, left, right = (browse_limits or {}).get((*key, name, pid), (codes, start, end))
+                if "code" in schema["columns"]:
+                    requested_codes = tuple(code for code in requested_codes if code in codes)
+                if left > right:
+                    continue
+                frame = read_scoped_product(owner, ref, name, codes=requested_codes, start=left, end=right,
+                                            columns=read_columns, product_id=pid)
             if not frame.empty:
-                frames.append(frame.assign(source_root=str(owner.root.resolve()), snapshot_id=ref.snapshot_id))
+                frames.append(frame.assign(
+                    source_root=str(owner.root.resolve()), snapshot_id=ref.snapshot_id, _readable=readable,
+                ))
     if not frames:
         return pd.DataFrame({
             column: pd.Series(dtype="float64" if query_column(name, column).startswith("TRY_CAST") else "object")
             for column in columns
         })
     merged = _select_revisions(pd.concat(frames, ignore_index=True), name, manifest["revision_selections"])
+    merged = merged.loc[merged["_readable"]]
     for asset in manifest["asset_snapshots"]:
         if asset.get("original_root"):
             relocated = merged.source_root.eq(asset["root"]) & merged.snapshot_id.eq(asset["snapshot_id"])
             merged.loc[relocated, "source_root"] = asset["original_root"]
-    fact_columns = [c for c in schema["columns"] if c != "source_ref"]
+    fact_columns = [c for c in schema["columns"] if c != "source_ref" and c in merged]
     order = [column for column in ("code", "date", "ex_date", "product_id", *_PROVENANCE, "source_ref")
              if column in merged]
-    return merged.drop_duplicates(fact_columns).sort_values(order).loc[:, list(columns)].reset_index(drop=True)
+    return merged.drop_duplicates(fact_columns).sort_values(order).reindex(columns=columns).reset_index(drop=True)
 
 
 def _archive_factor_aliases(store, document, policy=None):
@@ -580,7 +620,8 @@ def _select_archive_observations(bars, policy):
 
 
 def query_library(store, ref, *, codes, start, end, markets=(), columns=ARCHIVE_COLUMNS, predicates=(),
-                  daily_products=None, auxiliary_products=None):
+                  daily_products=None, auxiliary_products=None, browse_limits=None, browse_fields=None,
+                  _scoped_bars=None):
     """Query registered rows, optionally limiting tables to selected products per (root, snapshot ID)."""
     if start > end:
         raise ValueError("start must not exceed end")
@@ -600,14 +641,18 @@ def query_library(store, ref, *, codes, start, end, markets=(), columns=ARCHIVE_
     manifest = load_library(store, ref)
     selected = tuple(code for code in codes if not markets or code.rsplit(".", 1)[-1] in markets)
 
-    def read(table, fields, product_id=None):
-        if not selected:
+    def read(table, fields, product_id=None, *, subjects=None):
+        codes_to_read = selected if subjects is None else subjects
+        if not codes_to_read:
             return pd.DataFrame(columns=fields)
         products = daily_products if table == "daily_bars" else (auxiliary_products or {}).get(table)
-        return _read_library_range(store, manifest, table, codes=selected, start=start, end=end,
-                                   columns=fields, product_id=product_id, products_by_asset=products)
+        return _read_library_range(
+            store, manifest, table, codes=codes_to_read, start=start, end=end, columns=fields,
+            product_id=product_id, products_by_asset=products, browse_limits=browse_limits, browse_fields=browse_fields,
+            project=table == "securities",
+        )
 
-    bars = read("daily_bars", (*ARCHIVE_COLUMNS, *_PROVENANCE))
+    bars = read("daily_bars", (*ARCHIVE_COLUMNS, *_PROVENANCE)) if _scoped_bars is None else _scoped_bars
     policy = archive_source_policy(manifest)
     source_exit_rule = bool(policy and policy.get("tushare_delist_date_exclusive") is True)
     policy_days = policy.get("object_days", ()) if policy else ()
@@ -671,7 +716,9 @@ def query_library(store, ref, *, codes, start, end, markets=(), columns=ARCHIVE_
         gaps = pd.concat([gaps, pd.DataFrame([
             dict(code=code, start=day, end=day, reason="invalid_bar_fields") for code, day in sorted(field_issues)
         ])], ignore_index=True)
-    has_conflict = gaps.reason.isin(("conflicting_bars", "conflicting_trade_evidence", "invalid_bar_fields")).any()
+    has_blocking_gap = gaps.reason.isin(
+        ("conflicting_bars", "conflicting_trade_evidence", "invalid_bar_fields", "exit_boundary_unknown")
+    ).any()
     observations = []
     if policy and "observation_days" in policy:
         display = {key: label for key, label in policy["observation_days"].items()
@@ -681,9 +728,12 @@ def query_library(store, ref, *, codes, start, end, markets=(), columns=ARCHIVE_
         )
         if not observation_gaps.empty:
             gaps = pd.concat([gaps, observation_gaps], ignore_index=True)
-    status = "limited" if has_conflict or auxiliary_limits or observations else manifest["status"]
+    status = "limited" if has_blocking_gap or auxiliary_limits or observations else manifest["status"]
     filtered = filter_bars(bars, columns=tuple(c for c in columns if c not in _PROVENANCE), predicates=predicates)
-    return dict(selection=selection, status=status, bars=filtered.join(bars[list(_PROVENANCE)]),
+    provenance = list(_PROVENANCE)
+    if _scoped_bars is not None and "_quote_source" in bars:
+        provenance.append("_quote_source")
+    return dict(selection=selection, status=status, bars=filtered.join(bars[provenance]),
                 gaps=gaps, auxiliary_limits=auxiliary_limits, sources=manifest["sources"],
                 source_differences=differences, primary_observations=observations,
                 status_differences=status_differences,
@@ -759,20 +809,23 @@ def _close_evidence(owner, ref, document, *, products, start, end):
             read_scoped_product(owner, ref, table, codes=(), start=start, end=end, columns=columns, product_id=product)
             for product in products
         ], ignore_index=True)
-    grouped, originals = {}, {}
-    for row in frame[frame.table_name.eq("daily_bars")].itertuples(index=False):
-        if str(row.verified).lower() not in ("1", "true"):
-            continue
-        key = str(row.evidence_ref), str(row.sha256)
-        if key not in originals:
-            originals[key] = _read_close_attestations(owner, *key)
-        for fact in originals[key].get((str(row.record_key), str(row.revision_id)), ()):
-            if fact.get("published_at") == row.published_at:
-                grouped.setdefault(str(row.record_key), []).append((row, fact))
+    grouped, registrations = {}, {}
+    closes = frame.table_name.eq("daily_bars") & frame.record_key.astype(str).str.endswith("|close_raw")
+    for row in frame[closes].itertuples(index=False):
+        if str(row.verified).lower() in ("1", "true"):
+            key = str(row.evidence_ref), str(row.sha256)
+            registrations.setdefault(key, []).append(row)
+    for key, rows in registrations.items():
+        versions = {(str(row.record_key), str(row.revision_id)) for row in rows}
+        originals = _read_close_attestations(owner, *key, record_versions=versions)
+        for row in rows:
+            for fact in originals.get((str(row.record_key), str(row.revision_id)), ()):
+                if fact.get("published_at") == row.published_at:
+                    grouped.setdefault(str(row.record_key), []).append((row, fact))
     return grouped
 
 
-def _read_close_attestations(owner, name, digest):
+def _read_close_attestations(owner, name, digest, *, record_versions, project_value=None, metadata_only=False):
     if Path(name).name != name or name.startswith("."):
         return {}
     path = _safe_evidence(owner, f"evidence/{name}")
@@ -786,7 +839,14 @@ def _read_close_attestations(owner, name, digest):
         rows = data.get("records", [data])
         result = {}
         for row in rows:
-            result.setdefault((row["record_key"], row["revision_id"]), []).append(row)
+            version = row["record_key"], row["revision_id"]
+            if version not in record_versions:
+                continue
+            if metadata_only:
+                row = {key: row[key] for key in ("product_id", "source_ref", "published_at") if key in row}
+            elif project_value is not None and isinstance(row.get("value"), dict):
+                row = dict(row, value=project_value(row["value"]))
+            result.setdefault(version, []).append(row)
         return result
     except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return {}

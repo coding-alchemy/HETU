@@ -17,7 +17,7 @@ from .core import (
     window,
 )
 from .pairs import line
-from .series import daily, prices, returns, sessions
+from .series import daily, prices, require_aligned_return_intervals, returns, sessions
 
 
 def _basis(request):
@@ -43,12 +43,18 @@ def _market_fit(facts, request, risk):
     count = window(request, minimum=3 if risk else 2)
     benchmark = request.parameters.get("benchmark")
     require(bool(benchmark), "benchmark", "缺基准标识")
-    reference = daily(facts, request, benchmark, count + 1, continuous=_basis(request) == "close")
-    base = returns(prices(reference, _basis(request)))
+    field = _basis(request)
+    reference = daily(facts, request, benchmark, count + 1, continuous=field == "close")
+    reference_days = [row["date"] for row in reference]
+    reference_intervals = list(zip(reference_days[:-1], reference_days[1:], strict=True))
+    base = returns(prices(reference, field))
 
     def calculate(code):
-        rows = daily(facts, request, code, count + 1, continuous=_basis(request) == "close")
-        fitted = returns(prices(rows, _basis(request)))
+        rows = daily(facts, request, code, count + 1, continuous=field == "close")
+        days = [row["date"] for row in rows]
+        intervals = list(zip(days[:-1], days[1:], strict=True))
+        require_aligned_return_intervals(code, benchmark, intervals, reference_intervals)
+        fitted = returns(prices(rows, field))
         alpha, beta, errors = line(base, fitted)
         residual_sum = float(errors @ errors)
         value = float(np.sqrt(residual_sum / (count - 2) * 252)) if risk else beta
@@ -63,6 +69,7 @@ def _market_fit(facts, request, risk):
                 observations=count,
                 residual_sum=residual_sum,
                 residual_degrees=count - 2,
+                return_intervals=[dict(start=start, end=end) for start, end in intervals],
             ),
             rows + reference,
         )

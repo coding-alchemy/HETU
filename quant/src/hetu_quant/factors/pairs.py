@@ -1,11 +1,21 @@
 """Paired log-price models and residual diagnostics."""
 
+from datetime import timedelta
 from statistics import NormalDist
 
 import numpy as np
 
 from .core import output, require, window
-from .series import daily, prices
+from .series import (
+    _calendar,
+    calendar_dependencies,
+    daily,
+    daily_observations,
+    pair_calendar_dependencies,
+    pair_sample_days,
+    prices,
+)
+from .sources import calendar_market
 
 
 def least_squares(design, target):
@@ -21,7 +31,22 @@ def line(x, y):
 
 def _sample(facts, request, count, *, previous=False):
     require(len(request.subjects) == 2 and len(set(request.subjects)) == 2, "subjects", "按顺序指定两条不同序列")
-    a, b = (daily(facts, request, code, count, previous=previous, continuous=True) for code in request.subjects)
+    observation = str(request.trade_date)
+    calendars = [_calendar(facts, request, calendar_market(code)) for code in request.subjects]
+    observed = set().union(*(daily_observations(facts, request, code) for code in request.subjects))
+    selected = pair_sample_days(calendars, observation, count, previous=previous, observed_days=observed)
+    require(len(selected) == count, "calendar", f"共同交易日不足，需要 {count} 日，已有 {len(selected)} 日",
+            period=observation)
+    a, b = (
+        daily(facts, request, code, continuous=True, sample_days=selected)
+        for code in request.subjects
+    )
+    if facts.access:
+        cutoff_day = request.trade_date - timedelta(days=1) if previous else request.trade_date
+        groups = (group for calendar in calendars for group in calendar_dependencies(
+            calendar, selected[0], str(cutoff_day)
+        ))
+        a[0] = dict(a[0], _workbench_calendar=pair_calendar_dependencies(groups))
     return np.log(prices(a)), np.log(prices(b)), a, b
 
 

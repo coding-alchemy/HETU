@@ -4,12 +4,14 @@ import hashlib
 import json
 
 import pandas as pd
+
 from backtest_cases import build_case_store
 from hetu_quant.factors import TeachingSource
 from hetu_quant.factors.sources import teaching_document
 
 
-def local_volume_source(path, *, missing=None, late=False, deny=False, code=None, amount_unit="CNY"):
+def local_volume_source(path, *, missing=None, late=False, deny=False, code=None, amount_unit="CNY", bars_from=None,
+                        calendar_omit=(), close_by_date=None, amount_by_date=None, amount_evidence=()):
     raw = teaching_document(TeachingSource("up_amount_share_60d"))["tables"]
     if code:
         for table in ("daily_bars", "action_coverage"):
@@ -41,7 +43,10 @@ def local_volume_source(path, *, missing=None, late=False, deny=False, code=None
             )
         )
     for record in raw["daily_bars"]:
+        if bars_from is not None and record["date"] < bars_from:
+            continue
         code, day, close = record["code"], record["date"], record["close_raw"]
+        close = (close_by_date or {}).get(day, close)
         bar = dict(
             code=code,
             date=day,
@@ -49,7 +54,7 @@ def local_volume_source(path, *, missing=None, late=False, deny=False, code=None
             high_raw=close,
             low_raw=close,
             close_raw=close,
-            amount_cny=record["amount_cny"],
+            amount_cny=(amount_by_date or {}).get(day, record["amount_cny"]),
             volume_shares=100,
         )
         facts.append(bar)
@@ -83,6 +88,13 @@ def local_volume_source(path, *, missing=None, late=False, deny=False, code=None
                     unit=amount_unit if field == "amount_cny" else "CNY",
                 )
             )
+            if last_amount and amount_evidence:
+                original = originals[-1]
+                original.update(amount_evidence[0])
+                for index, evidence in enumerate(amount_evidence[1:], 1):
+                    revision = f"independent-{index}"
+                    proofs.append(dict(item, revision_id=revision))
+                    originals.append(dict(original | evidence, revision_id=revision))
             if late and last_amount:
                 # The future revision is attested but has not replaced the matching raw observation.
                 published = f"{day}T18:00:00+08:00"
@@ -95,7 +107,9 @@ def local_volume_source(path, *, missing=None, late=False, deny=False, code=None
         proof["sha256"] = hashlib.sha256(evidence).hexdigest()
     csvs = {
         "daily_bars": pd.DataFrame(facts).to_csv(index=False),
-        "calendar": pd.DataFrame(raw["calendar"])[["date", "is_trading_day"]].to_csv(index=False),
+        "calendar": pd.DataFrame([r for r in raw["calendar"] if r["date"] not in calendar_omit])[
+            ["date", "is_trading_day"]
+        ].to_csv(index=False),
         "knowledge_evidence": pd.DataFrame(proofs).to_csv(index=False),
     }
     products = {
@@ -121,6 +135,7 @@ def run_formula_case(tmp_path, factor_evidence_root, node, factor_id, expected, 
     from datetime import date
 
     import pytest
+
     from factor_assertions import checked
     from hetu_quant.factors import FactorRequest, close_cutoff, compute_factor
     from hetu_quant.factors.catalog import get_factor

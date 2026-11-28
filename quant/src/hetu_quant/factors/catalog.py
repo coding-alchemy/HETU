@@ -46,6 +46,39 @@ class FactorDefinition:
         }
 
     @property
+    def object_roles(self):
+        if "配对" in self.subject_kind:
+            return ("第一腿", "第二腿")
+        if "benchmark" in self.defaults:
+            return ("观察对象", "基准")
+        return ("观察对象",)
+
+    @property
+    def output_shape(self):
+        if "截面" in self.subject_kind:
+            return "截面"
+        if self.factor_id == "limit_streak_distribution":
+            return "分布"
+        if self.unit == "类别":
+            return "类别"
+        if self.unit == "比例或类别":
+            return "数值或类别"
+        if self.unit == "信号":
+            return "信号"
+        return "单值"
+
+    @property
+    def has_dated_series(self):
+        return self.factor_id in {
+            "pair_extreme_spread", "market_amount_percentile", "market_turnover_percentile",
+            "sector_valuation_percentile", "sector_turnover_percentile",
+        }
+
+    @property
+    def output_label(self):
+        return f"{self.output_shape}（含日期序列）" if self.has_dated_series else self.output_shape
+
+    @property
     def case_ids(self):
         return ("positive", "boundary", "local") if self.factor_id == "up_amount_share" else ("positive", "boundary")
 

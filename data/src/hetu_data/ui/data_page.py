@@ -572,3 +572,182 @@ def render_acquisition(store, submit):
         ),
     ):
         submit(plan)
+
+
+def render_input_browser(store, *, scopes_for, lookup_for=None, describe_amounts=None, registration_scope=None):
+    """Browse a fixed publication under the caller's per-product scopes."""
+    from hetu_data.browse import BrowseSelection, _axes, browse_page
+    from hetu_data.store import TABLE_SCHEMAS
+
+    state = st.session_state
+    st.subheader("浏览因子输入")
+    choices = {
+        **{f"快照 · {path.parent.name}": SnapshotRef(path.parent.name, store.root)
+           for path in sorted((store.root / "snapshots").glob("*/manifest.json"))
+           if not path.parent.name.startswith(".")},
+        **{f"库 · {row['library_id']}": LibraryRef(row["library_id"], store.root) for row in list_libraries(store)},
+    }
+    if not choices:
+        st.caption("暂无已发布的本地数据。")
+        return None
+    label = st.selectbox("输入发布", choices, index=None, key="factor_browser_source")
+    if label is None:
+        st.caption("请选择要浏览的固定发布。")
+        return None
+    source = choices[label]
+    manifest = store.load_manifest(source) if isinstance(source, SnapshotRef) else load_library(store, source)
+    published = manifest.get("created_at") or manifest.get("published_at") or "未知"
+    st.caption(f"发布时间 {published} · 用途 factor_calculation")
+    tables = tuple(dict.fromkeys(entry["table"] for entry in manifest["table_files"]
+                                 if entry["table"] in TABLE_SCHEMAS))
+    if not tables:
+        st.caption("此发布未登记可浏览的输入表。")
+        return None
+    table = st.selectbox("输入表", tables, key="factor_browser_table")
+    available = ARCHIVE_COLUMNS if table == "daily_bars" else TABLE_SCHEMAS[table]["columns"]
+    if table == "daily_bars":
+        st.caption("原价 · 金额口径按成交额原件逐行核对")
+    if lookup_for is not None:
+        with st.expander("查找本地对象"):
+            term = st.text_input("证券名称或代码", key="factor_browser_search")
+            dates = state.get("factor_browser_dates", ())
+            point = dates[-1] if dates else date.today()
+            coordinate = (source, point, term)
+            if st.button("查找获准对象", key="factor_browser_find"):
+                state["factor_browser_matches"] = coordinate
+            if state.get("factor_browser_matches") == coordinate:
+                try:
+                    matches = lookup_for(source, point, term)
+                except (ValueError, OSError, PermissionError):
+                    matches = []
+                    st.warning("当前无法读取所选发布的对象登记。")
+                if matches:
+                    candidate = st.selectbox(
+                        "选择匹配对象", matches, key="factor_browser_match",
+                        format_func=lambda row: f"{row[1]} · {row[0]} · {row[2]}"
+                    )
+
+                    def apply_candidate():
+                        try:
+                            current = lookup_for(source, point, term)
+                        except (ValueError, OSError, PermissionError):
+                            return
+                        if candidate in current:
+                            state["factor_browser_codes"] = candidate[0]
+
+                    st.button("填入查询", key="factor_browser_apply_candidate", on_click=apply_candidate)
+                else:
+                    st.caption("未找到获准的名称或代码。")
+    with st.form("factor_browser_query"):
+        products = sorted({entry["product_id"] for entry in manifest["table_files"] if entry["table"] == table})
+        product = st.selectbox("产品", ["全部", *products], key="factor_browser_product")
+        codes = st.text_input("对象代码（空格分隔）", key="factor_browser_codes")
+        market = st.selectbox("市场", ["全部", "SH", "SZ", "BJ"], key="factor_browser_market")
+        window = st.date_input("查询日期区间", value=(date.today(), date.today()), key="factor_browser_dates")
+        axis = st.selectbox("日期口径", _axes(table) or ("静态",), key=f"factor_browser_axis_{table}")
+        fields = st.multiselect("显示字段", available, default=available, key=f"factor_browser_fields_{table}")
+        order = st.selectbox("排序字段", available, key=f"factor_browser_order_{table}")
+        desc = st.checkbox("降序", key="factor_browser_descending")
+        submitted = st.form_submit_button("查询所选发布", key="factor_browser_query_submit")
+    if submitted:
+        if len(window) != 2:
+            st.warning("请补齐查询起止日期。")
+        else:
+            state["factor_browser_selection"] = BrowseSelection(
+                source, "factor_calculation", table, tuple(fields), tuple(dict.fromkeys(codes.split())),
+                window[0], window[1], "" if market == "全部" else market, axis if axis != "静态" else "",
+                order, desc, "" if product == "全部" else product,
+            )
+            state["factor_browser_page"] = 1
+    selection = state.get("factor_browser_selection")
+    if selection is None:
+        return None
+    page = int(state.get("factor_browser_page", 1))
+    size = 25
+    try:
+        result = browse_page(
+            store, selection, scopes=tuple(scopes_for(selection)), page=page, page_size=size,
+            describe_amounts=describe_amounts,
+            registration_scope=registration_scope,
+            range_cache=state.setdefault("factor_browser_range_cache", {}),
+        )
+    except (ValueError, OSError, PermissionError):
+        st.warning("无法读取所选范围。请核对发布、对象、查询区间或使用许可。")
+        return None
+    st.caption(f"已提交 {selection.source} · 本次查询 {selection.start} 至 {selection.end} · "
+               f"第 {page} 页 · {result.total} 条获准记录")
+    coverage = result.coverage
+    unavailable_date = "受限（日期字段未获准）" if coverage.get("date_field_restricted") else "未知"
+    if "product_range" in coverage:
+        first, last = coverage["product_range"]
+        span = f"{first} 至 {last}" if first and last else unavailable_date
+        st.caption(f"{selection.product_id} · 产品获准数据范围 {span}")
+    if coverage["denominator"] is None:
+        st.caption(f"实有 {coverage['actual']}，应有数量未知 · {coverage['reason']}")
+    else:
+        st.caption(f"实有 {coverage['actual']}，应有 {coverage['denominator']}")
+    if selection.table == "daily_bars":
+        latest = coverage["latest"]
+        unavailable_subject_date = (
+            "受限（证券代码字段未获准）" if coverage.get("code_field_restricted") else unavailable_date
+        )
+        for code in selection.subjects:
+            if not selection.market or code.rsplit(".", 1)[-1] == selection.market:
+                st.caption(f"{code} · 最近有据日期 {latest.get(code, unavailable_subject_date)}")
+    if result.rows.empty:
+        st.info("此已提交范围暂无可读行。")
+    else:
+        amount_details = ("成交额币种", "成交额单位", "成交额依据")
+        visible = result.rows.loc[:, [*selection.columns, *(key for key in amount_details if key in result.rows)]]
+        st.dataframe(visible, hide_index=True, key="factor_browser_results")
+        if "date" in result.rows:
+            dates = result.rows["date"].dropna()
+            if not dates.empty:
+                st.caption(f"本页实际日期 {dates.min()} 至 {dates.max()}")
+            elif coverage.get("date_field_restricted"):
+                st.caption(f"本页实际日期 {unavailable_date}")
+        if "product_id" in result.rows:
+            last_success = store._last_success()
+            for pid in sorted(result.rows["product_id"].dropna().unique()):
+                st.caption(f"{pid} · 最近成功维护 {last_success.get(pid) or '未知'}")
+    for gap in result.gaps:
+        if gap.get("fields"):
+            owner = gap.get("product") or gap.get("code") or "日线"
+            reason = "行情字段缺失" if gap["reason"] == "fields_missing" else gap["reason"]
+            limitation = " · 日期字段受限" if gap.get("date_restricted") else ""
+            st.caption(f"{owner} · {reason} · {', '.join(gap['fields'])}{limitation}")
+    if result.gaps:
+        st.json(result.gaps, expanded=False)
+    first, second = st.columns(2)
+    first.button("上一页", key="factor_browser_previous", disabled=page <= 1,
+                 on_click=lambda: state.update(factor_browser_page=page - 1))
+    second.button("下一页", key="factor_browser_next", disabled=page * size >= result.total,
+                  on_click=lambda: state.update(factor_browser_page=page + 1))
+    if result.rows.empty:
+        return None
+    records = result.rows.to_dict("records")
+    identifying = tuple(dict.fromkeys(("code", selection.axis or "date", "record_key", "product_id")))
+    index = st.selectbox(
+        "选择要带入的行", range(len(records)),
+        format_func=lambda i: " · ".join(str(records[i].get(key) or "未知") for key in identifying),
+        key="factor_browser_row",
+    )
+    row = records[index]
+    code = row.get("code")
+    if not code or pd.isna(code):
+        st.caption("该行缺少可验证的对象坐标，无法带入试算。")
+        return None
+    if selection.table == "daily_bars" and pd.isna(row["date"]):
+        st.caption("该行日期字段未获准，无法带入试算。")
+        return None
+    if st.button("带入试算", key="factor_browser_to_trial"):
+        context = dict(table=selection.table, axis=selection.axis, coordinate=row.get(selection.axis),
+                       record_key=row.get("record_key"), start=selection.start, end=selection.end)
+        if selection.table == "daily_bars":
+            context.update({field: row[field] for field in ("source_root", "snapshot_id", "product_id")})
+            if isinstance(origin := row.get("source_ref_origin"), dict):
+                context["source_ref_origin"] = origin
+        return dict(source=selection.source, subjects=(code,),
+                    trade_date=date.fromisoformat(str(row["date"])) if selection.table == "daily_bars" else None,
+                    context=context)
+    return None

@@ -79,7 +79,16 @@ def _parse_cn(text: str) -> datetime:
 
 
 def _page_data(root: Path, store: DataStore) -> None:
+    from hetu_quant.ui.factor_navigation import render_factor_data
+
     st.header("数据")
+    if st.session_state.get("factor_evidence_location"):
+        render_factor_data(store)
+        return
+    show = st.radio("查看", ["档案与维护", "因子输入"], horizontal=True, key="factor_data_mode")
+    if show == "因子输入":
+        render_factor_data(store)
+        return
     st.caption(f"数据根：{root.resolve()}")
     st.info("更新入口默认 free；本地查询按所选快照的来源及当前读取授权核验，paid 不等于已获授权。")
     render_library(store)
@@ -703,6 +712,10 @@ def _render_export(ref) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="HETU 量化研究平台（一期）")
+    if not st.get_option("client.disableDataExport"):
+        # Send the updated client policy before rendering any data on the first run.
+        st.set_option("client.disableDataExport", True)
+        st.rerun()
     root = _data_root()
     st.title("HETU 量化研究平台（一期）")
     st.caption(
@@ -713,6 +726,10 @@ def main() -> None:
     if next_page in _PAGES:
         st.session_state["page_nav"] = next_page
     page = st.sidebar.radio("页面", _PAGES, index=0, key="page_nav")
+    prior = st.session_state.get("previous_main_page")
+    if page == "因子库" and prior not in (None, "因子库"):
+        st.session_state["factor_restore_draft"] = True
+    st.session_state["previous_main_page"] = page
     if page == "任务列表":
         _page_jobs(root)
     elif page == "数据":

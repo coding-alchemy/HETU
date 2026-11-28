@@ -2299,18 +2299,20 @@ class DataStore:
 
     def read_range(
         self, ref: SnapshotRef, name: str, *, codes: tuple[str, ...], start: date, end: date, columns: tuple[str, ...],
-        product_id: str | None = None,
+        product_id: str | None = None, all_codes: bool = False, evidence_columns: tuple[str, ...] = (),
     ) -> pd.DataFrame:
         """离线范围读取；日期两端包含。无时间列的静态表只按代码筛选。"""
         schema = TABLE_SCHEMAS.get(name)
         if schema is None or not columns or not set(columns).issubset(schema["columns"]):
             raise ValueError("unknown table or column")
+        if all_codes and (not product_id or self.product(product_id).get("fee_class") != "free"):
+            raise AccessDenied("读取全体对象要求指定免费产品")
         if start > end:
             raise ValueError("start must not exceed end")
         has_code = "code" in schema["columns"]
-        paths = self._range_files(ref, name, codes=codes if has_code else None, start=start, end=end,
+        paths = self._range_files(ref, name, codes=codes if has_code and not all_codes else None, start=start, end=end,
                                  product_id=product_id)
-        if not paths or (has_code and not codes):
+        if not paths or (has_code and not codes and not all_codes):
             return pd.DataFrame(
                 {
                     c: pd.Series(dtype="float64" if query_column(name, c).startswith("TRY_CAST") else "object")
@@ -2322,29 +2324,49 @@ class DataStore:
         checked = list(
             dict.fromkeys([*columns, "product_id", *(["code"] if has_code else []), *([clock] if clock else [])])
         )
-        projection = ",".join(query_column(name, col) for col in checked)
         predicates, args = [], [paths]
         if product_id is not None:
             predicates.append('"product_id" = ?')
             args.append(product_id)
-        if has_code:
+        if has_code and not all_codes:
             predicates.append('"code" IN (SELECT unnest(?))')
             args.append(list(codes))
         if clock:
             predicates.append(f'"{clock}" BETWEEN ? AND ?')
             args.extend([start.isoformat(), end.isoformat()])
         order = [col for col in ("code", clock, "product_id", "source_ref") if col and col in checked]
-        sql = f"SELECT {projection} FROM read_parquet(?, union_by_name=true)"
+        tail = " FROM read_parquet(?, union_by_name=true)"
         if predicates:
-            sql += " WHERE " + " AND ".join(predicates)
-        sql += " ORDER BY " + ",".join(f'"{col}"' for col in order)
+            tail += " WHERE " + " AND ".join(predicates)
+        tail += " ORDER BY " + ",".join(f'"{col}"' for col in order)
         with duckdb.connect() as con:
-            frame = con.execute(sql, args).df()
+            available = set(con.read_parquet(paths, union_by_name=True).columns) if evidence_columns else set()
+            extras = tuple(column for column in evidence_columns
+                           if column not in checked and column.isidentifier() and column in available)
+            projection = ",".join([*(query_column(name, col) for col in checked), *(f'"{col}"' for col in extras)])
+            frame = con.execute(f"SELECT {projection}{tail}", args).df()
         mode = self.load_manifest(ref).get("mode", "free")
         for pid, own in frame.groupby("product_id", dropna=False):
             self.check_access(mode, self.product(str(pid)), operation="read")
             self._check_paid_rows(str(pid), own, name)
-        return frame.loc[:, list(columns)]
+        return frame.loc[:, [*columns, *extras]]
+
+    def read_evidence_registrations(self, ref, *, product_id, table, record_keys=None, record_fields=None):
+        paths = self._range_files(ref, "knowledge_evidence", product_id=product_id)
+        if not paths or record_keys == () or record_fields == ():
+            return pd.DataFrame(columns=TABLE_SCHEMAS["knowledge_evidence"]["columns"])
+        where = "product_id = ? AND table_name = ?"
+        args = [paths, product_id, table]
+        if record_keys is not None:
+            where += " AND record_key IN (SELECT unnest(?))"
+            args.append(list(record_keys))
+        if record_fields is not None:
+            where += " AND split_part(record_key, '|', -1) IN (SELECT unnest(?))"
+            args.append(list(record_fields))
+        with duckdb.connect() as con:
+            return con.execute(
+                f"SELECT * FROM read_parquet(?, union_by_name=true) WHERE {where}", args
+            ).df()
 
     def read_table(self, ref: SnapshotRef, name: str) -> pd.DataFrame:
         manifest = self.load_manifest(ref)

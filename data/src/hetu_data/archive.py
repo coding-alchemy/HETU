@@ -182,13 +182,34 @@ def open_archive_view(store: DataStore, ref: SnapshotRef) -> duckdb.DuckDBPyConn
         raise
 
 
-def query_archive(store, ref, *, codes, start, end):
+def query_archive(store, ref, *, codes, start, end, products=None, browse_limits=None):
     """网页和Notebook共同入口；缺口只解释本次范围，不替代全档案资格。"""
-    bars = store.read_range(ref, "daily_bars", codes=codes, start=start, end=end, columns=ARCHIVE_COLUMNS)
+    if products is None:
+        def read(table, fields, product_id=None, *, subjects=None):
+            return store.read_range(
+                ref, table, codes=codes if subjects is None else subjects,
+                start=start, end=end, columns=fields, product_id=product_id,
+            )
+    else:
+        from hetu_data.library import read_scoped_product
 
-    def read(table, fields, product_id=None):
-        return store.read_range(ref, table, codes=codes, start=start, end=end, columns=fields, product_id=product_id)
+        def read(table, fields, product_id=None, *, subjects=None):
+            frames = []
+            for pid in products.get(table, ()):
+                if product_id is not None and product_id != pid:
+                    continue
+                bounded, left, right = (browse_limits or {}).get(
+                    (str(store.root.resolve()), ref.snapshot_id, table, pid), (codes, start, end)
+                )
+                if subjects is not None:
+                    bounded = tuple(code for code in bounded if code in subjects)
+                if left <= right:
+                    frames.append(read_scoped_product(
+                        store, ref, table, codes=bounded, start=left, end=right, columns=fields, product_id=pid
+                    ))
+            return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=fields)
 
+    bars = read("daily_bars", ARCHIVE_COLUMNS)
     gaps, auxiliary_limits = _archive_query_details(read, bars, codes, start, end)
     return dict(
         snapshot_id=ref.snapshot_id,
@@ -199,13 +220,50 @@ def query_archive(store, ref, *, codes, start, end):
     )
 
 
+_LIFECYCLE_FIELDS = ("code", "ipo_date", "out_date", "product_id", "source_ref")
+
+
+def _archive_identities(read, start, end, *, tushare_delist_date_exclusive):
+    """Read the status only for the Tushare exit boundary that needs it."""
+    identities = read("securities", _LIFECYCLE_FIELDS)
+    if not tushare_delist_date_exclusive or identities.empty:
+        return identities, set()
+    candidates = identities.loc[
+        identities.product_id.eq("ts_a_basic")
+        & identities.ipo_date.fillna("").ne("")
+        & identities.out_date.fillna("").between(start.isoformat(), end.isoformat())
+        & identities.source_ref.fillna("").ne("")
+    ]
+    if candidates.empty:
+        return identities, set()
+    subjects = tuple(sorted(set(candidates.code)))
+    statuses = read("securities", (*_LIFECYCLE_FIELDS, "status"), "ts_a_basic", subjects=subjects)
+    # Compare every authorized status for the same provider's stated interval.
+    # The first projection may already have coalesced equal date records.
+    interval = ["code", "ipo_date", "out_date"]
+    evidence = {
+        key: set(group.status.dropna()) - {""}
+        for key, group in statuses.loc[statuses.source_ref.fillna("").ne("")].groupby(interval)
+    }
+    identities = identities.assign(status="")
+    unknown = set()
+    for index, key in zip(candidates.index, candidates[interval].itertuples(index=False, name=None), strict=True):
+        found = evidence.get(key, set())
+        if found == {"D"} or (found and found <= {"L", "P"}):
+            # Both L and P preserve the stated last valid day.
+            identities.at[index, "status"] = "D" if found == {"D"} else "L"
+        else:
+            unknown.add((key[0], key[2]))
+    return _source_exit_boundaries(identities, True), unknown
+
+
 def _archive_query_details(read, bars, codes, start, end, *, policy_days=(), primary_status_keys=(),
                            scoped_status_days=(), accepted_keys=(), tushare_delist_date_exclusive=False):
     limitations = []
 
-    def auxiliary(table, fields, product_id=None):
+    def auxiliary(table, fields, product_id=None, *, subjects=None):
         try:
-            return read(table, fields, product_id)
+            return read(table, fields, product_id, subjects=subjects)
         except AccessDenied as error:
             limitations.append(dict(table=table, reason=str(error)))
             return pd.DataFrame(columns=fields)
@@ -219,8 +277,9 @@ def _archive_query_details(read, bars, codes, start, end, *, policy_days=(), pri
     full = _full_day_halt(halt_events)
     halted = set(halt_events.loc[full, ["code", "date"]].itertuples(index=False, name=None))
     other = set(halt_events.loc[~full, ["code", "date"]].itertuples(index=False, name=None))
-    identities = auxiliary("securities", ("code", "ipo_date", "out_date", "status", "product_id", "source_ref"))
-    identities = _source_exit_boundaries(identities, tushare_delist_date_exclusive)
+    identities, unknown_exit_boundaries = _archive_identities(
+        auxiliary, start, end, tushare_delist_date_exclusive=tushare_delist_date_exclusive,
+    )
     gaps = _archive_gaps(
         bars, auxiliary("calendar", ("date", "is_trading_day", "source_ref", "product_id")),
         identities,
@@ -233,6 +292,7 @@ def _archive_query_details(read, bars, codes, start, end, *, policy_days=(), pri
         primary_status_keys=primary_status_keys,
         scoped_status_days=scoped_status_days,
         accepted_keys=accepted_keys,
+        unknown_exit_boundaries=unknown_exit_boundaries,
     )
     return gaps, limitations
 
@@ -253,17 +313,32 @@ def _source_exit_boundaries(identities, tushare_delist_date_exclusive):
     return identities
 
 
+def _archive_calendar_market(product):
+    return "SZ" if product == "cn_sz_archive_calendar" else None
+
+
+def _uses_sz_calendar(market, flags):
+    return market == "SZ" and False in flags
+
+
+def _archive_calendar_flags(calendar, *, sourced_only=False):
+    sourced = calendar.source_ref.fillna("").astype(str).str.strip().ne("")
+    shenzhen = calendar.product_id.map(_archive_calendar_market).eq("SZ") & sourced
+
+    def flags(rows):
+        return {str(day): {_query_boolean(value) for value in group.is_trading_day}
+                for day, group in rows.groupby("date")}
+
+    return flags(calendar.loc[~shenzhen & sourced if sourced_only else ~shenzhen]), flags(calendar.loc[shenzhen])
+
+
 def _archive_gaps(bars, calendar, identities, status, events, codes, start, end, *,
                   halted, mixed, official_intraday=(), policy_days=(), primary_status_keys=(),
-                  scoped_status_days=(), accepted_keys=()):
+                  scoped_status_days=(), accepted_keys=(), unknown_exit_boundaries=()):
     official_dates = set(events.loc[_official_no_trade(events), ["code", "date"]].itertuples(index=False, name=None))
     days = pd.date_range(start, end).strftime("%Y-%m-%d").tolist()
-    exchange_calendar = calendar.product_id.eq("cn_sz_archive_calendar") & calendar.source_ref.fillna("").ne("")
-    sz_closed = set(calendar.loc[exchange_calendar & calendar.is_trading_day.map(_query_boolean).eq(False), "date"])
-    calendars = {
-        str(day): {_query_boolean(v) for v in group.is_trading_day}
-        for day, group in calendar.loc[~exchange_calendar].groupby("date")
-    }
+    calendars, shenzhen_calendar = _archive_calendar_flags(calendar)
+    sz_closed = {day for day, flags in shenzhen_calendar.items() if False in flags}
     statuses = {
         (str(code), str(day)): {_query_boolean(v) for v in group.is_suspended}
         for (code, day), group in status.groupby(["code", "date"])
@@ -281,11 +356,16 @@ def _archive_gaps(bars, calendar, identities, status, events, codes, start, end,
             reasons["lifecycle_unknown"].extend(days)
         observed = set(own.date.astype(str))
         traded = set()
-        if official_dates or halted or (statuses and policy_days) or sz_closed or official_intraday:
+        if "_trade" in own:
+            traded = set(own.loc[own["_trade"], "date"].astype(str))
+        elif official_dates or halted or (statuses and policy_days) or sz_closed or official_intraday:
             values = own[_BAR_FIELDS]
             traded = set(own.loc[_archive_trade_evidence(values, _valid_archive_bars(values)), "date"].astype(str))
         for day in days:
             key = (code, day)
+            exit_unknown = key in unknown_exit_boundaries and day not in observed
+            if exit_unknown:
+                reasons["exit_boundary_unknown"].append(day)
             if key in official_intraday:
                 reasons["confirmed_intraday_halt"].append(day)
             if key in mixed or (key in halted and (day in traded or False in statuses.get(key, set()))):
@@ -303,6 +383,11 @@ def _archive_gaps(bars, calendar, identities, status, events, codes, start, end,
                 continue
             elif known and day < left:
                 reason = "not_listed"
+            elif exit_unknown:
+                # An independent halt makes either interpretation of the exit date a no-bar day.
+                if statuses.get(key) != {True} or calendars.get(day) != {True}:
+                    continue
+                reason = "suspended"
             elif known and right and day > right:
                 reason = "after_exit"
             else:
@@ -322,7 +407,10 @@ def _archive_gaps(bars, calendar, identities, status, events, codes, start, end,
                 code.endswith(".SZ") and day in sz_closed
             ):
                 reasons[reason].append(day)
-        if not own.empty:
+        if "_incomplete" in own:
+            reasons["fields_missing"].extend(own.loc[own["_incomplete"], "date"].astype(str))
+            reasons["conflicting_bars"].extend(own.loc[own["_conflict"], "date"].astype(str))
+        elif not own.empty:
             incomplete = own[_BAR_FIELDS].isna().any(axis=1)
             reasons["fields_missing"].extend(own.loc[incomplete, "date"].astype(str))
             distinct = own.drop_duplicates(["date", *_BAR_FIELDS])

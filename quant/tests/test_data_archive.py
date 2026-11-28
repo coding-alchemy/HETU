@@ -1034,7 +1034,7 @@ def test_official_calendar_close_is_scoped_to_shenzhen(tmp_path):
     assert _market_sessions(calendar, scopes, targets) == ({"SH": [date_text], "SZ": []}, [])
 
 
-def test_tushare_observation_selects_price_without_settling_status_or_imputing_amount(tmp_path):
+def test_tushare_observation_selects_price_without_settling_status_or_imputing_amount(tmp_path, monkeypatch):
     import json
 
     from hetu_data.library import publish_library, query_library, query_library_sql
@@ -1049,12 +1049,15 @@ def test_tushare_observation_selects_price_without_settling_status_or_imputing_a
     tcase["csvs"]["security_events"] = f"code,date,event_type,suspend_timing\n{code},{first},S,\n"
     picked.loc[picked.date.eq(second), "amount_cny"] = float("nan")
     tcase["csvs"]["daily_bars"] = picked.to_csv(index=False)
+    permission = {"allowed_uses": ["daily_archive"]}
+    tcase["permissions"] = {"daily_bars": permission, "security_events": permission}
     primary, primary_ref = build_case_store(tmp_path / "primary", tcase, tables=("daily_bars", "security_events"))
     other_case = make_backtest_case("coverage")
     other_case["table_products"]["daily_bars"] = ("second_source", "daily")
     other = original[original.code.eq(code) & original.date.isin([first, second, third])].copy()
     other["amount_cny"] += 1
     other_case["csvs"]["daily_bars"] = other.to_csv(index=False)
+    other_case["permissions"] = {"daily_bars": permission}
     alternate, alternate_ref = build_case_store(tmp_path / "other", other_case, tables=("daily_bars",))
     evidence = "evidence/observation.json"
     (primary.root / evidence).write_text(json.dumps(dict(
@@ -1074,6 +1077,256 @@ def test_tushare_observation_selects_price_without_settling_status_or_imputing_a
     assert len(result["primary_observations"][0]["alternative_rows"]) == 1
     sql = query_library_sql(primary, result["selection"], "SELECT * FROM daily_bars")
     pd.testing.assert_frame_equal(result["bars"], sql, check_dtype=False)
+
+    from hetu_data.browse import BrowseSelection, browse_page
+
+    start, end = date.fromisoformat(first), date.fromisoformat(third)
+    selection = BrowseSelection(ref, "daily_archive", "daily_bars", ("amount_cny",), (code,), start, end)
+    from hetu_quant.ui.factor_navigation import _scopes
+
+    scopes = tuple(_scopes(primary, selection))
+    pages = [browse_page(primary, selection, scopes=scopes, page=n, page_size=1) for n in range(1, 5)]
+    assert {page.total for page in pages} == {4}
+    paginated = pd.concat([page.rows for page in pages]).reset_index(drop=True)
+    assert paginated.groupby("date").size().to_dict() == {first: 1, second: 1, third: 2}
+    assert paginated.loc[paginated.date.eq(second), "amount_cny"].isna().all()
+    assert {"conflicting_trade_evidence", "primary_amount_missing"} <= {gap["reason"] for gap in pages[0].gaps}
+
+    limited_case = dict(other_case, csvs={"daily_bars": other[other.date.eq(second)].to_csv(index=False)},
+                        table_products={"daily_bars": ("close_only", "daily")},
+                        permissions={"daily_bars": dict(permission, allowed_fields=["code", "date", "close_raw"])})
+    limited, limited_ref = build_case_store(tmp_path / "close_only", limited_case, tables=("daily_bars",))
+    augmented = publish_library(primary, asset_snapshots=[*assets, _registered(limited, limited_ref)])
+    review_pages = []
+    for source in (ref, augmented):
+        scoped = BrowseSelection(source, "daily_archive", "daily_bars", ("close_raw",), (code,), start, start)
+        page = browse_page(primary, scoped, scopes=tuple(_scopes(primary, scoped)), page=1, page_size=2)
+        print(source.library_id, page.total, page.rows[["product_id", "close_raw"]].to_dict("records"))
+        assert page.rows["product_id"].tolist() == ["ts_a_daily"]
+        assert page.rows["close_raw"].tolist() == picked.iloc[:1]["close_raw"].tolist()
+        review_pages.append(page)
+    assert review_pages[0].gaps == review_pages[1].gaps
+
+    mixed = BrowseSelection(augmented, "daily_archive", "daily_bars", ("close_raw",), (code,), start, end)
+    view = browse_page(primary, mixed, scopes=tuple(_scopes(primary, mixed)), page=1, page_size=10)
+    assert view.rows.groupby("date").size().to_dict() == {first: 1, second: 3, third: 2}
+    assert view.rows.loc[view.rows.date.eq(first), "product_id"].tolist() == ["ts_a_daily"]
+
+
+    resumed_case = dict(tcase, csvs=dict(tcase["csvs"], security_events=f"code,date,event_type,suspend_timing\n"
+                                                                      f"{code},{first},R,\n"))
+    resumed, resumed_ref = build_case_store(
+        tmp_path / "resumed", resumed_case, tables=("daily_bars", "security_events")
+    )
+    (resumed.root / evidence).write_bytes((primary.root / evidence).read_bytes())
+    resumed_assets = [dict(_registered(resumed, resumed_ref), source_policy=assets[0]["source_policy"]), assets[1]]
+    resumed_library = publish_library(primary, asset_snapshots=resumed_assets)
+    unrestricted = []
+    restricted = []
+    from hetu_data.store import DataStore
+
+    original_read = DataStore.read_range
+    event_reads = []
+
+    def record_event_reads(store, ref, table, **kwargs):
+        if table == "security_events" and kwargs.get("product_id") == "ts_suspend_day":
+            event_reads.append(kwargs["columns"])
+        return original_read(store, ref, table, **kwargs)
+
+    monkeypatch.setattr(DataStore, "read_range", record_event_reads)
+
+    def browse_close(source):
+        selection = BrowseSelection(source, "daily_archive", "daily_bars", ("close_raw",), (code,), start, start)
+        scopes = tuple(_scopes(primary, selection))
+        page = browse_page(primary, selection, scopes=scopes, page=1, page_size=2)
+        assert page.rows["close_raw"].tolist() == [10.0]
+        return {gap["reason"] for gap in page.gaps}
+
+    for source in (ref, resumed_library):
+        unrestricted.append(browse_close(source))
+    assert "conflicting_trade_evidence" in unrestricted[0] - unrestricted[1]
+    assert any("event_type" in cols and "suspend_timing" in cols for cols in event_reads)
+    event_reads.clear()
+    for owner in (primary, resumed):
+        config_path = owner.root.parent / "products.json"
+        cfg = json.loads(config_path.read_text())
+        cfg["products"]["ts_suspend_day"]["permission"]["allowed_fields"] = ["code", "date"]
+        config_path.write_text(json.dumps(cfg))
+        owner.config = cfg
+    for source in (ref, resumed_library):
+        selection = BrowseSelection(source, "daily_archive", "daily_bars", ("close_raw",), (code,), start, start)
+        assert [set(scope["fields"]) for scope in _scopes(primary, selection)
+                if scope["product_id"] == "ts_suspend_day"] == [{"code", "date"}]
+        restricted.append(browse_close(source))
+    print("event fields read", event_reads, "narrow diagnostics", restricted, "full diagnostics", unrestricted)
+    assert all("event_type" not in cols and "suspend_timing" not in cols for cols in event_reads)
+    assert restricted[0] == restricted[1] and "conflicting_trade_evidence" not in restricted[0]
+
+
+@pytest.mark.parametrize(
+    "directory,exclusive,boundary_closed,boundary_suspended",
+    [
+        ("ts_a_basic", False, False, False),
+        ("synthetic_securities", True, False, False),
+        ("ts_a_basic", True, False, False),
+        ("ts_a_basic", True, True, False),
+        ("ts_a_basic", True, False, True),
+    ],
+    ids=["ts_a_basic-False-False", "synthetic_securities-True-False", "ts_a_basic-True-False",
+         "ts_a_basic-True-True", "suspended"],
+)
+def test_archive_identity_status_is_only_needed_for_source_specific_exit(
+    tmp_path, monkeypatch, directory, exclusive, boundary_closed, boundary_suspended,
+):
+    import json
+
+    from hetu_data.browse import BrowseSelection, browse_page
+    from hetu_data.library import publish_library, query_library
+    from hetu_data.store import DataStore
+
+    from hetu_quant.ui.factor_navigation import _scopes
+
+    code = "SYN_A.SH"
+    first, boundary, later = "2023-12-29", "2024-01-02", "2024-01-04"
+    start, end = date.fromisoformat(first), date.fromisoformat(later)
+    case = make_backtest_case("coverage")
+    if boundary_closed:
+        calendar = pd.read_csv(io.StringIO(case["csvs"]["calendar"]))
+        calendar.loc[calendar.date.eq(boundary), "is_trading_day"] = False
+        case["csvs"]["calendar"] = calendar.to_csv(index=False)
+    bars = pd.read_csv(io.StringIO(case["csvs"]["daily_bars"]))
+    case["csvs"]["daily_bars"] = bars.loc[bars.code.eq(code) & bars.date.eq(first)].to_csv(index=False)
+    securities = pd.read_csv(io.StringIO(case["csvs"]["securities"]))
+    securities.loc[securities.code.eq(code), ["out_date", "status"]] = [boundary, "L" if boundary_suspended else "D"]
+    case["csvs"]["securities"] = securities.to_csv(index=False)
+    case["table_products"].update(daily_bars=("ts_a_daily", "daily"), securities=(directory, "catalog"))
+    tables = ("daily_bars", "calendar", "securities")
+    case["permissions"] = {table: {"allowed_uses": ["daily_archive"]} for table in tables}
+    store, snapshot = build_case_store(tmp_path, case, tables=tables)
+    asset = _registered(store, snapshot)
+    basis = "evidence/lifecycle.json"
+    # The quote also goes through archive source adjudication inside the paginated browser.
+    (store.root / basis).write_text(json.dumps(dict(
+        purpose="daily_archive", primary_product_id="ts_a_daily", compared_product_ids=["cn_a_daily"],
+        fields=["amount_cny"], codes=[code], start=first, end=later, basis="synthetic archive source evidence",
+        observation_days={f"{code}/{first}": "status_unresolved"},
+        tushare_delist_date_exclusive=exclusive,
+    )))
+    asset["source_policy"] = dict(primary_product_id="ts_a_daily", basis_ref=basis)
+    assets = [asset]
+    if boundary_suspended:
+        status_case = make_backtest_case("coverage")
+        status_case["csvs"]["security_status"] = f"code,date,is_st,is_suspended\n{code},{boundary},False,True\n"
+        status_case["permissions"] = {"security_status": {"allowed_uses": ["daily_archive"]}}
+        halt_store, halt_ref = build_case_store(tmp_path / "halt", status_case, tables=("security_status",))
+        assets.append(_registered(halt_store, halt_ref))
+    library = publish_library(store, asset_snapshots=assets)
+    selection = BrowseSelection(library, "daily_archive", "daily_bars", ("close_raw",), (code,), start, end)
+    original_read = DataStore.read_range
+    identity_reads = []
+
+    def record_identity_reads(owner, ref, table, **kwargs):
+        if table == "securities":
+            identity_reads.append((kwargs["codes"], set(kwargs["columns"])))
+        return original_read(owner, ref, table, **kwargs)
+
+    monkeypatch.setattr(DataStore, "read_range", record_identity_reads)
+    special = exclusive and directory == "ts_a_basic"
+
+    def readback(chosen=selection):
+        scopes = tuple(_scopes(store, chosen))
+        products = {}
+        for scope in scopes:
+            if scope["allowed"]:
+                assets = products.setdefault(scope["table"], {})
+                assets.setdefault((scope["root"], scope["snapshot_id"]), []).append(scope["product_id"])
+        query = query_library(store, chosen.source, codes=(code,), start=start, end=end,
+                              daily_products=products.pop("daily_bars"), auxiliary_products=products,
+                              browse_fields={(s["root"], s["snapshot_id"], s["table"], s["product_id"]):
+                                             set(s["fields"]) for s in scopes})
+        page = browse_page(store, chosen, scopes=scopes, page=1, page_size=1)
+        assert query["bars"].close_raw.tolist() == page.rows.close_raw.tolist() == [10.0]
+        matches = []
+        for gaps in (query["gaps"].to_dict("records"), page.gaps):
+            assert any(gap["reason"] == "after_exit" and gap["start"] <= later <= gap["end"] for gap in gaps)
+            matches.append({gap["reason"] for gap in gaps if gap["start"] <= boundary <= gap["end"]})
+        return matches, (page.coverage["actual"], page.coverage["denominator"], page.coverage["reason"])
+
+    before, full_coverage = readback()
+    full_reads = tuple(identity_reads)
+    identity_reads.clear()
+    if special and not boundary_closed and not boundary_suspended:
+        left = date.fromisoformat(later)
+        outside = BrowseSelection(library, "daily_archive", "daily_bars", ("close_raw",), (code,), left, left)
+        page = browse_page(store, outside, scopes=tuple(_scopes(store, outside)), page=1, page_size=1)
+        assert (page.coverage["actual"], page.coverage["denominator"], page.coverage["reason"]) == (0, 0, "")
+        assert [gap for gap in page.gaps if gap.get("code") == code] == [
+            dict(code=code, start=later, end=later, reason="after_exit")
+        ]
+        assert identity_reads and all("status" not in fields for _, fields in identity_reads)
+        # The same provider's second registration can disagree even when the base dates coalesce.
+        from dataclasses import replace
+
+        registrations = []
+        for status in ("L", "P"):
+            other, _ = build_case_store(tmp_path / status, case, tables=("securities",))
+            manifest_path = other.root.parent / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            revised = other.root.parent / "other-securities.csv"
+            securities.loc[securities.code.eq(code), "status"] = status
+            securities.to_csv(revised, index=False)
+            manifest["items"][0]["files"] = [revised.name]
+            manifest_path.write_text(json.dumps(manifest))
+            registrations.append(_registered(other, other.import_files(manifest_path, (revised,))))
+        live, paused = registrations
+        for assets in ((asset, live), (live, asset)):
+            compared = publish_library(store, asset_snapshots=assets)
+            gaps, coverage = readback(replace(selection, source=compared))
+            print("D + L", gaps, coverage)
+            assert gaps == [{"exit_boundary_unknown"}] * 2
+            assert coverage == (1, None, "退市日期边界待证")
+        policy = {"source_policy": asset["source_policy"]}
+        prices = dict(asset, tables=[table for table in asset["tables"] if table != "securities"])
+        for statuses in ((live,), (live, paused), (paused, live)):
+            compared = publish_library(store, asset_snapshots=[dict(prices, **policy), *statuses])
+            gaps, coverage = readback(replace(selection, source=compared))
+            print("L 与 P", len(statuses), gaps, coverage)
+            assert gaps == [{"missing_bar"}] * 2
+            assert coverage == (1, 2, "")
+        identity_reads.clear()
+    config_path = tmp_path / "products.json"
+    cfg = json.loads(config_path.read_text())
+    cfg["products"][directory]["permission"]["allowed_fields"] = ["code", "ipo_date", "out_date"]
+    config_path.write_text(json.dumps(cfg))
+    store.config = cfg
+    after, narrow_coverage = readback()
+    print(directory, exclusive, snapshot.snapshot_id, library.library_id, code, "close=10",
+          "full:", before, full_coverage, full_reads, "narrow:", after, narrow_coverage, identity_reads)
+    if boundary_suspended:
+        assert before == [{"suspended"}] * 2
+        assert after == [{"suspended", "exit_boundary_unknown"}] * 2
+        assert full_coverage == narrow_coverage == (1, 1, "")
+        from dataclasses import replace
+
+        without_halt = publish_library(store, asset_snapshots=[asset])
+        gaps, coverage = readback(replace(selection, source=without_halt))
+        assert gaps == [{"exit_boundary_unknown"}] * 2
+        assert coverage == (1, None, "退市日期边界待证")
+        print("缺少停牌佐证", gaps, coverage)
+    else:
+        assert before == [{"after_exit" if special else "missing_bar"}] * 2
+        assert after == [{"exit_boundary_unknown" if special else "missing_bar"}] * 2
+        assert full_coverage == (1, 1 if special else 2, "")
+    if boundary_closed or boundary_suspended:
+        assert narrow_coverage == (1, 1, "")
+    else:
+        assert narrow_coverage == ((1, None, "退市日期边界待证") if special else full_coverage)
+    assert all("status" not in fields for _, fields in identity_reads)
+    assert any("status" in fields for _, fields in full_reads) == special
+    assert all(
+        codes == (code,) and fields <= {"code", "ipo_date", "out_date", "product_id", "source_ref", "status"}
+        for codes, fields in (*full_reads, *identity_reads)
+    )
 
 
 def test_public_intraday_fact_revises_only_matched_day_market_and_product():

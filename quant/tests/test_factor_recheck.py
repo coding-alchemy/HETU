@@ -11,7 +11,7 @@ from hetu_data.library import publish_library
 from factor_cases import example_query, local_fact_source, local_volume_source, native_dividend_correction
 from hetu_quant.factors import compute_factor
 from test_factor_review import rerun
-from test_factor_workbench import open_factors
+from test_factor_workbench import open_factors, run_trial
 
 
 def library(store, *sources):
@@ -626,7 +626,9 @@ def test_cash_branch_total_compares_duplicates_across_originals(tmp_path, corrob
             assert not result.rows and result.gaps[0]["field"] == "event_identity"
 
 
-def test_cash_branches_match_unnumbered_copy_by_announcement(tmp_path):
+@pytest.mark.parametrize("shared_publication", [False, True], ids=["attachment-only", "issuer-announcement"])
+@pytest.mark.parametrize("branch", ["first", "second", "both"])
+def test_cash_branches_match_unnumbered_copy_by_announcement(tmp_path, shared_publication, branch):
     doc, query, _ = _disclosure_branches("identity")
     tables = doc["tables"]
     prior, first, second, *other = tables["events"]
@@ -636,24 +638,46 @@ def test_cash_branches_match_unnumbered_copy_by_announcement(tmp_path):
          "source_ref": f"witness-{row['event_id']}.pdf", "available_at": prior["available_at"]}
         for row in (first, second)
     ]
+    announcement = "https://issuer.example/distributions/d1"
+    if shared_publication:
+        witnesses[0]["announcement_ref"] = announcement
     copy = {key: value for key, value in witnesses[0].items() if key != "event_id"}
     tables["corporate_actions"].extend([*witnesses, copy])
     source = example_query(query.factor_id)[0]
     query = replace(query, cutoff=query.cutoff.replace(hour=19))
-    for label, branches in (("first", [first]), ("second", [second]), ("both", [first, second])):
-        tables["events"] = [prior, *branches, *other]
-        store, ref = local_fact_source(tmp_path / label, tables)
-        for result in (rerun(tmp_path, source, doc, query), compute_factor(store, ref, query)):
-            assert not result.gaps
-            row, = result.rows
-            assert row["value"] == pytest.approx(.07)
-            assert {item["event_id"]: item["d"] for item in row["inputs"] if item.get("event_id")} == {
-                "D1": .20, "NEW": .20, "D2": .30,
-            }
-            assert sum(item.get("d") is not None for item in row["inputs"]) == 3
-            assert {item["source_ref"] for item in row["inputs"] if item.get("d") == .2} == {
-                "witness-D1.pdf", "witness-NEW.pdf",
-            }
+    branches = {"first": [first], "second": [second], "both": [first, second]}
+    tables["events"] = [prior, *branches[branch], *other]
+    store, ref = local_fact_source(tmp_path / "local", tables)
+    for result in (rerun(tmp_path, source, doc, query), compute_factor(store, ref, query)):
+        if not shared_publication:
+            assert not result.rows
+            gap, = result.gaps
+            assert (gap["subject"], gap["field"], gap["period"]) == ("A", "event_identity", "2023-08-01")
+            disputed = [proof for proof in gap["evidence"] if proof.get("source_ref") == "witness-D1.pdf"]
+            assert len(disputed) == 2
+            assert all(proof["value"] == .20 and not proof.get("announcement_ref") for proof in disputed)
+            if result.source["id"] == ref.snapshot_id:
+                assert len({proof["fact_key"] for proof in disputed}) == 2
+            print(branch, result.source["id"], "event_identity", disputed)
+            continue
+        assert not result.gaps
+        row, = result.rows
+        assert row["value"] == pytest.approx(.07)
+        assert {item["event_id"]: item["d"] for item in row["inputs"] if item.get("event_id")} == {
+            "D1": .20, "NEW": .20, "D2": .30,
+        }
+        assert sum(item.get("d") is not None for item in row["inputs"]) == 3
+        assert {item["source_ref"] for item in row["inputs"] if item.get("d") == .2} == {
+            "witness-D1.pdf", "witness-NEW.pdf",
+        }
+        action = next(item for item in row["inputs"] if item.get("event_id") == "D1")
+        attestations = [proof for proof in action["field_evidence"]["d"]["corroborating_sources"]
+                        if proof.get("source_ref") == "witness-D1.pdf"]
+        assert len(attestations) == 2 and {proof["announcement_ref"] for proof in attestations} == {announcement}
+        if result.source["id"] == ref.snapshot_id:
+            assert len({proof["fact_key"] for proof in attestations}) == 2
+        print(branch, result.source["id"], row["value"],
+              [(item["event_id"], item["d"], item["source_ref"]) for item in row["inputs"] if "event_id" in item])
 
 
 @pytest.mark.parametrize("same_identity", [False, True])
@@ -2243,15 +2267,15 @@ def test_workbench_can_recompute_both_200_day_inputs(monkeypatch, tmp_path, fact
     page = open_factors(monkeypatch, tmp_path)
     page.selectbox(key="factor_id").set_value("breadth_above_ma_share").run()
     page.selectbox(key="factor_preset_breadth_above_ma_share").set_value("200日").run()
-    page.button(key="factor_compute").click().run()
-    assert page.dataframe[0].value.iloc[0]["读数"] == "40%"
+    run_trial(page)
+    assert page.dataframe[0].value.iloc[0]["读数"] == 0.4
     rows = read_selftest(factor_evidence_root, "breadth_above_ma_share", "1", {"window": 200})["cases"]
     positive = next(row for row in rows if row["case_id"] == "positive")
     assert positive["replay"]["trade_date"] == "2024-01-31"
     page.selectbox(key="factor_replay_breadth_above_ma_share").set_value(positive["receipt"]).run()
     page.button(key="factor_replay_compute").click().run()
     assert not page.exception
-    assert [table.value.iloc[0]["读数"] for table in page.dataframe] == ["40%", "60%"]
+    assert [table.value.iloc[0]["读数"] for table in page.dataframe if "读数" in table.value] == [0.4, 0.6]
     assert any(item.label == "下载此收据的精确输入" for item in page.get("download_button"))
     print("2024-01-31 / 200日 / 随包 40% / 正例收据复算 60%")
 
